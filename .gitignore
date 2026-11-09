@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+.next/
+out/
+.expo/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# env: only the examples are committed
+.env
+.env.*
+!.env.example
+
+# prisma generated client
+apps/api/src/generated/
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*

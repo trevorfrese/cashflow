@@ -1,0 +1,36 @@
+{
+  "name": "cashflow",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Buy now, pay later for small business rent. Open source reference implementation, mock money only.",
+  "license": "MIT",
+  "packageManager": "pnpm@10.8.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "setup": "docker compose up -d --wait && pnpm --filter @cashflow/api db:migrate && pnpm --filter @cashflow/api db:seed",
+    "dev": "turbo run dev --filter=@cashflow/api --filter=@cashflow/web",
+    "dev:mobile": "pnpm --filter @cashflow/mobile start",
+    "build": "turbo run build",
+    "lint": "turbo run lint && pnpm check:copy",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:copy": "sh scripts/check-no-em-dash.sh",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:reset": "docker compose down -v && docker compose up -d --wait && pnpm --filter @cashflow/api db:migrate && pnpm --filter @cashflow/api db:seed"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.14.0",
+    "prettier": "^3.9.10",
+    "turbo": "^2.11.10",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.2"
+  }
+}

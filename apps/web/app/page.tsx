@@ -26,10 +26,10 @@ export default function Home() {
       </header>
 
       <section className="hero">
-        <div className="coin">
+        <div className="lockup">
           <CoinMark size={200} title="CashFlow gold coin with an engraved C" />
+          <h1 className="wordmark">CashFlow</h1>
         </div>
-        <h1 className="wordmark">CashFlow</h1>
         <p className="tagline">
           Buy now, pay later for small business rent. Now an open source project.
         </p>
@@ -38,31 +38,8 @@ export default function Home() {
             <GitHubIcon />
             View on GitHub
           </a>
-          <a
-            className="button button-secondary"
-            href={`${GITHUB}/blob/main/ARCHITECTURE.md`}
-            rel="noopener"
-          >
-            Read the architecture
-          </a>
         </div>
       </section>
-
-      <footer className="bottom">
-        <p>
-          A startup, wound down and released in public. No real money moves in this code. MIT
-          licensed.
-        </p>
-        <p>
-          <a href={`${GITHUB}/blob/main/README.md`} rel="noopener">
-            README
-          </a>
-          {' · '}
-          <a href={`${GITHUB}/issues`} rel="noopener">
-            Issues
-          </a>
-        </p>
-      </footer>
     </main>
   );
 }

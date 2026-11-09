@@ -89,8 +89,16 @@ a:hover {
   padding: 40px 0;
 }
 
-.coin {
-  width: clamp(120px, 22vw, 200px);
+.lockup {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(16px, 3vw, 36px);
+  flex-wrap: wrap;
+}
+
+.lockup svg {
+  width: clamp(72px, 11vw, 150px);
   height: auto;
   filter: drop-shadow(0 24px 40px rgba(0, 0, 0, 0.35));
 }
@@ -162,33 +170,9 @@ a:hover {
   color: var(--paper);
 }
 
-.bottom {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 24px;
-  color: var(--slate);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.bottom p {
-  margin: 0;
-  color: var(--muted);
-}
-
-.bottom a {
-  color: var(--muted);
-}
-
 @media (max-width: 480px) {
   .button {
     width: 100%;
     justify-content: center;
-  }
-  .bottom {
-    flex-direction: column;
-    align-items: flex-start;
   }
 }

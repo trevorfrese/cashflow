@@ -243,47 +243,61 @@ a:hover {
   }
 }
 
-.bg-ring {
+.bg-ribbons {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 160vmax;
-  height: 160vmax;
-  margin: -80vmax 0 0 -80vmax;
-  color: rgba(216, 170, 54, 0.14);
-  animation: spin 240s linear infinite;
+  inset: 0;
+  transform: rotate(-4deg) scale(1.15);
+  transform-origin: 50% 60%;
+}
+
+.bg-ribbon {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 200%;
+  height: 100%;
+  overflow: visible;
   will-change: transform;
 }
 
-.bg-ring-inner {
-  width: 110vmax;
-  height: 110vmax;
-  margin: -55vmax 0 0 -55vmax;
+.bg-ribbon-a {
+  color: rgba(216, 170, 54, 0.26);
+  animation: flow 46s linear infinite;
+}
+
+.bg-ribbon-b {
+  color: rgba(252, 231, 162, 0.16);
+  animation: flow 64s linear infinite reverse;
+}
+
+.bg-ribbon-c {
+  color: rgba(156, 112, 18, 0.3);
+  animation: flow 38s linear infinite;
+}
+
+
+.bg-ribbon-d {
+  color: rgba(216, 170, 54, 0.12);
+  animation: flow 80s linear infinite reverse;
+}
+
+.bg-ribbon-e {
   color: rgba(252, 231, 162, 0.1);
-  animation: spin-reverse 180s linear infinite;
+  animation: flow 72s linear infinite;
 }
 
-@keyframes spin {
+@keyframes flow {
   from {
-    transform: rotate(0deg);
+    transform: translate3d(0, 0, 0);
   }
   to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes spin-reverse {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(-360deg);
+    transform: translate3d(-50%, 0, 0);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .bg-glow,
-  .bg-ring {
+  .bg-ribbon {
     animation: none;
   }
 }

@@ -1,0 +1,379 @@
+// CashFlow data model. Money is integer cents. Calendar dates (due dates, periods) are
+// YYYY-MM-DD strings so they compare correctly without timezone math. Timestamps are DateTime.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  runtime             = "nodejs"
+  moduleFormat        = "esm"
+  importFileExtension = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Auth ----------
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String
+  fullName      String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  businesses    Business[]
+  refreshTokens RefreshToken[]
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ---------- Business ----------
+
+enum BusinessStatus {
+  ONBOARDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum Industry {
+  RESTAURANT
+  RETAIL
+  SALON
+  FITNESS
+  PROFESSIONAL_SERVICES
+  HEALTHCARE
+  OTHER
+}
+
+model Business {
+  id                        String         @id @default(cuid())
+  ownerUserId               String
+  owner                     User           @relation(fields: [ownerUserId], references: [id])
+  legalName                 String
+  dba                       String?
+  industry                  Industry
+  addressLine1              String
+  addressLine2              String?
+  city                      String
+  state                     String
+  postalCode                String
+  foundedOn                 String // YYYY-MM-DD
+  statedMonthlyRevenueCents Int
+  status                    BusinessStatus @default(ONBOARDING)
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+
+  bankLinks    BankLink[]
+  applications UnderwritingApplication[]
+  leases       Lease[]
+  rentPlans    RentPlan[]
+
+  @@index([ownerUserId])
+}
+
+// ---------- Bank link ----------
+
+enum BankLinkStatus {
+  PENDING
+  LINKED
+  ERROR
+  DISCONNECTED
+}
+
+model BankLink {
+  id                    String         @id @default(cuid())
+  businessId            String
+  business              Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  provider              String
+  providerItemId        String
+  /// Opaque token the PaymentsProvider can charge. Mock accepts anything.
+  providerAccountToken  String
+  institutionName       String
+  accountMask           String
+  availableBalanceCents Int?
+  status                BankLinkStatus @default(LINKED)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  applications UnderwritingApplication[]
+
+  @@index([businessId])
+}
+
+// ---------- Underwriting ----------
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  DECLINED
+  NEEDS_INFO
+}
+
+enum DecisionOutcome {
+  APPROVED
+  DECLINED
+  NEEDS_INFO
+}
+
+model UnderwritingApplication {
+  id                        String            @id @default(cuid())
+  businessId                String
+  business                  Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bankLinkId                String?
+  bankLink                  BankLink?         @relation(fields: [bankLinkId], references: [id])
+  statedMonthlyRevenueCents Int
+  timeInBusinessMonths      Int
+  requestedMonthlyRentCents Int
+  status                    ApplicationStatus @default(DRAFT)
+  submittedAt               DateTime?
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+
+  decision  UnderwritingDecision?
+  rentPlans RentPlan[]
+
+  @@index([businessId])
+}
+
+model UnderwritingDecision {
+  id                        String                  @id @default(cuid())
+  applicationId             String                  @unique
+  application               UnderwritingApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  outcome                   DecisionOutcome
+  approvedMonthlyLimitCents Int?
+  feeBps                    Int?
+  /// Array of { code, message }.
+  reasons                   Json
+  provider                  String
+  decidedAt                 DateTime                @default(now())
+}
+
+// ---------- Lease ----------
+
+enum LeaseStatus {
+  DRAFT
+  ACTIVE
+  ENDED
+}
+
+model Lease {
+  id                         String      @id @default(cuid())
+  businessId                 String
+  business                   Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  landlordName               String
+  landlordEmail              String
+  propertyLine1              String
+  propertyLine2              String?
+  propertyCity               String
+  propertyState              String
+  propertyPostalCode         String
+  monthlyRentCents           Int
+  dueDayOfMonth              Int
+  startsOn                   String // YYYY-MM-DD
+  endsOn                     String? // YYYY-MM-DD
+  landlordAccountHolderName  String
+  landlordRoutingNumber      String
+  landlordAccountNumberLast4 String
+  /// Opaque PaymentsProvider destination token. Mock accepts anything; "mock_fail" forces failures.
+  landlordPayoutToken        String
+  status                     LeaseStatus @default(ACTIVE)
+  createdAt                  DateTime    @default(now())
+  updatedAt                  DateTime    @updatedAt
+
+  rentPlans RentPlan[]
+
+  @@index([businessId])
+}
+
+// ---------- Rent plan ----------
+
+enum RentPlanStatus {
+  ACTIVE
+  PAUSED
+  CLOSED
+}
+
+enum PayoutStatus {
+  SCHEDULED
+  PROCESSING
+  PAID
+  FAILED
+}
+
+enum InstallmentStatus {
+  SCHEDULED
+  COLLECTING
+  PAID
+  FAILED
+  LATE
+}
+
+enum RepaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model RentPlan {
+  id                   String                  @id @default(cuid())
+  businessId           String
+  business             Business                @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  leaseId              String
+  lease                Lease                   @relation(fields: [leaseId], references: [id])
+  applicationId        String
+  application          UnderwritingApplication @relation(fields: [applicationId], references: [id])
+  installmentsPerMonth Int                     @default(2)
+  feeBps               Int
+  monthlyRentCents     Int
+  dueDayOfMonth        Int
+  status               RentPlanStatus          @default(ACTIVE)
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+
+  payouts      LandlordPayout[]
+  installments Installment[]
+
+  @@index([businessId])
+  @@index([status])
+}
+
+model LandlordPayout {
+  id            String       @id @default(cuid())
+  rentPlanId    String
+  rentPlan      RentPlan     @relation(fields: [rentPlanId], references: [id], onDelete: Cascade)
+  periodMonth   String // YYYY-MM
+  amountCents   Int
+  scheduledFor  String // YYYY-MM-DD
+  status        PayoutStatus @default(SCHEDULED)
+  paidAt        DateTime?
+  providerRef   String?
+  failureReason String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  installments Installment[]
+
+  @@unique([rentPlanId, periodMonth])
+  @@index([status, scheduledFor])
+}
+
+model Installment {
+  id             String            @id @default(cuid())
+  rentPlanId     String
+  rentPlan       RentPlan          @relation(fields: [rentPlanId], references: [id], onDelete: Cascade)
+  payoutId       String
+  payout         LandlordPayout    @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+  periodMonth    String // YYYY-MM
+  sequence       Int
+  principalCents Int
+  feeCents       Int
+  totalCents     Int
+  dueDate        String // YYYY-MM-DD
+  status         InstallmentStatus @default(SCHEDULED)
+  paidAt         DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  repayments Repayment[]
+
+  @@unique([payoutId, sequence])
+  @@index([status, dueDate])
+}
+
+model Repayment {
+  id            String          @id @default(cuid())
+  installmentId String
+  installment   Installment     @relation(fields: [installmentId], references: [id], onDelete: Cascade)
+  amountCents   Int
+  provider      String
+  providerRef   String?
+  status        RepaymentStatus
+  failureReason String?
+  createdAt     DateTime        @default(now())
+
+  @@index([installmentId])
+}
+
+// ---------- Ledger ----------
+
+enum LedgerAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+model LedgerAccount {
+  id        String            @id @default(cuid())
+  /// Stable code such as "capital_pool", "cash", "fee_revenue", "receivable:<businessId>".
+  code      String            @unique
+  name      String
+  type      LedgerAccountType
+  ownerType String?
+  ownerId   String?
+  createdAt DateTime          @default(now())
+
+  entries LedgerEntry[]
+
+  @@index([ownerType, ownerId])
+}
+
+model LedgerTransaction {
+  id            String   @id @default(cuid())
+  description   String
+  referenceType String?
+  referenceId   String?
+  /// Guards against double posting for the same business event.
+  idempotencyKey String? @unique
+  postedAt      DateTime @default(now())
+
+  entries LedgerEntry[]
+
+  @@index([referenceType, referenceId])
+}
+
+model LedgerEntry {
+  id            String            @id @default(cuid())
+  transactionId String
+  transaction   LedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  accountId     String
+  account       LedgerAccount     @relation(fields: [accountId], references: [id])
+  direction     LedgerDirection
+  amountCents   Int
+
+  @@index([accountId])
+  @@index([transactionId])
+}
+
+// ---------- Jobs ----------
+
+model JobRun {
+  id         String    @id @default(cuid())
+  name       String
+  asOf       String // YYYY-MM-DD the job treated as "today"
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  ok         Boolean?
+  summary    Json?
+  error      String?
+
+  @@index([name, startedAt])
+}

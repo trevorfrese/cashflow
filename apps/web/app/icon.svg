@@ -15,10 +15,10 @@
       <stop offset="1" stop-color="#BE901F"/>
     </linearGradient>
   </defs>
-  <rect width="200" height="200" rx="44" fill="#14120E"/>
-  <circle cx="100" cy="100" r="76" fill="url(#face)"/>
-  <circle cx="100" cy="100" r="73" fill="none" stroke="url(#rim)" stroke-width="5"/>
-  <circle cx="100" cy="100" r="54" fill="url(#field)"/>
-  <path d="M119.92 83.29 A26 26 0 1 0 119.92 116.71" fill="none" stroke="#FCE7A2" stroke-width="15"/>
-  <path d="M118.92 82.29 A26 26 0 1 0 118.92 115.71" fill="none" stroke="#5E440A" stroke-width="15"/>
+  <circle cx="100" cy="100" r="100" fill="url(#face)"/>
+  <circle cx="100" cy="100" r="96" fill="none" stroke="url(#rim)" stroke-width="6"/>
+  <circle cx="100" cy="100" r="70" fill="url(#field)"/>
+  <circle cx="100" cy="100" r="70" fill="none" stroke="url(#rim)" stroke-width="3"/>
+  <path d="M125.5 80 A32 32 0 1 0 125.5 120" fill="none" stroke="#FCE7A2" stroke-width="18"/>
+  <path d="M124 78.5 A32 32 0 1 0 124 118.5" fill="none" stroke="#5E440A" stroke-width="18"/>
 </svg>

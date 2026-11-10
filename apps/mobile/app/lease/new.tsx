@@ -142,7 +142,7 @@ export default function NewLease() {
 
       <Text variant="heading">Property</Text>
       <Card tone="alt" style={styles.switchRow}>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
           <Text variant="bodyStrong">Same as business address</Text>
           {business ? (
             <Text variant="caption" tone="muted">
@@ -166,7 +166,7 @@ export default function NewLease() {
             onChangeText={set('line2')}
           />
           <View style={styles.row}>
-            <View style={{ flex: 2 }}>
+            <View style={{ flex: 2, minWidth: 0 }}>
               <TextField
                 label="City"
                 value={form.city}
@@ -174,7 +174,7 @@ export default function NewLease() {
                 error={errors.city}
               />
             </View>
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <TextField
                 label="State"
                 value={form.state}
@@ -184,7 +184,7 @@ export default function NewLease() {
                 maxLength={2}
               />
             </View>
-            <View style={{ flex: 1.4 }}>
+            <View style={{ flex: 1.4, minWidth: 0 }}>
               <TextField
                 label="ZIP"
                 value={form.postalCode}

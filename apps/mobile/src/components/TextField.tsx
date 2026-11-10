@@ -59,7 +59,7 @@ export function TextField({
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 6 },
+  wrap: { gap: 6, minWidth: 0 },
   label: { textTransform: 'uppercase', letterSpacing: 0.6 },
   field: {
     flexDirection: 'row',
@@ -72,5 +72,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   prefix: { marginRight: 4 },
-  input: { flex: 1, fontSize: 16, color: colors.text, paddingVertical: 12 },
+  input: {
+    flex: 1,
+    minWidth: 0,
+    width: '100%',
+    fontSize: 16,
+    color: colors.text,
+    paddingVertical: 12,
+  },
 });

@@ -10,13 +10,25 @@ import { centsToDollarsInput, dollarsToCents, monthsSince } from '@/lib/forms';
 import { useBankLinks, useSubmitApplication } from '@/lib/queries';
 import { colors, spacing } from '@/theme';
 
+/**
+ * What the owner typed, kept across the detour to the bank connect screen. That screen
+ * replaces this route, so component state alone would reset the form on the way back.
+ */
+const draft: { businessId: string | null; revenue: string; months: string; rent: string } = {
+  businessId: null,
+  revenue: '',
+  months: '',
+  rent: '',
+};
+
 export default function NewApplication() {
   const { business } = useBusiness();
   const links = useBankLinks(business?.id);
   const submit = useSubmitApplication();
-  const [revenue, setRevenue] = useState('');
-  const [months, setMonths] = useState('');
-  const [rent, setRent] = useState('');
+  const sameDraft = draft.businessId !== null && draft.businessId === business?.id;
+  const [revenue, setRevenue] = useState(sameDraft ? draft.revenue : '');
+  const [months, setMonths] = useState(sameDraft ? draft.months : '');
+  const [rent, setRent] = useState(sameDraft ? draft.rent : '');
   const [bankLinkId, setBankLinkId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -26,6 +38,12 @@ export default function NewApplication() {
       setMonths((v) => v || String(monthsSince(business.foundedOn)));
     }
   }, [business]);
+  useEffect(() => {
+    draft.businessId = business?.id ?? null;
+    draft.revenue = revenue;
+    draft.months = months;
+    draft.rent = rent;
+  }, [business?.id, revenue, months, rent]);
   useEffect(() => {
     const linked = links.data?.filter((l) => l.status === 'LINKED') ?? [];
     if (!bankLinkId && linked.length > 0) setBankLinkId(linked[linked.length - 1]!.id);
@@ -57,6 +75,7 @@ export default function NewApplication() {
     setErrors({});
     try {
       const app = await submit.mutateAsync(parsed.data);
+      draft.businessId = null;
       router.replace({ pathname: '/application/[id]', params: { id: app.id } });
     } catch (e) {
       setErrors({ form: describeError(e) });

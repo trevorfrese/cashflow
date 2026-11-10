@@ -9,7 +9,7 @@ import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { dollarsToCents, normalizeMonthInput } from '@/lib/forms';
 import { useCreateBusiness } from '@/lib/queries';
-import { spacing } from '@/theme';
+import { colors, fonts, spacing } from '@/theme';
 
 const INDUSTRIES: ReadonlyArray<{ value: Industry; label: string }> = [
   { value: 'RESTAURANT', label: 'Restaurant or cafe' },
@@ -84,10 +84,18 @@ export default function NewBusiness() {
 
   return (
     <Screen
+      back
+      step="Step 1 of 4"
       title="Your business"
       subtitle="Tell us about the business whose rent you want to split."
       footer={
-        <Button title="Save business" onPress={() => void submit()} loading={create.isPending} />
+        <Button
+          title="Save business"
+          size="lg"
+          icon="arrow-right"
+          onPress={() => void submit()}
+          loading={create.isPending}
+        />
       }
     >
       {errors.form ? <Notice tone="danger" message={errors.form} /> : null}
@@ -105,9 +113,7 @@ export default function NewBusiness() {
         placeholder="Blue Door Bakery"
       />
       <View style={styles.group}>
-        <Text variant="caption" tone="muted" style={styles.label}>
-          Industry
-        </Text>
+        <Text style={styles.label}>Industry</Text>
         <ChoiceChips
           options={INDUSTRIES}
           value={form.industry}
@@ -189,6 +195,6 @@ export default function NewBusiness() {
 
 const styles = StyleSheet.create({
   group: { gap: 8 },
-  label: { textTransform: 'uppercase', letterSpacing: 0.6 },
+  label: { fontFamily: fonts.bold, fontSize: 14, lineHeight: 18, color: colors.ink },
   row: { flexDirection: 'row', gap: spacing.sm },
 });

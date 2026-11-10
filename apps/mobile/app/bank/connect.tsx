@@ -60,11 +60,15 @@ export default function ConnectBank() {
 
   return (
     <Screen
+      back
       title="Connect your bank"
-      subtitle="We read twelve months of transactions to verify revenue and cash flow. Nothing is stored beyond what the decision needs."
+      subtitle="Pick the account history the sandbox bank should return."
       footer={
         <Button
-          title="Connect sandbox bank"
+          title="Connect bank"
+          variant="azure"
+          size="lg"
+          icon="arrow-right"
           onPress={() => void connect()}
           loading={create.isPending}
           disabled={!business}
@@ -72,15 +76,8 @@ export default function ConnectBank() {
       }
     >
       {error ? <Notice tone="danger" message={error} /> : null}
-      <Notice
-        tone="info"
-        title="Sandbox bank"
-        message="A real deployment opens Plaid Link here. In the sandbox you choose the kind of account history the fake bank returns."
-      />
       <View style={styles.group}>
-        <Text variant="caption" tone="muted" style={styles.label}>
-          Account history to simulate
-        </Text>
+        <Text variant="label">Account history to simulate</Text>
         <ChoiceChips options={SCENARIOS} value={scenario} onChange={setScenario} />
         <Text variant="body" tone="muted">
           {chosen.blurb}
@@ -117,6 +114,5 @@ export default function ConnectBank() {
 }
 
 const styles = StyleSheet.create({
-  group: { gap: spacing.sm },
-  label: { textTransform: 'uppercase', letterSpacing: 0.6 },
+  group: { gap: spacing.smd },
 });

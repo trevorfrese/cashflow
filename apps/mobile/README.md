@@ -4,7 +4,12 @@ The CashFlow app for business owners, built with Expo and Expo Router. Sign in, 
 business, connect a bank account, get an instant cash flow based underwriting decision,
 link a lease, and manage the rent plan: upcoming installments, payment history, pay now.
 
-Everything runs against the local API in sandbox mode. A banner on every screen says so.
+Everything runs against the local API in sandbox mode.
+
+The look comes from the CashFlow design canvas: jet-age poster colors with neo-brutalist
+lines (3px Ink borders, hard offset shadows, Archivo set wide). Tokens live in
+`packages/shared/src/brand.ts` and `src/theme.ts`; the Archivo cuts in `assets/fonts` are
+instanced from the Google Fonts variable font (SIL Open Font License, see `OFL.txt` there).
 
 ## Run
 
@@ -33,13 +38,13 @@ app/                 Expo Router routes
   lease/new          landlord, property, rent, payout details
   plan/new           installment cadence and first period preview
 src/
-  components/        Button, TextField, Card, Pill, Screen, ScoreGauge, CoinMark, ...
+  components/        Button, TextField, Card, Pill, Screen, TabBar, ScoreGauge, CoinMark, ...
   lib/api.ts         typed fetch with Zod validation and token refresh
   lib/auth.tsx       session provider backed by expo-secure-store
   lib/queries.ts     TanStack Query hooks, one per endpoint
   lib/stage.ts       where a business is in the journey, drives the home screen
   lib/forms.ts       money and date parsing for inputs
-  theme.ts           colors, spacing, type, from the shared brand tokens
+  theme.ts           colors, fonts, type scale, hard shadows, from the shared brand tokens
 ```
 
 ## Sandbox bank scenarios

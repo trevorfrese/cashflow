@@ -1,29 +1,15 @@
 import { Redirect } from 'expo-router';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { CoinMark } from '@/components';
+import { SplashView } from '@/components';
 import { useAuth } from '@/lib/auth';
-import { colors } from '@/theme';
 
+/**
+ * Entry route. Shows the splash while the session loads, then sends signed in users to the
+ * app and everyone else to the welcome screen. The welcome screen has its own route because
+ * "/" is also the home tab once signed in.
+ */
 export default function Index() {
   const { user } = useAuth();
-  if (user === undefined) {
-    return (
-      <View style={styles.splash}>
-        <CoinMark size={96} />
-        <ActivityIndicator color={colors.textMuted} />
-      </View>
-    );
-  }
-  return <Redirect href={user ? '/(tabs)' : '/(auth)/sign-in'} />;
+  if (user === undefined) return <SplashView loading />;
+  return <Redirect href={user ? '/(tabs)' : '/welcome'} />;
 }
-
-const styles = StyleSheet.create({
-  splash: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 24,
-    backgroundColor: colors.background,
-  },
-});

@@ -9,7 +9,7 @@ import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { formatPeriod } from '@/lib/forms';
 import { useApplication, useBankLinks, useResubmitApplication } from '@/lib/queries';
-import { colors, radii, spacing } from '@/theme';
+import { border, colors, radii, spacing } from '@/theme';
 
 export default function Decision() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -21,7 +21,7 @@ export default function Decision() {
 
   if (isLoading || !app) {
     return (
-      <Screen title="Decision">
+      <Screen back title="Decision">
         <Text tone="muted">{isLoading ? 'Loading…' : 'Application not found.'}</Text>
       </Screen>
     );
@@ -43,7 +43,14 @@ export default function Decision() {
 
   const footer = (() => {
     if (app.status === 'APPROVED') {
-      return <Button title="Link your lease" onPress={() => router.push('/lease/new')} />;
+      return (
+        <Button
+          title="Link your lease"
+          size="lg"
+          icon="arrow-right"
+          onPress={() => router.push('/lease/new')}
+        />
+      );
     }
     if (app.status === 'NEEDS_INFO') {
       return linked.length > 0 ? (
@@ -53,7 +60,11 @@ export default function Decision() {
           loading={resubmit.isPending}
         />
       ) : (
-        <Button title="Connect a bank account" onPress={() => router.push('/bank/connect')} />
+        <Button
+          title="Connect a bank account"
+          variant="azure"
+          onPress={() => router.push('/bank/connect')}
+        />
       );
     }
     return (
@@ -62,7 +73,7 @@ export default function Decision() {
   })();
 
   return (
-    <Screen title={headline(app.status)} footer={footer}>
+    <Screen back title={headline(app.status)} footer={footer}>
       {error ? <Notice tone="danger" message={error} /> : null}
       {!d ? (
         <Text tone="muted">No decision yet.</Text>
@@ -114,20 +125,6 @@ export default function Decision() {
           </Section>
 
           {d.cashFlow ? <CashFlowCard summary={d.cashFlow} /> : null}
-
-          {app.status === 'APPROVED' ? (
-            <Notice
-              tone="success"
-              title="How it works from here"
-              message={`Link the lease and CashFlow pays your landlord in full on the due date. You repay in ${d.recommendedInstallmentsPerMonth ?? 2} installments plus the ${formatBps(d.feeBps ?? 0)} fee.`}
-            />
-          ) : null}
-          {app.status === 'DECLINED' ? (
-            <Notice
-              tone="warning"
-              message="You can apply again once the flagged items have changed, for example after 90 days without overdrafts or when revenue has stabilized."
-            />
-          ) : null}
         </>
       )}
     </Screen>
@@ -161,13 +158,13 @@ function orderReasons(reasons: DecisionReason[]): DecisionReason[] {
 function ReasonRow({ reason }: { reason: DecisionReason }) {
   const color =
     reason.impact === 'NEGATIVE'
-      ? colors.late
+      ? colors.jetRed
       : reason.impact === 'POSITIVE'
-        ? colors.paid
-        : colors.primary;
+        ? colors.mint
+        : colors.sky;
   return (
     <View style={styles.reason}>
-      <View style={[styles.dot, { backgroundColor: color }]} />
+      <View style={[styles.marker, { backgroundColor: color }]} />
       <View style={{ flex: 1, gap: 2 }}>
         <Text variant="bodyStrong">{labelFor(reason.code)}</Text>
         <Text variant="body" tone="muted">
@@ -228,20 +225,14 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function CashFlowCard({ summary: s }: { summary: CashFlowSummary }) {
   const max = Math.max(1, ...s.monthly.map((m) => m.revenueCents));
-  const signed = (bps: number) => `${bps >= 0 ? '+' : ''}${(bps / 100).toFixed(1)}%`;
   return (
     <Card>
       <Text variant="heading">Your cash flow, from the bank</Text>
-      <Text variant="caption" tone="muted">
-        {s.monthsOfHistory} months reviewed, as of {s.asOf}
-      </Text>
       <View style={styles.grid}>
         <Metric
           label="Verified revenue"
           value={`${formatCents(s.verifiedMonthlyRevenueCents, { showCents: false })}/mo`}
         />
-        <Metric label="Trend" value={signed(s.revenueGrowthBps)} />
-        <Metric label="Operating margin" value={`${(s.operatingMarginBps / 100).toFixed(0)}%`} />
         <Metric
           label="Free cash flow"
           value={`${formatCents(s.monthlyNetCashFlowCents, { showCents: false })}/mo`}
@@ -251,17 +242,10 @@ function CashFlowCard({ summary: s }: { summary: CashFlowSummary }) {
           value={s.daysOfCashOnHand === null ? 'Unknown' : `${s.daysOfCashOnHand} days`}
         />
         <Metric label="Overdrafts (90d)" value={String(s.nsfCount90)} />
-        <Metric
-          label="Existing debt"
-          value={`${(s.debtToRevenueBps / 100).toFixed(1)}% of revenue`}
-        />
-        <Metric label="Rent to revenue" value={`${(s.rentToRevenueBps / 100).toFixed(1)}%`} />
       </View>
       {s.monthly.length > 0 ? (
         <View style={{ gap: 6, paddingTop: spacing.sm }}>
-          <Text variant="caption" tone="muted">
-            Monthly revenue
-          </Text>
+          <Text variant="label">Monthly revenue</Text>
           <View style={styles.bars}>
             {s.monthly.map((m) => (
               <View key={m.month} style={styles.barCol}>
@@ -269,8 +253,8 @@ function CashFlowCard({ summary: s }: { summary: CashFlowSummary }) {
                   style={[
                     styles.bar,
                     {
-                      height: Math.max(4, Math.round((m.revenueCents / max) * 72)),
-                      backgroundColor: m.nsfCount > 0 ? colors.late : colors.gold,
+                      height: Math.max(8, Math.round((m.revenueCents / max) * 72)),
+                      backgroundColor: m.nsfCount > 0 ? colors.jetRed : colors.gold,
                     },
                   ]}
                 />
@@ -304,18 +288,27 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   gaugeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
-  reason: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
-  dot: { width: 10, height: 10, borderRadius: 5, marginTop: 6 },
+  reason: { flexDirection: 'row', gap: spacing.smd, alignItems: 'flex-start' },
+  marker: {
+    width: 14,
+    height: 14,
+    borderRadius: 3,
+    marginTop: 4,
+    borderWidth: border.thin,
+    borderColor: colors.ink,
+  },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingTop: spacing.sm },
   metric: {
     width: '47%',
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.paper,
+    borderWidth: border.thin,
+    borderColor: colors.ink,
     borderRadius: radii.chip,
     padding: 10,
     gap: 2,
   },
   bars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 76 },
   barCol: { flex: 1, justifyContent: 'flex-end' },
-  bar: { borderRadius: 3 },
+  bar: { borderRadius: 3, borderWidth: border.thin, borderColor: colors.ink },
   barLabels: { flexDirection: 'row', justifyContent: 'space-between' },
 });

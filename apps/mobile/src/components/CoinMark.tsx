@@ -1,57 +1,51 @@
-import Svg, { Circle, ClipPath, Defs, G, LinearGradient, Path, Stop } from 'react-native-svg';
+import { useId } from 'react';
+import Svg, { Circle, Defs, G, Mask, Path, Rect } from 'react-native-svg';
 
-/** The cents symbol: an open C plus a vertical bar, offset by (dx, dy) for the bevel layers. */
-function symbol(dx: number, dy: number): string {
-  return `M${117.92 + dx} ${83.29 + dy} A26 26 0 1 0 ${117.92 + dx} ${116.71 + dy}`;
-}
-function bar(dx: number, dy: number): string {
-  return `M${100 + dx} ${55.5 + dy} V${81.5 + dy} M${100 + dx} ${118.5 + dy} V${144.5 + dy}`;
-}
+import { colors } from '@/theme';
 
-/** The CashFlow coin from the brand canvas: flat gold coin with a cents symbol. */
-export function CoinMark({ size = 64 }: { size?: number }) {
+/** The cents symbol: an open C plus a vertical bar. */
+const CENT_ARC = 'M117.92 83.29 A26 26 0 1 0 117.92 116.71';
+const CENT_BAR = 'M100 55.5 V81.5 M100 118.5 V144.5';
+/** The same symbol grown outward, drawn underneath as the ink outline. */
+const CENT_ARC_OUT = 'M120.24 86.53 A26 26 0 1 0 120.24 113.47';
+const CENT_BAR_OUT = 'M100 51.5 V81.5 M100 118.5 V148.5';
+
+/**
+ * The CashFlow coin from the final board of the brand canvas: a flat two-gold coin with ink
+ * outlines, a hard ink drop shadow, and the cents symbol pressed into the face (a 1.5px inner
+ * shadow on its top-left walls). `lineColor` swaps the ink for the deep gold or night variants.
+ */
+export function CoinMark({
+  size = 64,
+  lineColor = colors.ink,
+}: {
+  size?: number;
+  lineColor?: string;
+}) {
+  const maskId = `coin-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   return (
     <Svg width={size} height={size} viewBox="0 0 200 200" accessibilityRole="image">
       <Defs>
-        <ClipPath id="coinClip">
-          <Circle cx="100" cy="100" r="60" />
-        </ClipPath>
-        <LinearGradient id="coinRing" x1="1" y1="1" x2="0" y2="0">
-          <Stop offset="0" stopColor="#FFFBD6" />
-          <Stop offset="0.5" stopColor="#F5B800" />
-          <Stop offset="1" stopColor="#8F5E00" />
-        </LinearGradient>
-        <LinearGradient
-          id="coinSym"
-          gradientUnits="userSpaceOnUse"
-          x1="62"
-          y1="62"
-          x2="138"
-          y2="138"
-        >
-          <Stop offset="0" stopColor="#FFFCE6" />
-          <Stop offset="0.25" stopColor="#FFEC8C" />
-          <Stop offset="1" stopColor="#FFD43B" />
-        </LinearGradient>
+        <Mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
+          <G fill="none" stroke="#FFFFFF" strokeWidth="14">
+            <Path d={CENT_ARC} />
+            <Path d={CENT_BAR} />
+          </G>
+        </Mask>
       </Defs>
-      <Circle cx="100" cy="100" r="82" fill="#FFD43B" />
-      <Circle cx="100" cy="100" r="60" fill="#F4B323" />
-      <G clipPath="url(#coinClip)">
-        <Circle cx="100" cy="100" r="60" fill="#DE9810" />
-        <Circle cx="103" cy="104" r="60" fill="#F4B323" />
+      <Circle cx="107" cy="107" r="82" fill={lineColor} />
+      <Circle cx="100" cy="100" r="82" fill={colors.gold} stroke={lineColor} strokeWidth="6" />
+      <Circle cx="100" cy="100" r="58" fill={colors.coinGold} stroke={lineColor} strokeWidth="4" />
+      <G fill="none" stroke={lineColor} strokeWidth="22">
+        <Path d={CENT_ARC_OUT} />
+        <Path d={CENT_BAR_OUT} />
       </G>
-      <Circle cx="100" cy="100" r="60.5" fill="none" stroke="url(#coinRing)" strokeWidth="2.5" />
-      <G fill="none" strokeWidth="15" stroke="#FFF6C4">
-        <Path d={symbol(1.5, 2)} />
-        <Path d={bar(1.5, 2)} />
-      </G>
-      <G fill="none" strokeWidth="15" stroke="#A86E00">
-        <Path d={symbol(-1.2, -1.5)} />
-        <Path d={bar(-1.2, -1.5)} />
-      </G>
-      <G fill="none" strokeWidth="15" stroke="url(#coinSym)">
-        <Path d={symbol(0, 0)} />
-        <Path d={bar(0, 0)} />
+      <G mask={`url(#${maskId})`}>
+        <Rect width="200" height="200" fill={lineColor} />
+        <G fill="none" stroke={colors.gold} strokeWidth="14" transform="translate(1.5 1.5)">
+          <Path d={CENT_ARC} />
+          <Path d={CENT_BAR} />
+        </G>
       </G>
     </Svg>
   );

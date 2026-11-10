@@ -5,11 +5,11 @@ import { Text } from './Text';
 import { colors } from '@/theme';
 
 const GRADE_COLOR: Record<string, string> = {
-  A: colors.paid,
-  B: colors.paid,
-  C: colors.dueSoon,
-  D: colors.dueSoon,
-  F: colors.late,
+  A: colors.mint,
+  B: colors.mint,
+  C: colors.gold,
+  D: colors.gold,
+  F: colors.jetRed,
 };
 
 /** Arc from twelve o'clock clockwise through `fraction` of the circle, as an SVG path. */
@@ -25,7 +25,7 @@ function arcPath(cx: number, cy: number, r: number, fraction: number): string {
   return `M ${x0} ${y0} A ${r} ${r} 0 ${largeArc} 1 ${x1} ${y1}`;
 }
 
-/** Circular 0 to 100 gauge with the grade in the middle. */
+/** Circular 0 to 100 gauge with the grade in the middle. Ink ring, flat color fill. */
 export function ScoreGauge({
   score,
   grade,
@@ -35,10 +35,10 @@ export function ScoreGauge({
   grade: string;
   size?: number;
 }) {
-  const stroke = 12;
-  const r = (size - stroke) / 2;
+  const stroke = 16;
+  const r = (size - stroke) / 2 - 3;
   const progress = Math.max(0, Math.min(100, score)) / 100;
-  const color = GRADE_COLOR[grade] ?? colors.textMuted;
+  const color = GRADE_COLOR[grade] ?? colors.sand;
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
@@ -46,7 +46,15 @@ export function ScoreGauge({
           cx={size / 2}
           cy={size / 2}
           r={r}
-          stroke={colors.surfaceAlt}
+          stroke={colors.ink}
+          strokeWidth={stroke + 6}
+          fill="none"
+        />
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          stroke={colors.white}
           strokeWidth={stroke}
           fill="none"
         />
@@ -56,11 +64,11 @@ export function ScoreGauge({
             stroke={color}
             strokeWidth={stroke}
             fill="none"
-            strokeLinecap="round"
+            strokeLinecap="butt"
           />
         ) : null}
       </Svg>
-      <Text variant="display" style={{ color, fontSize: 44, lineHeight: 50 }}>
+      <Text variant="display" style={{ fontSize: 44, lineHeight: 50 }}>
         {grade}
       </Text>
       <Text variant="caption" tone="muted">

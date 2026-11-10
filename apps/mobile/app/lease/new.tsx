@@ -1,14 +1,14 @@
 import { CreateLeaseRequest, formatCents } from '@cashflow/shared';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { StyleSheet, Switch, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, ChoiceChips, Notice, Screen, Text, TextField } from '@/components';
+import { Button, Card, Notice, Screen, Segmented, Text, TextField, Toggle } from '@/components';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { centsToDollarsInput, dollarsToCents, normalizeMonthInput, todayIso } from '@/lib/forms';
 import { useApplications, useCreateLease } from '@/lib/queries';
-import { spacing } from '@/theme';
+import { colors, fonts, spacing } from '@/theme';
 
 const DUE_DAYS = [1, 5, 10, 15] as const;
 
@@ -106,11 +106,15 @@ export default function NewLease() {
 
   return (
     <Screen
+      back
+      step="Step 3 of 4"
       title="Link your lease"
       subtitle="Who gets paid, how much, and when."
       footer={
         <Button
           title="Continue to rent plan"
+          size="lg"
+          icon="arrow-right"
           onPress={() => void submit()}
           loading={create.isPending}
           disabled={!business}
@@ -122,7 +126,7 @@ export default function NewLease() {
         <Notice tone="warning" message="You need an approved application before linking a lease." />
       ) : null}
 
-      <Text variant="heading">Landlord</Text>
+      <Text variant="label">Landlord</Text>
       <TextField
         label="Landlord or property manager"
         value={form.landlordName}
@@ -140,8 +144,8 @@ export default function NewLease() {
         helper="We send a payment confirmation here each month."
       />
 
-      <Text variant="heading">Property</Text>
-      <Card tone="alt" style={styles.switchRow}>
+      <Text variant="label">Property</Text>
+      <Card tone="paper" shadow="none" style={styles.switchRow}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text variant="bodyStrong">Same as business address</Text>
           {business ? (
@@ -150,7 +154,11 @@ export default function NewLease() {
             </Text>
           ) : null}
         </View>
-        <Switch value={sameAddress} onValueChange={setSameAddress} />
+        <Toggle
+          value={sameAddress}
+          onValueChange={setSameAddress}
+          label="Same as business address"
+        />
       </Card>
       {!sameAddress ? (
         <>
@@ -197,7 +205,7 @@ export default function NewLease() {
         </>
       ) : null}
 
-      <Text variant="heading">Rent</Text>
+      <Text variant="label">Rent</Text>
       <TextField
         label="Monthly rent"
         value={form.rent}
@@ -212,10 +220,8 @@ export default function NewLease() {
         }
       />
       <View style={styles.group}>
-        <Text variant="caption" tone="muted" style={styles.label}>
-          Due on the
-        </Text>
-        <ChoiceChips
+        <Text style={styles.label}>Due on the</Text>
+        <Segmented
           options={DUE_DAYS.map((d) => ({ value: d, label: ordinalLabel(d) }))}
           value={DUE_DAYS.includes(form.dueDay as (typeof DUE_DAYS)[number]) ? form.dueDay : null}
           onChange={(v) => setForm((f) => ({ ...f, dueDay: v }))}
@@ -238,11 +244,7 @@ export default function NewLease() {
         placeholder="YYYY-MM-DD"
       />
 
-      <Text variant="heading">Where the landlord gets paid</Text>
-      <Notice
-        tone="info"
-        message="Sandbox: payout details are simulated and no transfer is made. In production these would be tokenized with the payments provider."
-      />
+      <Text variant="label">Where the landlord gets paid</Text>
       <TextField
         label="Account holder name"
         value={form.accountHolderName}
@@ -285,6 +287,6 @@ function ordinalLabel(d: number): string {
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: spacing.sm },
   group: { gap: spacing.sm },
-  label: { textTransform: 'uppercase', letterSpacing: 0.6 },
+  label: { fontFamily: fonts.bold, fontSize: 14, lineHeight: 18, color: colors.ink },
   switchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
 });

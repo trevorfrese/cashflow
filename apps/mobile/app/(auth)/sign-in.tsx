@@ -3,7 +3,7 @@ import { Link } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, CoinMark, Notice, Screen, Text, TextField } from '@/components';
+import { Button, Notice, Screen, Text, TextField } from '@/components';
 import { describeError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { spacing } from '@/theme';
@@ -35,14 +35,7 @@ export default function SignIn() {
   };
 
   return (
-    <Screen>
-      <View style={styles.hero}>
-        <CoinMark size={88} />
-        <Text variant="display">CashFlow</Text>
-        <Text variant="body" tone="muted" style={{ textAlign: 'center' }}>
-          Buy now, pay later for small business rent.
-        </Text>
-      </View>
+    <Screen back title="Sign in">
       {error ? <Notice tone="danger" message={error} /> : null}
       <TextField
         label="Email"
@@ -63,7 +56,13 @@ export default function SignIn() {
         placeholder="At least 10 characters"
         onSubmitEditing={() => void submit()}
       />
-      <Button title="Sign in" onPress={() => void submit()} loading={busy} />
+      <Button
+        title="Sign in"
+        size="lg"
+        icon="arrow-right"
+        onPress={() => void submit()}
+        loading={busy}
+      />
       <Button
         title="Use the demo account"
         variant="secondary"
@@ -79,7 +78,7 @@ export default function SignIn() {
           New here?{' '}
         </Text>
         <Link href="/(auth)/register">
-          <Text variant="bodyStrong" tone="primary">
+          <Text variant="bodyStrong" tone="link">
             Create an account
           </Text>
         </Link>
@@ -89,6 +88,5 @@ export default function SignIn() {
 }
 
 const styles = StyleSheet.create({
-  hero: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xl },
   footer: { flexDirection: 'row', justifyContent: 'center', paddingTop: spacing.md },
 });

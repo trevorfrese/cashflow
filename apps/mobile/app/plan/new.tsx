@@ -8,12 +8,12 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, ChoiceChips, ListRow, Notice, Pill, Screen, Text } from '@/components';
+import { Button, Card, ListRow, Notice, Pill, Screen, Segmented, Text } from '@/components';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { formatDate, todayIso } from '@/lib/forms';
 import { useApplications, useCreateRentPlan, useLeases } from '@/lib/queries';
-import { spacing } from '@/theme';
+import { border, colors, fonts, spacing } from '@/theme';
 
 export default function NewPlan() {
   const { leaseId } = useLocalSearchParams<{ leaseId: string }>();
@@ -60,11 +60,15 @@ export default function NewPlan() {
 
   return (
     <Screen
+      back
+      step="Step 4 of 4"
       title="Your rent plan"
       subtitle="CashFlow pays the landlord in full on the due date. Choose how you repay."
       footer={
         <Button
           title="Start plan"
+          size="lg"
+          icon="arrow-right"
           onPress={() => void start()}
           loading={create.isPending}
           disabled={!lease || !approved}
@@ -74,25 +78,17 @@ export default function NewPlan() {
       {error ? <Notice tone="danger" message={error} /> : null}
       {lease ? (
         <Card tone="gold">
-          <Text variant="caption" style={{ color: '#7A5A0E' }}>
-            {lease.landlordName}
-          </Text>
-          <Text variant="money" style={{ color: '#14120E' }}>
-            {formatCents(lease.monthlyRentCents, { showCents: false })}
-          </Text>
-          <Text variant="body" style={{ color: '#5E440A' }}>
-            paid in full on the {ordinal(lease.dueDayOfMonth)} each month
-          </Text>
+          <Text variant="label">{lease.landlordName}</Text>
+          <Text variant="money">{formatCents(lease.monthlyRentCents, { showCents: false })}</Text>
+          <Text variant="body">paid in full on the {ordinal(lease.dueDayOfMonth)} each month</Text>
         </Card>
       ) : (
         <Text tone="muted">Loading lease…</Text>
       )}
 
       <View style={styles.group}>
-        <Text variant="caption" tone="muted" style={styles.label}>
-          Installments per month
-        </Text>
-        <ChoiceChips
+        <Text style={styles.label}>Installments per month</Text>
+        <Segmented
           options={[
             { value: 1, label: '1' },
             { value: 2, label: '2' },
@@ -109,7 +105,7 @@ export default function NewPlan() {
       </View>
 
       {preview ? (
-        <Card>
+        <Card shadowColor={colors.sky}>
           <View style={styles.cardHeader}>
             <Text variant="heading">First period</Text>
             <Pill label={`${formatBps(feeBps)} fee`} tone="gold" />
@@ -122,20 +118,16 @@ export default function NewPlan() {
               key={i.sequence}
               title={formatDate(i.dueDate)}
               subtitle={`${formatCents(i.principalCents)} rent + ${formatCents(i.feeCents)} fee`}
-              right={<Text variant="bodyStrong">{formatCents(i.totalCents)}</Text>}
+              right={<Text variant="heading">{formatCents(i.totalCents)}</Text>}
               last={idx === preview.installments.length - 1}
             />
           ))}
           <View style={styles.total}>
             <Text variant="bodyStrong">Total per month</Text>
-            <Text variant="bodyStrong">{formatCents(preview.payoutCents + preview.feeCents)}</Text>
+            <Text variant="heading">{formatCents(preview.payoutCents + preview.feeCents)}</Text>
           </View>
         </Card>
       ) : null}
-      <Text variant="caption" tone="muted">
-        Installments are collected from your connected bank account on the dates shown. A missed
-        installment is retried and marked late after three days.
-      </Text>
     </Screen>
   );
 }
@@ -148,7 +140,15 @@ function ordinal(d: number): string {
 
 const styles = StyleSheet.create({
   group: { gap: spacing.sm },
-  label: { textTransform: 'uppercase', letterSpacing: 0.6 },
+  label: { fontFamily: fonts.bold, fontSize: 14, lineHeight: 18, color: colors.ink },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  total: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: spacing.sm },
+  total: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: spacing.smd,
+    marginTop: spacing.xs,
+    borderTopWidth: border.width,
+    borderTopColor: colors.ink,
+    borderStyle: 'dashed',
+  },
 });

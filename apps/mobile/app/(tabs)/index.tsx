@@ -1,13 +1,15 @@
+import type { Installment, Lease } from '@cashflow/shared';
 import { formatBps, formatCents } from '@cashflow/shared';
-import { Link, router } from 'expo-router';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  Avatar,
   Button,
   Card,
+  ChoiceChips,
   CoinMark,
-  DemoBanner,
   EmptyState,
   Notice,
   Pill,
@@ -15,13 +17,21 @@ import {
   statusPill,
 } from '@/components';
 import { describeError } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { useBusiness } from '@/lib/business';
-import { formatDate } from '@/lib/forms';
-import { useApplications, useLeases, useRentPlan, useRentPlans } from '@/lib/queries';
+import { formatDate, formatPeriod, ordinal, todayIso } from '@/lib/forms';
+import {
+  useApplications,
+  useInstallments,
+  useLeases,
+  useRentPlan,
+  useRentPlans,
+} from '@/lib/queries';
 import { deriveStage, type Stage } from '@/lib/stage';
-import { colors, radii, spacing } from '@/theme';
+import { border, colors, fonts, hardShadow, spacing } from '@/theme';
 
 export default function Home() {
+  const { user } = useAuth();
   const biz = useBusiness();
   const business = biz.business;
   const applications = useApplications(business?.id);
@@ -42,16 +52,16 @@ export default function Home() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <DemoBanner />
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} />}
       >
-        <View style={styles.brand}>
-          <CoinMark size={28} />
-          <Text variant="heading" style={styles.wordmark}>
-            CashFlow
-          </Text>
+        <View style={styles.topBar}>
+          <View style={styles.brand}>
+            <CoinMark size={34} />
+            <Text variant="heading">CashFlow</Text>
+          </View>
+          <Avatar name={user?.fullName} />
         </View>
 
         {error ? <Notice tone="danger" message={describeError(error)} /> : null}
@@ -62,47 +72,25 @@ export default function Home() {
             <Text variant="body" tone="muted">
               Set up your business to see whether CashFlow can pay your rent up front.
             </Text>
-            <Button title="Set up your business" onPress={() => router.push('/business/new')} />
+            <Button
+              title="Set up your business"
+              icon="arrow-right"
+              onPress={() => router.push('/business/new')}
+            />
           </Card>
         ) : null}
 
-        {biz.businesses.length > 0 ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.switcher}
-          >
-            {biz.businesses.map((b) => {
-              const selected = b.id === business?.id;
-              return (
-                <Pressable
-                  key={b.id}
-                  onPress={() => biz.select(b.id)}
-                  style={[styles.bizChip, selected && styles.bizChipSelected]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                >
-                  <Text
-                    variant="caption"
-                    style={{ color: selected ? colors.onPrimary : colors.text }}
-                  >
-                    {b.dba ?? b.legalName}
-                  </Text>
-                </Pressable>
-              );
-            })}
-            <Link href="/business/new" asChild>
-              <Pressable style={styles.bizChip} accessibilityRole="button">
-                <Text variant="caption" tone="primary">
-                  + Add
-                </Text>
-              </Pressable>
-            </Link>
-          </ScrollView>
+        {biz.businesses.length > 1 ? (
+          <ChoiceChips
+            options={biz.businesses.map((b) => ({ value: b.id, label: b.dba ?? b.legalName }))}
+            value={business?.id ?? null}
+            onChange={(id) => biz.select(id)}
+            appearance="tabs"
+          />
         ) : null}
 
         {business && stage ? (
-          <StageCard stage={stage} />
+          <StageCard stage={stage} leases={leases.data ?? []} />
         ) : loading ? (
           <Text tone="muted">Loading…</Text>
         ) : null}
@@ -111,7 +99,7 @@ export default function Home() {
   );
 }
 
-function StageCard({ stage }: { stage: Stage }) {
+function StageCard({ stage, leases }: { stage: Stage; leases: Lease[] }) {
   switch (stage.kind) {
     case 'NEEDS_APPLICATION':
       return (
@@ -121,19 +109,24 @@ function StageCard({ stage }: { stage: Stage }) {
             Connect your bank account and get an instant decision based on your cash flow, not a
             credit score.
           </Text>
-          <Button title="Start application" onPress={() => router.push('/application/new')} />
+          <Button
+            title="Start application"
+            icon="arrow-right"
+            onPress={() => router.push('/application/new')}
+          />
         </Card>
       );
     case 'NEEDS_INFO':
       return (
         <Card>
-          <Pill label="Needs info" tone="info" />
+          <Pill label="Needs info" tone="gold" />
           <Text variant="title">One more step</Text>
           <Text variant="body" tone="muted">
             {stage.application.decision?.reasons[0]?.message}
           </Text>
           <Button
             title="Continue"
+            icon="arrow-right"
             onPress={() =>
               router.push({ pathname: '/application/[id]', params: { id: stage.application.id } })
             }
@@ -157,7 +150,7 @@ function StageCard({ stage }: { stage: Stage }) {
           />
           <Button
             title="Start a new application"
-            variant="ghost"
+            variant="text"
             onPress={() => router.push('/application/new')}
           />
         </Card>
@@ -177,10 +170,14 @@ function StageCard({ stage }: { stage: Stage }) {
             {formatBps(stage.application.decision?.feeBps ?? 0)} fee per month. Link your lease to
             start.
           </Text>
-          <Button title="Link your lease" onPress={() => router.push('/lease/new')} />
+          <Button
+            title="Link your lease"
+            icon="arrow-right"
+            onPress={() => router.push('/lease/new')}
+          />
           <Button
             title="View decision"
-            variant="ghost"
+            variant="text"
             onPress={() =>
               router.push({ pathname: '/application/[id]', params: { id: stage.application.id } })
             }
@@ -195,11 +192,11 @@ function StageCard({ stage }: { stage: Stage }) {
           <Text variant="body" tone="muted">
             {stage.lease.landlordName},{' '}
             {formatCents(stage.lease.monthlyRentCents, { showCents: false })} due on the{' '}
-            {stage.lease.dueDayOfMonth}
-            {suffix(stage.lease.dueDayOfMonth)}.
+            {ordinal(stage.lease.dueDayOfMonth)}.
           </Text>
           <Button
             title="Choose repayment schedule"
+            icon="arrow-right"
             onPress={() =>
               router.push({ pathname: '/plan/new', params: { leaseId: stage.lease.id } })
             }
@@ -207,78 +204,97 @@ function StageCard({ stage }: { stage: Stage }) {
         </Card>
       );
     case 'ACTIVE_PLAN':
-      return <PlanSummary planId={stage.plan.id} />;
+      return (
+        <PlanSummary
+          planId={stage.plan.id}
+          lease={leases.find((l) => l.id === stage.plan.leaseId)}
+        />
+      );
   }
 }
 
-function PlanSummary({ planId }: { planId: string }) {
+function PlanSummary({ planId, lease }: { planId: string; lease: Lease | undefined }) {
   const plan = useRentPlan(planId);
+  const installments = useInstallments(planId);
   const d = plan.data;
   if (!d) return <Text tone="muted">Loading plan…</Text>;
+
   const next = d.nextInstallment;
-  const payout = d.nextPayout;
+  const all = installments.data ?? [];
+  const period =
+    next?.periodMonth ??
+    d.nextPayout?.periodMonth ??
+    [...d.payouts].sort((a, b) => (a.periodMonth < b.periodMonth ? 1 : -1))[0]?.periodMonth;
+  const periodItems = all
+    .filter((i) => i.periodMonth === period)
+    .sort((a, b) => a.sequence - b.sequence);
+  const paidCount = periodItems.filter((i) => i.status === 'PAID').length;
+  const periodPayout = d.payouts.find((p) => p.periodMonth === period) ?? d.nextPayout;
+  const paidSoFar = all
+    .filter((i) => i.status === 'PAID')
+    .reduce((sum, i) => sum + i.totalCents, 0);
+  const leftThisPeriod = periodItems
+    .filter((i) => i.status !== 'PAID')
+    .reduce((sum, i) => sum + i.totalCents, 0);
+
   return (
     <>
-      <Card tone="ink">
-        <Text variant="caption" style={{ color: colors.brightGold }}>
-          Next payment
-        </Text>
-        {next ? (
-          <>
-            <Text variant="money" style={{ color: colors.paper }}>
-              {formatCents(next.totalCents)}
-            </Text>
-            <View style={styles.rowBetween}>
-              <Text variant="body" style={{ color: colors.stone }}>
-                Due {formatDate(next.dueDate)}
+      <Card tone="gold" shadow="l">
+        <View style={styles.heroBody}>
+          <Text variant="label">
+            {period ? formatPeriod(period) : 'Rent'}
+            {lease ? ` · ${lease.propertyAddress.line1}` : ''}
+          </Text>
+          <Text variant="money" numberOfLines={1} adjustsFontSizeToFit>
+            {formatCents(d.monthlyRentCents, { showCents: false })}
+          </Text>
+          <Text variant="body">{payoutLine(periodPayout, d.dueDayOfMonth)}</Text>
+          {periodItems.length > 0 ? (
+            <>
+              <Blocks items={periodItems} />
+              <Text style={styles.heroCount}>
+                {paidCount} of {periodItems.length} paid back
               </Text>
-              <Pill {...statusPill(next.status)} />
+            </>
+          ) : null}
+        </View>
+      </Card>
+
+      <Card>
+        {next ? (
+          <View style={styles.rowBetween}>
+            <View style={{ gap: 2 }}>
+              <Text variant="number" numberOfLines={1} adjustsFontSizeToFit>
+                {formatCents(next.totalCents)}
+              </Text>
+              <Text variant="caption" tone="muted">
+                Due {formatDate(next.dueDate)} · from your bank
+              </Text>
             </View>
-          </>
+            <Pill {...nextPill(next)} />
+          </View>
         ) : (
-          <Text variant="body" style={{ color: colors.stone }}>
+          <Text variant="body" tone="muted">
             Nothing due right now.
           </Text>
         )}
-        <Button
-          title="View schedule"
-          variant="secondary"
-          onPress={() => router.push('/(tabs)/schedule')}
-          style={{ marginTop: spacing.sm }}
-        />
       </Card>
-      <Card>
-        <Text variant="heading">Landlord payout</Text>
-        {payout ? (
-          <View style={styles.rowBetween}>
-            <View>
-              <Text variant="bodyStrong">
-                {formatCents(payout.amountCents, { showCents: false })}
-              </Text>
-              <Text variant="caption" tone="muted">
-                {payout.status === 'PAID' && payout.paidAt
-                  ? `Paid ${formatDate(payout.paidAt.slice(0, 10))}`
-                  : `Scheduled ${formatDate(payout.scheduledFor)}`}
-              </Text>
-            </View>
-            <Pill {...statusPill(payout.status)} />
-          </View>
-        ) : (
-          <Text tone="muted">No payout scheduled.</Text>
-        )}
-      </Card>
-      <Card>
-        <Text variant="heading">Plan terms</Text>
-        <View style={styles.terms}>
-          <Term
-            label="Monthly rent"
-            value={formatCents(d.monthlyRentCents, { showCents: false })}
-          />
-          <Term label="Fee" value={formatBps(d.feeBps)} />
-          <Term label="Installments" value={`${d.installmentsPerMonth} / month`} />
-          <Term label="Status" value={d.status.charAt(0) + d.status.slice(1).toLowerCase()} />
+
+      <View style={styles.tiles}>
+        <View style={[styles.tile, hardShadow('m')]}>
+          <Text variant="label">Paid so far</Text>
+          <Text variant="number" style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
+            {formatCents(paidSoFar, { showCents: false })}
+          </Text>
         </View>
-      </Card>
+        <View style={[styles.tile, hardShadow('m')]}>
+          <Text variant="label">Left this month</Text>
+          <Text variant="number" style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
+            {formatCents(leftThisPeriod, { showCents: false })}
+          </Text>
+        </View>
+      </View>
+
       {d.upcomingInstallments.length === 0 && !next ? (
         <EmptyState
           title="All caught up"
@@ -289,39 +305,93 @@ function PlanSummary({ planId }: { planId: string }) {
   );
 }
 
-function Term({ label, value }: { label: string; value: string }) {
+/** One block per installment in the period, filled gold once it is paid. */
+function Blocks({ items }: { items: Installment[] }) {
   return (
-    <View style={{ width: '47%' }}>
-      <Text variant="caption" tone="muted">
-        {label}
-      </Text>
-      <Text variant="bodyStrong">{value}</Text>
+    <View style={styles.blocks}>
+      {items.map((i) => (
+        <View
+          key={i.id}
+          style={[
+            styles.block,
+            { backgroundColor: i.status === 'PAID' ? colors.ink : colors.white },
+          ]}
+        />
+      ))}
     </View>
   );
 }
 
-function suffix(d: number): string {
-  const s = ['th', 'st', 'nd', 'rd'] as const;
-  const v = d % 100;
-  return s[(v - 20) % 10] ?? s[v] ?? s[0];
+function payoutLine(
+  payout: { status: string; scheduledFor: string; paidAt: string | null } | null | undefined,
+  dueDay: number,
+): string {
+  if (!payout) return `Landlord paid in full on the ${ordinal(dueDay)}`;
+  if (payout.status === 'PAID')
+    return `Landlord paid in full on ${formatDate((payout.paidAt ?? payout.scheduledFor).slice(0, 10))}`;
+  return `Landlord gets paid in full on ${formatDate(payout.scheduledFor)}`;
+}
+
+function nextPill(i: Installment): { label: string; tone: 'due' | 'late' | 'info' | 'paid' } {
+  const today = todayIso();
+  if (i.status === 'SCHEDULED') {
+    if (i.dueDate < today) return { label: 'Overdue', tone: 'late' };
+    const days = daysBetween(today, i.dueDate);
+    if (days <= 7)
+      return { label: days === 0 ? 'Due today' : `Due ${weekday(i.dueDate)}`, tone: 'due' };
+    return { label: 'Scheduled', tone: 'info' };
+  }
+  const s = statusPill(i.status);
+  return { label: s.label, tone: s.tone === 'late' ? 'late' : s.tone === 'paid' ? 'paid' : 'due' };
+}
+
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+}
+
+function weekday(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'short',
+    timeZone: 'UTC',
+  });
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.md, gap: spacing.md, paddingBottom: spacing.xxl },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  wordmark: { fontWeight: '800', letterSpacing: -0.3 },
-  switcher: { gap: spacing.sm },
-  bizChip: {
-    paddingHorizontal: 14,
-    minHeight: 36,
-    justifyContent: 'center',
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.xs,
   },
-  bizChipSelected: { backgroundColor: colors.text, borderColor: colors.text },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  terms: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  heroBody: { gap: 6 },
+  heroCount: { fontFamily: fonts.bold, fontSize: 13, lineHeight: 18, color: colors.ink },
+  blocks: { flexDirection: 'row', gap: 6, marginTop: 6 },
+  block: {
+    flex: 1,
+    height: 16,
+    borderWidth: border.thin,
+    borderColor: colors.ink,
+    borderRadius: 4,
+  },
+  rowBetween: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  tiles: { flexDirection: 'row', gap: spacing.md },
+  tile: {
+    flex: 1,
+    minWidth: 0,
+    padding: 14,
+    gap: 4,
+    backgroundColor: colors.white,
+    borderWidth: border.width,
+    borderColor: colors.ink,
+    borderRadius: 12,
+  },
+  tileValue: { fontSize: 22, lineHeight: 26 },
 });

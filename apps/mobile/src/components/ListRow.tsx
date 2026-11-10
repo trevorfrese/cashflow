@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Text } from './Text';
-import { colors, spacing } from '@/theme';
+import { border, colors, spacing } from '@/theme';
 
 export function ListRow({
   title,
@@ -50,7 +50,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingVertical: 12,
   },
-  divider: { borderBottomWidth: 1, borderBottomColor: colors.border },
+  divider: { borderBottomWidth: border.thin, borderBottomColor: colors.ink },
   left: { flex: 1, gap: 2 },
   right: { alignItems: 'flex-end', gap: 4 },
 });

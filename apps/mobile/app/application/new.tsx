@@ -8,7 +8,7 @@ import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { centsToDollarsInput, dollarsToCents, monthsSince } from '@/lib/forms';
 import { useBankLinks, useSubmitApplication } from '@/lib/queries';
-import { colors, spacing } from '@/theme';
+import { spacing } from '@/theme';
 
 /**
  * What the owner typed, kept across the detour to the bank connect screen. That screen
@@ -86,11 +86,15 @@ export default function NewApplication() {
 
   return (
     <Screen
+      back
+      step="Step 2 of 4"
       title="Apply for rent advances"
       subtitle="Underwriting looks at your bank account, not a credit score. Decisions are instant."
       footer={
         <Button
           title="Submit application"
+          size="lg"
+          icon="arrow-right"
           onPress={() => void onSubmit()}
           loading={submit.isPending}
           disabled={!business}
@@ -99,10 +103,8 @@ export default function NewApplication() {
     >
       {errors.form ? <Notice tone="danger" message={errors.form} /> : null}
       {business ? (
-        <Card tone="alt">
-          <Text variant="caption" tone="muted">
-            Applying as
-          </Text>
+        <Card tone="paper" shadow="none">
+          <Text variant="label">Applying as</Text>
           <Text variant="heading">{business.dba ?? business.legalName}</Text>
         </Card>
       ) : null}
@@ -113,7 +115,6 @@ export default function NewApplication() {
         prefix="$"
         keyboardType="decimal-pad"
         error={errors.revenue}
-        helper="We verify this against the connected account."
       />
       <TextField
         label="Months in business"
@@ -130,14 +131,13 @@ export default function NewApplication() {
         keyboardType="decimal-pad"
         error={errors.rent}
         placeholder="6,200"
-        helper="The rent you want CashFlow to pay your landlord each month."
       />
 
       <Card>
         <View style={styles.cardHeader}>
           <Text variant="heading">Bank account</Text>
           <Link href={{ pathname: '/bank/connect', params: { next: 'application' } }}>
-            <Text variant="bodyStrong" tone="primary">
+            <Text variant="bodyStrong" tone="link">
               {linked.length > 0 ? 'Add another' : 'Connect'}
             </Text>
           </Link>
@@ -156,7 +156,7 @@ export default function NewApplication() {
               right={
                 <Pill
                   label={bankLinkId === l.id ? 'Selected' : 'Use'}
-                  tone={bankLinkId === l.id ? 'paid' : 'neutral'}
+                  tone={bankLinkId === l.id ? 'paid' : 'draft'}
                 />
               }
               last={i === linked.length - 1}
@@ -164,11 +164,6 @@ export default function NewApplication() {
           ))
         )}
       </Card>
-      <Text variant="caption" tone="muted" style={{ color: colors.textMuted }}>
-        Submitting runs the CashFlow underwriting engine on twelve months of transactions: verified
-        revenue, cash buffer, overdrafts, existing debt, and how comfortably rent fits inside free
-        cash flow.
-      </Text>
     </Screen>
   );
 }

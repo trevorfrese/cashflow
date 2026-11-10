@@ -1,23 +1,45 @@
 import { StyleSheet, View, type ViewProps } from 'react-native';
 
-import { colors, radii, spacing } from '@/theme';
+import { border, colors, hardShadow, radii, spacing, type ShadowSize } from '@/theme';
 
+type Tone = 'surface' | 'paper' | 'night' | 'gold' | 'sky' | 'dusk';
+
+const BG: Record<Tone, string> = {
+  surface: colors.white,
+  paper: colors.paper,
+  night: colors.night,
+  gold: colors.gold,
+  sky: colors.sky,
+  dusk: colors.dusk,
+};
+
+/** A framed box: 3px ink border, 14px corners, and a hard shadow unless `shadow` is none. */
 export function Card({
   style,
   tone = 'surface',
+  shadow = 'm',
+  shadowColor,
   ...rest
-}: ViewProps & { tone?: 'surface' | 'gold' | 'ink' | 'alt' }) {
-  return <View {...rest} style={[styles.card, styles[tone], style]} />;
+}: ViewProps & { tone?: Tone; shadow?: ShadowSize | 'none'; shadowColor?: string }) {
+  return (
+    <View
+      {...rest}
+      style={[
+        styles.card,
+        { backgroundColor: BG[tone] },
+        shadow !== 'none' && hardShadow(shadow, shadowColor),
+        style,
+      ]}
+    />
+  );
 }
 
 const styles = StyleSheet.create({
   card: {
+    borderWidth: border.width,
+    borderColor: colors.ink,
     borderRadius: radii.card,
-    padding: spacing.lg,
+    padding: spacing.md,
     gap: spacing.sm,
   },
-  surface: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  alt: { backgroundColor: colors.surfaceAlt },
-  gold: { backgroundColor: colors.brightGold },
-  ink: { backgroundColor: colors.text },
 });

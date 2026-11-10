@@ -1,9 +1,15 @@
 import { useState } from 'react';
 import { StyleSheet, TextInput, type TextInputProps, View } from 'react-native';
 
+import { Icon } from './Icon';
 import { Text } from './Text';
-import { colors, radii, spacing } from '@/theme';
+import { border, colors, fonts, hardShadow, radii } from '@/theme';
 
+/**
+ * Text input from the design system: the label is always visible, the field is a white box
+ * with a 3px ink border, focus adds a hard shadow and an azure border, an error tints the
+ * field and gives it a red shadow. A currency prefix sits in a gold block on the left.
+ */
 export function TextField({
   label,
   error,
@@ -13,22 +19,22 @@ export function TextField({
   ...input
 }: TextInputProps & { label: string; error?: string | null; helper?: string; prefix?: string }) {
   const [focused, setFocused] = useState(false);
+  const disabled = input.editable === false;
   return (
     <View style={styles.wrap}>
-      <Text variant="caption" tone="muted" style={styles.label}>
-        {label}
-      </Text>
+      <Text style={[styles.label, disabled && { color: colors.textMuted }]}>{label}</Text>
       <View
         style={[
           styles.field,
-          focused && { borderColor: colors.primary },
-          error ? { borderColor: colors.late } : null,
+          focused && styles.focused,
+          error ? styles.errored : null,
+          disabled && styles.disabled,
         ]}
       >
         {prefix ? (
-          <Text variant="body" tone="muted" style={styles.prefix}>
-            {prefix}
-          </Text>
+          <View style={styles.prefix}>
+            <Text style={styles.prefixText}>{prefix}</Text>
+          </View>
         ) : null}
         <TextInput
           {...input}
@@ -42,13 +48,14 @@ export function TextField({
             setFocused(false);
             input.onBlur?.(e);
           }}
-          style={[styles.input, style]}
+          style={[styles.input, prefix ? styles.inputStrong : null, style]}
         />
       </View>
       {error ? (
-        <Text variant="caption" tone="danger">
-          {error}
-        </Text>
+        <View style={styles.errorRow}>
+          <Icon name="alert" size={16} color={colors.lateText} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
       ) : helper ? (
         <Text variant="caption" tone="muted">
           {helper}
@@ -59,25 +66,45 @@ export function TextField({
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 6, minWidth: 0 },
-  label: { textTransform: 'uppercase', letterSpacing: 0.6 },
+  wrap: { gap: 8, minWidth: 0 },
+  label: { fontFamily: fonts.bold, fontSize: 14, lineHeight: 18, color: colors.ink },
   field: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'stretch',
     minHeight: 52,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: border.width,
+    borderColor: colors.ink,
     borderRadius: radii.control,
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.md,
+    backgroundColor: colors.white,
   },
-  prefix: { marginRight: 4 },
+  focused: { ...hardShadow('m'), borderColor: colors.azure },
+  errored: { ...hardShadow('m', colors.jetRed), backgroundColor: colors.errorFieldBg },
+  disabled: {
+    backgroundColor: colors.disabledBg,
+    borderColor: colors.disabledBorder,
+    borderStyle: 'dashed',
+  },
+  prefix: {
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    backgroundColor: colors.gold,
+    borderRightWidth: border.width,
+    borderRightColor: colors.ink,
+    borderTopLeftRadius: radii.control - border.width,
+    borderBottomLeftRadius: radii.control - border.width,
+  },
+  prefixText: { fontFamily: fonts.display, fontSize: 18, lineHeight: 22, color: colors.ink },
   input: {
     flex: 1,
     minWidth: 0,
     width: '100%',
-    fontSize: 16,
-    color: colors.text,
+    paddingHorizontal: 14,
     paddingVertical: 12,
+    fontSize: 17,
+    fontFamily: fonts.regular,
+    color: colors.ink,
   },
+  inputStrong: { fontFamily: fonts.heading, fontSize: 18 },
+  errorRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  errorText: { fontFamily: fonts.bold, fontSize: 13, lineHeight: 18, color: colors.lateText },
 });

@@ -1,31 +1,39 @@
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, type ViewStyle } from 'react-native';
 
 import { Text } from './Text';
-import { colors, radii } from '@/theme';
+import { colors, fonts, radii } from '@/theme';
 
-export type PillTone = 'neutral' | 'paid' | 'due' | 'late' | 'info' | 'gold';
+export type PillTone = 'neutral' | 'draft' | 'paid' | 'due' | 'late' | 'info' | 'gold';
 
 const tones: Record<PillTone, { bg: string; fg: string }> = {
-  neutral: { bg: colors.surfaceAlt, fg: colors.textMuted },
-  paid: { bg: colors.successBg, fg: colors.paid },
-  due: { bg: colors.warningBg, fg: colors.dueSoon },
-  late: { bg: colors.dangerBg, fg: colors.late },
-  info: { bg: colors.infoBg, fg: colors.primary },
-  gold: { bg: colors.cream, fg: colors.bronze },
+  neutral: { bg: colors.stone, fg: colors.textMuted },
+  draft: { bg: colors.stone, fg: colors.textMuted },
+  paid: { bg: colors.successBg, fg: colors.paidText },
+  due: { bg: colors.warningBg, fg: colors.ink },
+  late: { bg: colors.dangerBg, fg: colors.lateText },
+  info: { bg: colors.infoBg, fg: colors.azureDeep },
+  gold: { bg: colors.gold, fg: colors.ink },
 };
 
-export function Pill({ label, tone = 'neutral' }: { label: string; tone?: PillTone }) {
+/** Status tag: a small flat label. No border or shadow, so it never reads as a button. */
+export function Pill({
+  label,
+  tone = 'neutral',
+  style,
+}: {
+  label: string;
+  tone?: PillTone;
+  style?: ViewStyle;
+}) {
   const t = tones[tone];
   return (
-    <View style={[styles.pill, { backgroundColor: t.bg }]}>
-      <Text variant="caption" style={{ color: t.fg }}>
-        {label}
-      </Text>
+    <View style={[styles.pill, { backgroundColor: t.bg }, style]}>
+      <Text style={[styles.text, { color: t.fg }]}>{label.toUpperCase()}</Text>
     </View>
   );
 }
 
-/** Map product statuses onto pill tones and short labels. */
+/** Map product statuses onto tag tones and short labels. */
 export function statusPill(status: string): { label: string; tone: PillTone } {
   switch (status) {
     case 'PAID':
@@ -35,6 +43,7 @@ export function statusPill(status: string): { label: string; tone: PillTone } {
     case 'LINKED':
       return { label: title(status), tone: 'paid' };
     case 'SCHEDULED':
+      return { label: title(status), tone: 'info' };
     case 'COLLECTING':
     case 'PROCESSING':
     case 'PENDING':
@@ -46,7 +55,9 @@ export function statusPill(status: string): { label: string; tone: PillTone } {
     case 'ERROR':
       return { label: title(status), tone: 'late' };
     case 'NEEDS_INFO':
-      return { label: 'Needs info', tone: 'info' };
+      return { label: 'Needs info', tone: 'gold' };
+    case 'DRAFT':
+      return { label: 'Draft', tone: 'draft' };
     default:
       return { label: title(status), tone: 'neutral' };
   }
@@ -58,9 +69,10 @@ function title(s: string): string {
 
 const styles = StyleSheet.create({
   pill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: radii.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radii.chip,
     alignSelf: 'flex-start',
   },
+  text: { fontFamily: fonts.bold, fontSize: 11, lineHeight: 14, letterSpacing: 1 },
 });

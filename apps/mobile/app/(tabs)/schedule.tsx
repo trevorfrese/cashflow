@@ -18,7 +18,7 @@ import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { formatDate, formatPeriod, todayIso } from '@/lib/forms';
 import { useInstallments, usePayInstallment, usePayouts, useRentPlans } from '@/lib/queries';
-import { spacing } from '@/theme';
+import { border, colors, spacing } from '@/theme';
 
 export default function Schedule() {
   const { business } = useBusiness();
@@ -46,14 +46,7 @@ export default function Schedule() {
   const today = todayIso();
 
   return (
-    <Screen
-      title="Schedule"
-      subtitle={
-        plan
-          ? `${formatCents(plan.monthlyRentCents, { showCents: false })} rent, ${plan.installmentsPerMonth} installments a month`
-          : undefined
-      }
-    >
+    <Screen title="Schedule">
       {periods.length === 0 && !installments.isLoading ? (
         <EmptyState
           title="Nothing scheduled"
@@ -142,10 +135,14 @@ function InstallmentRow({
     <View>
       <ListRow
         title={`Installment ${i.sequence} of ${count}`}
-        subtitle={`${i.status === 'PAID' && i.paidAt ? `Paid ${formatDate(i.paidAt.slice(0, 10))}` : `Due ${formatDate(i.dueDate)}`} · ${formatCents(i.principalCents)} rent + ${formatCents(i.feeCents)} fee`}
+        subtitle={
+          i.status === 'PAID' && i.paidAt
+            ? `Paid ${formatDate(i.paidAt.slice(0, 10))}`
+            : `Due ${formatDate(i.dueDate)}`
+        }
         right={
           <>
-            <Text variant="bodyStrong">{formatCents(i.totalCents)}</Text>
+            <Text variant="heading">{formatCents(i.totalCents)}</Text>
             <Pill {...pill} />
           </>
         }
@@ -157,11 +154,12 @@ function InstallmentRow({
           <Button
             title={confirming ? `Confirm ${formatCents(i.totalCents)} from your bank` : 'Pay now'}
             variant={confirming ? 'primary' : 'secondary'}
+            size="sm"
             onPress={() => void onPay()}
             loading={pay.isPending}
           />
           {confirming ? (
-            <Button title="Cancel" variant="ghost" onPress={() => setConfirming(false)} />
+            <Button title="Cancel" variant="text" size="sm" onPress={() => setConfirming(false)} />
           ) : null}
         </View>
       ) : null}
@@ -172,5 +170,5 @@ function InstallmentRow({
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   payRow: { paddingVertical: spacing.sm, gap: spacing.sm },
-  divider: { borderBottomWidth: 1, borderBottomColor: '#E4E0D6' },
+  divider: { borderBottomWidth: border.thin, borderBottomColor: colors.ink },
 });

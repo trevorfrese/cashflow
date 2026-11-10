@@ -1,17 +1,21 @@
-import { Text as RNText, type TextProps as RNTextProps, StyleSheet } from 'react-native';
+import { Text as RNText, type TextProps as RNTextProps } from 'react-native';
 
 import { colors, type as typeScale } from '@/theme';
 
 type Variant = keyof typeof typeScale;
-type Tone = 'default' | 'muted' | 'inverse' | 'primary' | 'danger' | 'success';
+type Tone =
+  'default' | 'muted' | 'inverse' | 'primary' | 'link' | 'danger' | 'success' | 'gold' | 'sky';
 
 const toneColor: Record<Tone, string> = {
   default: colors.text,
   muted: colors.textMuted,
-  inverse: colors.onPrimary,
-  primary: colors.primary,
-  danger: colors.late,
-  success: colors.paid,
+  inverse: colors.white,
+  primary: colors.azureDeep,
+  link: colors.azureDeep,
+  danger: colors.lateText,
+  success: colors.paidText,
+  gold: colors.gold,
+  sky: colors.sky,
 };
 
 export function Text({
@@ -20,14 +24,5 @@ export function Text({
   style,
   ...rest
 }: RNTextProps & { variant?: Variant; tone?: Tone }) {
-  return (
-    <RNText
-      {...rest}
-      style={[styles.base, typeScale[variant], { color: toneColor[tone] }, style]}
-    />
-  );
+  return <RNText {...rest} style={[typeScale[variant], { color: toneColor[tone] }, style]} />;
 }
-
-const styles = StyleSheet.create({
-  base: { fontFamily: undefined },
-});

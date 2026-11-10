@@ -38,7 +38,11 @@ export default function Register() {
   };
 
   return (
-    <Screen title="Create your account" subtitle="Sign in details for the owner of the business.">
+    <Screen
+      back
+      title="Create your account"
+      subtitle="Sign in details for the owner of the business."
+    >
       {error ? <Notice tone="danger" message={error} /> : null}
       <TextField
         label="Your name"
@@ -67,13 +71,19 @@ export default function Register() {
         helper="At least 10 characters."
         error={errors.password}
       />
-      <Button title="Create account" onPress={() => void submit()} loading={busy} />
+      <Button
+        title="Create account"
+        size="lg"
+        icon="arrow-right"
+        onPress={() => void submit()}
+        loading={busy}
+      />
       <View style={styles.footer}>
         <Text variant="body" tone="muted">
           Already have an account?{' '}
         </Text>
         <Link href="/(auth)/sign-in">
-          <Text variant="bodyStrong" tone="primary">
+          <Text variant="bodyStrong" tone="link">
             Sign in
           </Text>
         </Link>

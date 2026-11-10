@@ -2,7 +2,11 @@ import { z } from 'zod';
 
 import { Id, IsoDateTimeSchema } from './common';
 
-export const Email = z.string().email().max(254).transform((s) => s.trim().toLowerCase());
+export const Email = z
+  .string()
+  .email()
+  .max(254)
+  .transform((s) => s.trim().toLowerCase());
 export const Password = z.string().min(10, 'Use at least 10 characters').max(200);
 
 export const RegisterRequest = z.object({

@@ -1,9 +1,7 @@
 import { z } from 'zod';
 
 export const Id = z.string().min(1);
-export const IsoDateSchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
+export const IsoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
 export const IsoDateTimeSchema = z.string().datetime({ offset: true });
 export const Cents = z.number().int().nonnegative();
 export const Bps = z.number().int().min(0).max(10_000);

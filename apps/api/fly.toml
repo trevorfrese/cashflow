@@ -1,0 +1,36 @@
+# Fly.io config for the CashFlow API. Deploy from the repo root:
+#   fly launch --no-deploy --copy-config --config apps/api/fly.toml
+#   fly postgres create && fly postgres attach <pg-app>   # sets DATABASE_URL
+#   fly secrets set JWT_SECRET="$(openssl rand -base64 48)"
+#   fly deploy --config apps/api/fly.toml --dockerfile apps/api/Dockerfile .
+app = "cashflow-api"
+primary_region = "sea"
+
+[build]
+  dockerfile = "apps/api/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "4000"
+  LOG_LEVEL = "info"
+  JOBS_ENABLED = "true"
+  JOBS_CRON = "0 * * * *"
+  ENABLE_ADMIN = "false"
+  UNDERWRITING_PROVIDER = "mock"
+  BANK_LINK_PROVIDER = "mock"
+  PAYMENTS_PROVIDER = "mock"
+  CAPITAL_PROVIDER = "mock"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"

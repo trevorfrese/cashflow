@@ -162,10 +162,20 @@ describe('buildInstallmentSchedule', () => {
 
   it('rejects unsupported installment counts', () => {
     expect(() =>
-      buildInstallmentSchedule({ rentCents: 1000, feeBps: 0, dueDate: '2026-01-01', installmentsPerMonth: 0 }),
+      buildInstallmentSchedule({
+        rentCents: 1000,
+        feeBps: 0,
+        dueDate: '2026-01-01',
+        installmentsPerMonth: 0,
+      }),
     ).toThrow();
     expect(() =>
-      buildInstallmentSchedule({ rentCents: 1000, feeBps: 0, dueDate: '2026-01-01', installmentsPerMonth: 5 }),
+      buildInstallmentSchedule({
+        rentCents: 1000,
+        feeBps: 0,
+        dueDate: '2026-01-01',
+        installmentsPerMonth: 5,
+      }),
     ).toThrow();
   });
 });

@@ -6,7 +6,13 @@ export type BusinessStatus = z.infer<typeof BusinessStatus>;
 export const BankLinkStatus = z.enum(['PENDING', 'LINKED', 'ERROR', 'DISCONNECTED']);
 export type BankLinkStatus = z.infer<typeof BankLinkStatus>;
 
-export const ApplicationStatus = z.enum(['DRAFT', 'SUBMITTED', 'APPROVED', 'DECLINED', 'NEEDS_INFO']);
+export const ApplicationStatus = z.enum([
+  'DRAFT',
+  'SUBMITTED',
+  'APPROVED',
+  'DECLINED',
+  'NEEDS_INFO',
+]);
 export type ApplicationStatus = z.infer<typeof ApplicationStatus>;
 
 export const DecisionOutcome = z.enum(['APPROVED', 'DECLINED', 'NEEDS_INFO']);

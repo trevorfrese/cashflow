@@ -150,7 +150,11 @@ export function feeForRent(rentCents: number, feeBps: number): number {
  */
 export function buildInstallmentSchedule(input: ScheduleInput): PeriodSchedule {
   const installmentsPerMonth = input.installmentsPerMonth ?? 2;
-  if (!Number.isInteger(installmentsPerMonth) || installmentsPerMonth < 1 || installmentsPerMonth > 4) {
+  if (
+    !Number.isInteger(installmentsPerMonth) ||
+    installmentsPerMonth < 1 ||
+    installmentsPerMonth > 4
+  ) {
     throw new Error(`installmentsPerMonth must be 1..4, got ${installmentsPerMonth}`);
   }
   const { day } = parseIsoDate(input.dueDate);

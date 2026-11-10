@@ -9,7 +9,7 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "setup": "docker compose up -d --wait && pnpm --filter @cashflow/api db:migrate && pnpm --filter @cashflow/api db:seed",
+    "setup": "docker compose up -d --wait && pnpm --filter @cashflow/api db:migrate:deploy && pnpm --filter @cashflow/api db:seed",
     "dev": "turbo run dev --filter=@cashflow/api --filter=@cashflow/web",
     "dev:mobile": "pnpm --filter @cashflow/mobile start",
     "build": "turbo run build",
@@ -21,7 +21,7 @@
     "check:copy": "sh scripts/check-no-em-dash.sh",
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
-    "db:reset": "docker compose down -v && docker compose up -d --wait && pnpm --filter @cashflow/api db:migrate && pnpm --filter @cashflow/api db:seed"
+    "db:reset": "docker compose down -v && docker compose up -d --wait && pnpm --filter @cashflow/api db:migrate:deploy && pnpm --filter @cashflow/api db:seed"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

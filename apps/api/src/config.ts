@@ -2,7 +2,9 @@ import { z } from 'zod';
 
 const Bool = z
   .union([z.boolean(), z.string()])
-  .transform((v) => (typeof v === 'boolean' ? v : ['1', 'true', 'yes', 'on'].includes(v.toLowerCase())));
+  .transform((v) =>
+    typeof v === 'boolean' ? v : ['1', 'true', 'yes', 'on'].includes(v.toLowerCase()),
+  );
 
 const ConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -47,10 +49,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // Safety rails. A production build must never run with a live key by accident.
   if (config.NODE_ENV === 'production') {
     if (config.STRIPE_SECRET_KEY?.startsWith('sk_live_')) {
-      throw new Error('Refusing to start: STRIPE_SECRET_KEY is a live key. This project never moves real money.');
+      throw new Error(
+        'Refusing to start: STRIPE_SECRET_KEY is a live key. This project never moves real money.',
+      );
     }
     if (config.PLAID_ENV === 'production') {
-      throw new Error('Refusing to start: PLAID_ENV=production. This project only runs against sandbox data.');
+      throw new Error(
+        'Refusing to start: PLAID_ENV=production. This project only runs against sandbox data.',
+      );
     }
   }
   return config;

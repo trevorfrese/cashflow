@@ -144,9 +144,8 @@ export function feeForRent(rentCents: number, feeBps: number): number {
  *
  * The landlord is paid the full rent on `dueDate`. The business repays principal plus fee
  * in `installmentsPerMonth` installments. The first installment is collected on the due date
- * and the rest are spaced evenly across the period, where the period length is the number of
- * days until the next due date. With 2 installments in a 30 day month that is the due date
- * and the due date plus 15 days.
+ * and the rest follow the semi-monthly convention, two weeks apart for two installments and
+ * one week apart for four. Rent due on the 1st is repaid on the 1st and the 15th.
  */
 export function buildInstallmentSchedule(input: ScheduleInput): PeriodSchedule {
   const installmentsPerMonth = input.installmentsPerMonth ?? 2;
@@ -157,10 +156,7 @@ export function buildInstallmentSchedule(input: ScheduleInput): PeriodSchedule {
   ) {
     throw new Error(`installmentsPerMonth must be 1..4, got ${installmentsPerMonth}`);
   }
-  const { day } = parseIsoDate(input.dueDate);
-  const periodEnd = followingDueDate(input.dueDate, day);
-  const periodDays = daysBetween(input.dueDate, periodEnd);
-  const spacing = Math.floor(periodDays / installmentsPerMonth);
+  const spacing = Math.floor(28 / installmentsPerMonth);
 
   const feeCents = feeForRent(input.rentCents, input.feeBps);
   const principalParts = splitCents(input.rentCents, installmentsPerMonth);

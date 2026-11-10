@@ -7,6 +7,7 @@ import {
   RentPlan,
   RentPlanDetail,
   Repayment,
+  UpdateRentPlanRequest,
 } from '@cashflow/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
@@ -89,6 +90,32 @@ export async function rentPlanRoutes(app: FastifyInstance) {
         upcomingInstallments: upcoming.map(toInstallment),
         payouts: payouts.map(toPayout),
       };
+    },
+  );
+
+  /** Change the repayment cadence or pause and resume the plan. Closed plans are final. */
+  r.patch(
+    '/rent-plans/:id',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        tags: ['rent-plans'],
+        params: Params,
+        body: UpdateRentPlanRequest,
+        response: { 200: RentPlan },
+      },
+    },
+    async (request) => {
+      const plan = await getOwnedRentPlan(db, request.params.id, currentUserId(request));
+      if (plan.status === 'CLOSED') throw unprocessable('PLAN_CLOSED', 'This plan is closed');
+      const updated = await db.rentPlan.update({
+        where: { id: plan.id },
+        data: {
+          installmentsPerMonth: request.body.installmentsPerMonth,
+          status: request.body.status,
+        },
+      });
+      return toRentPlan(updated);
     },
   );
 

@@ -168,11 +168,11 @@ what happened on any given day.
 `buildInstallmentSchedule({ rentCents, feeBps, dueDate, installmentsPerMonth })` lives in
 `packages/shared/src/money/schedule.ts` and is used by the API to create installments and by
 the mobile app to preview them before a plan exists. The first installment is collected on
-the rent due date and the rest are spaced evenly across the period; principal and fee are
-split with `splitCents` so rounding remainders land on the last installment and the sum is
-exact. With two installments in a 30 day month that is the due date and the due date plus 15
-days. Underwriting may recommend four installments for businesses with daily deposits and a
-thin buffer.
+the rent due date and the rest follow the semi-monthly convention: two weeks apart for two
+installments (the 1st and the 15th for rent due on the 1st), one week apart for four.
+Principal and fee are split with `splitCents` so rounding remainders land on the last
+installment and the sum is exact. Underwriting may recommend four installments for businesses
+with daily deposits and a thin buffer.
 
 ## Auth
 

@@ -97,9 +97,9 @@ describe('buildInstallmentSchedule', () => {
     expect(schedule.installments).toHaveLength(2);
 
     const [first, second] = schedule.installments;
-    // December has 31 days, so spacing is floor(31 / 2) = 15.
+    // Two halves: the due date and two weeks later, the 1st and the 15th.
     expect(first?.dueDate).toBe('2026-12-01');
-    expect(second?.dueDate).toBe('2026-12-16');
+    expect(second?.dueDate).toBe('2026-12-15');
     expect(first?.principalCents).toBe(122500);
     expect(second?.principalCents).toBe(122500);
     // Odd fee: 6125 splits as 3062 + 3063.

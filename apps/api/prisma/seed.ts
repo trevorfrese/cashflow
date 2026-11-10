@@ -72,12 +72,12 @@ async function main() {
       state: 'OR',
       postalCode: '97204',
       foundedOn: '2021-03-01',
-      statedMonthlyRevenueCents: 4_800_000,
+      statedMonthlyRevenueCents: 6_000_000,
       status: 'ACTIVE',
     },
   });
   const bakeryBank = await providers.bankLink.exchangePublicToken(
-    'seed_blue_door_healthy_rev_48000_rent_6200',
+    'seed_blue_door_healthy_rev_60000_rent_10000',
   );
   const bakeryLink = await db.bankLink.create({
     data: {
@@ -94,9 +94,9 @@ async function main() {
     data: {
       businessId: bakery.id,
       bankLinkId: bakeryLink.id,
-      statedMonthlyRevenueCents: 4_800_000,
+      statedMonthlyRevenueCents: 6_000_000,
       timeInBusinessMonths: 68,
-      requestedMonthlyRentCents: 620_000,
+      requestedMonthlyRentCents: 1_000_000,
     },
   });
   const bakeryApp = await underwriteApplication({
@@ -118,7 +118,7 @@ async function main() {
       propertyCity: 'Portland',
       propertyState: 'OR',
       propertyPostalCode: '97204',
-      monthlyRentCents: 620_000,
+      monthlyRentCents: 1_000_000,
       dueDayOfMonth: 1,
       startsOn: planStart,
       landlordAccountHolderName: 'Harbor View Properties LLC',
@@ -139,7 +139,7 @@ async function main() {
   let due = nextRentDueDate(1, planStart);
   const replayDates: string[] = [];
   while (due <= today) {
-    replayDates.push(due, addDays(due, 15));
+    replayDates.push(due, addDays(due, 14));
     due = followingDueDate(due, 1);
   }
   for (const asOf of replayDates.filter((d) => d <= today).sort()) {

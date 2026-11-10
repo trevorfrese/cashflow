@@ -6,7 +6,6 @@ import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
-  Avatar,
   Button,
   Card,
   ChoiceChips,
@@ -18,7 +17,6 @@ import {
   statusPill,
 } from '@/components';
 import { describeError } from '@/lib/api';
-import { useAuth } from '@/lib/auth';
 import { useBusiness } from '@/lib/business';
 import { formatDate, formatPeriod, ordinal, todayIso } from '@/lib/forms';
 import {
@@ -30,10 +28,9 @@ import {
   useRentPlans,
 } from '@/lib/queries';
 import { deriveStage, type Stage } from '@/lib/stage';
-import { border, colors, fonts, hardShadow, spacing } from '@/theme';
+import { border, colors, spacing } from '@/theme';
 
 export default function Home() {
-  const { user } = useAuth();
   const biz = useBusiness();
   const business = biz.business;
   const applications = useApplications(business?.id);
@@ -63,7 +60,6 @@ export default function Home() {
             <CoinMark size={34} />
             <Text variant="heading">CashFlow</Text>
           </View>
-          <Avatar name={user?.fullName} />
         </View>
 
         {error ? <Notice tone="danger" message={describeError(error)} /> : null}
@@ -230,92 +226,69 @@ function PlanSummary({ planId, lease }: { planId: string; lease: Lease | undefin
   const periodItems = all
     .filter((i) => i.periodMonth === period)
     .sort((a, b) => a.sequence - b.sequence);
-  const paidCount = periodItems.filter((i) => i.status === 'PAID').length;
   const periodPayout = d.payouts.find((p) => p.periodMonth === period) ?? d.nextPayout;
-  const paidSoFar = all
-    .filter((i) => i.status === 'PAID')
-    .reduce((sum, i) => sum + i.totalCents, 0);
-  const leftThisPeriod = periodItems
-    .filter((i) => i.status !== 'PAID')
-    .reduce((sum, i) => sum + i.totalCents, 0);
+  const feeCents = periodItems.reduce((sum, i) => sum + i.feeCents, 0);
 
   return (
     <>
       <Card tone="gold" shadow="l">
-        <View style={styles.heroBody}>
-          <Text variant="label">
-            {period ? formatPeriod(period) : 'Rent'}
-            {lease ? ` · ${lease.propertyAddress.line1}` : ''}
-          </Text>
-          <Text variant="money" numberOfLines={1} adjustsFontSizeToFit>
-            {formatCents(d.monthlyRentCents, { showCents: false })}
-          </Text>
-          <Text variant="body">{payoutLine(periodPayout, d.dueDayOfMonth)}</Text>
-          {periodItems.length > 0 ? (
-            <>
-              <Blocks items={periodItems} />
-              <Text style={styles.heroCount}>
-                {paidCount} of {periodItems.length} paid back
-              </Text>
-            </>
+        <Text variant="label">{period ? `${formatPeriod(period)} rent` : 'Rent'}</Text>
+        <Text variant="money" numberOfLines={1} adjustsFontSizeToFit>
+          {formatCents(d.monthlyRentCents, { showCents: false })}
+        </Text>
+        <Text variant="body">{payoutLine(periodPayout, lease, d.dueDayOfMonth)}</Text>
+      </Card>
+
+      {periodItems.length > 0 ? (
+        <Card>
+          <Text variant="heading">You pay back</Text>
+          {periodItems.map((i, idx) => (
+            <InstallmentRow
+              key={i.id}
+              installment={i}
+              count={periodItems.length}
+              planId={planId}
+              payable={periodPayout?.status === 'PAID'}
+              last={idx === periodItems.length - 1}
+            />
+          ))}
+          {feeCents > 0 ? (
+            <Text variant="caption" tone="muted">
+              Includes the {formatCents(feeCents, { showCents: false })} CashFlow fee (
+              {formatBps(d.feeBps)}), split across the payments.
+            </Text>
           ) : null}
-        </View>
-      </Card>
-
-      <Card>
-        {next ? (
-          <NextPayment
-            installment={next}
-            planId={planId}
-            payable={periodPayout?.status === 'PAID'}
-          />
-        ) : (
-          <Text variant="body" tone="muted">
-            Nothing due right now.
-          </Text>
-        )}
-      </Card>
-
-      <View style={styles.tiles}>
-        <View style={[styles.tile, hardShadow('m')]}>
-          <Text variant="label">Paid so far</Text>
-          <Text variant="number" style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-            {formatCents(paidSoFar, { showCents: false })}
-          </Text>
-        </View>
-        <View style={[styles.tile, hardShadow('m')]}>
-          <Text variant="label">Left this month</Text>
-          <Text variant="number" style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-            {formatCents(leftThisPeriod, { showCents: false })}
-          </Text>
-        </View>
-      </View>
-
-      {d.upcomingInstallments.length === 0 && !next ? (
+        </Card>
+      ) : (
         <EmptyState
           title="All caught up"
-          message="Upcoming installments appear here 30 days before each rent due date."
+          message="Your next payments appear here 30 days before rent is due."
         />
-      ) : null}
+      )}
     </>
   );
 }
 
-/** The next installment with a Pay now button once CashFlow has paid the landlord. */
-function NextPayment({
+/** One installment in the period, with Pay now once CashFlow has paid the landlord. */
+function InstallmentRow({
   installment: i,
+  count,
   planId,
   payable,
+  last,
 }: {
   installment: Installment;
+  count: number;
   planId: string;
   payable: boolean;
+  last: boolean;
 }) {
   const pay = usePayInstallment(planId);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const canPay =
     payable && (i.status === 'SCHEDULED' || i.status === 'FAILED' || i.status === 'LATE');
+  const paid = i.status === 'PAID';
 
   const onPay = async () => {
     if (!confirming) {
@@ -333,23 +306,24 @@ function NextPayment({
   };
 
   return (
-    <>
+    <View style={[styles.installment, !last && styles.divider]}>
       <View style={styles.rowBetween}>
-        <View style={{ gap: 2, flex: 1, minWidth: 0 }}>
-          <Text variant="number" numberOfLines={1} adjustsFontSizeToFit>
-            {formatCents(i.totalCents)}
-          </Text>
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Text variant="bodyStrong">{installmentLabel(i.sequence, count)}</Text>
           <Text variant="caption" tone="muted">
-            Due {formatDate(i.dueDate)} · from your bank
+            {paid && i.paidAt ? `Paid ${formatDate(i.paidAt.slice(0, 10))}` : formatDate(i.dueDate)}
           </Text>
         </View>
-        <Pill {...nextPill(i)} />
+        <View style={{ alignItems: 'flex-end', gap: 4 }}>
+          <Text variant="heading">{formatCents(i.principalCents, { showCents: false })}</Text>
+          <Pill {...(paid ? { label: 'Paid', tone: 'paid' } : nextPill(i))} />
+        </View>
       </View>
       {error ? <Notice tone="danger" message={error} /> : null}
       {canPay ? (
-        <View style={{ gap: spacing.sm, marginTop: spacing.xs }}>
+        <View style={{ gap: spacing.sm }}>
           <Button
-            title={confirming ? `Confirm ${formatCents(i.totalCents)}` : 'Pay now'}
+            title={confirming ? `Confirm ${formatCents(i.totalCents)} from your bank` : 'Pay now'}
             variant={confirming ? 'primary' : 'secondary'}
             size="sm"
             onPress={() => void onPay()}
@@ -360,35 +334,27 @@ function NextPayment({
           ) : null}
         </View>
       ) : null}
-    </>
-  );
-}
-
-/** One block per installment in the period, filled ink once it is paid. */
-function Blocks({ items }: { items: Installment[] }) {
-  return (
-    <View style={styles.blocks}>
-      {items.map((i) => (
-        <View
-          key={i.id}
-          style={[
-            styles.block,
-            { backgroundColor: i.status === 'PAID' ? colors.ink : colors.white },
-          ]}
-        />
-      ))}
     </View>
   );
 }
 
+/** "1st half" and "2nd half" for two installments, "Payment 1 of 4" otherwise. */
+function installmentLabel(sequence: number, count: number): string {
+  if (count === 1) return 'Full amount';
+  if (count === 2) return sequence === 1 ? '1st half' : '2nd half';
+  return `Payment ${sequence} of ${count}`;
+}
+
 function payoutLine(
   payout: { status: string; scheduledFor: string; paidAt: string | null } | null | undefined,
+  lease: Lease | undefined,
   dueDay: number,
 ): string {
-  if (!payout) return `Landlord paid in full on the ${ordinal(dueDay)}`;
+  const landlord = lease?.landlordName ?? 'your landlord';
+  if (!payout) return `Paid in full to ${landlord} on the ${ordinal(dueDay)}`;
   if (payout.status === 'PAID')
-    return `Landlord paid in full on ${formatDate((payout.paidAt ?? payout.scheduledFor).slice(0, 10))}`;
-  return `Landlord gets paid in full on ${formatDate(payout.scheduledFor)}`;
+    return `Paid in full to ${landlord} on ${formatDate((payout.paidAt ?? payout.scheduledFor).slice(0, 10))}`;
+  return `Goes to ${landlord} in full on ${formatDate(payout.scheduledFor)}`;
 }
 
 function nextPill(i: Installment): { label: string; tone: 'due' | 'late' | 'info' | 'paid' } {
@@ -418,39 +384,14 @@ function weekday(iso: string): string {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.md, gap: spacing.md, paddingBottom: spacing.xxl },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.xs,
-  },
+  topBar: { paddingVertical: spacing.xs },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  heroBody: { gap: 6 },
-  heroCount: { fontFamily: fonts.bold, fontSize: 13, lineHeight: 18, color: colors.ink },
-  blocks: { flexDirection: 'row', gap: 6, marginTop: 6 },
-  block: {
-    flex: 1,
-    height: 16,
-    borderWidth: border.thin,
-    borderColor: colors.ink,
-    borderRadius: 4,
-  },
   rowBetween: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: spacing.sm,
   },
-  tiles: { flexDirection: 'row', gap: spacing.md },
-  tile: {
-    flex: 1,
-    minWidth: 0,
-    padding: 14,
-    gap: 4,
-    backgroundColor: colors.white,
-    borderWidth: border.width,
-    borderColor: colors.ink,
-    borderRadius: 12,
-  },
-  tileValue: { fontSize: 22, lineHeight: 26 },
+  installment: { paddingVertical: spacing.smd, gap: spacing.sm },
+  divider: { borderBottomWidth: border.thin, borderBottomColor: colors.ink },
 });

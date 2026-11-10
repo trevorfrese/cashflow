@@ -73,6 +73,16 @@ export const RentPlanDetail = RentPlan.extend({
 });
 export type RentPlanDetail = z.infer<typeof RentPlanDetail>;
 
+/**
+ * Settings the owner can change on a running plan. A new cadence applies to periods generated
+ * after the change; a paused plan skips landlord payouts and collections until it is resumed.
+ */
+export const UpdateRentPlanRequest = z.object({
+  installmentsPerMonth: z.number().int().min(1).max(4).optional(),
+  status: z.enum(['ACTIVE', 'PAUSED']).optional(),
+});
+export type UpdateRentPlanRequest = z.infer<typeof UpdateRentPlanRequest>;
+
 export const PayInstallmentRequest = z.object({
   installmentId: Id,
 });

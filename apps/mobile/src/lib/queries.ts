@@ -16,6 +16,7 @@ import type {
   CreateLeaseRequest,
   CreateRentPlanRequest,
   PayInstallmentRequest,
+  UpdateRentPlanRequest,
 } from '@cashflow/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -143,6 +144,18 @@ export function useCreateRentPlan() {
       void qc.invalidateQueries({ queryKey: keys.rentPlans(plan.businessId) });
       void qc.invalidateQueries({ queryKey: keys.leases(plan.businessId) });
       void qc.invalidateQueries({ queryKey: keys.businesses });
+    },
+  });
+}
+
+export function useUpdateRentPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ planId, ...body }: UpdateRentPlanRequest & { planId: string }) =>
+      api(`/rent-plans/${planId}`, { method: 'PATCH', body, schema: RentPlan }),
+    onSuccess: (plan) => {
+      void qc.invalidateQueries({ queryKey: keys.rentPlans(plan.businessId) });
+      void qc.invalidateQueries({ queryKey: keys.plan(plan.id) });
     },
   });
 }

@@ -15,6 +15,7 @@ export type IconName =
   | 'settings'
   | 'clock'
   | 'chevron-down'
+  | 'chevron-right'
   | 'search';
 
 /** Stroke icons drawn to match the 3px ink lines of the design system. */
@@ -77,6 +78,7 @@ export function Icon({
         </>
       ) : null}
       {name === 'chevron-down' ? <Path d="M6 9l6 6 6-6" {...common} /> : null}
+      {name === 'chevron-right' ? <Path d="M9 6l6 6-6 6" {...common} /> : null}
       {name === 'search' ? (
         <>
           <Circle cx="11" cy="11" r="7" {...common} />

@@ -51,6 +51,9 @@ export default function RootLayout() {
                 <Stack.Screen name="application/[id]" />
                 <Stack.Screen name="lease/new" />
                 <Stack.Screen name="plan/new" />
+                <Stack.Screen name="settings/rent" />
+                <Stack.Screen name="settings/businesses" />
+                <Stack.Screen name="settings/banks" />
               </Stack>
             </PhoneFrame>
           </BusinessProvider>

@@ -31,6 +31,7 @@ Sign in with the demo account (`demo@cashflow.local` / `demo-password-123`) or t
 app/                 Expo Router routes
   (auth)/            sign-in, register
   (tabs)/            home, history, settings
+  settings/          rent (cadence, pause), businesses, bank accounts
   business/new       business profile
   bank/connect       sandbox bank picker (Plaid Link in production)
   application/new    underwriting application

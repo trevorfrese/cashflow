@@ -57,8 +57,8 @@ export default function Home() {
       >
         <View style={styles.topBar}>
           <View style={styles.brand}>
-            <CoinMark size={34} />
-            <Text variant="heading">CashFlow</Text>
+            <CoinMark size={40} />
+            <Text variant="display">CashFlow</Text>
           </View>
         </View>
 
@@ -384,8 +384,8 @@ function weekday(iso: string): string {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.md, gap: spacing.md, paddingBottom: spacing.xxl },
-  topBar: { paddingVertical: spacing.xs },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  topBar: { marginBottom: spacing.xs },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   rowBetween: {
     flexDirection: 'row',
     justifyContent: 'space-between',

@@ -9,7 +9,7 @@ There is no real capital behind this repo. Everything that touches money or risk
 ```
 apps/web          Next.js one page marketing site for splitmylease.com (Vercel)
 apps/mobile       Expo app: auth, onboarding, underwriting, lease linking, rent plan
-apps/api          Fastify API: Prisma + Postgres, Zod, provider interfaces, scheduled jobs
+apps/api          Fastify API: Prisma + Postgres, Zod, provider interfaces, underwriting engine, scheduled jobs
 packages/shared   Zod schemas, enums, types, brand tokens, pure installment math
 docker/           Postgres init SQL for docker compose
 scripts/          Repo-level scripts (em dash check)
@@ -24,7 +24,7 @@ Package names are scoped: `@cashflow/shared`, `@cashflow/api`, `@cashflow/web`, 
 - TypeScript strict everywhere, extending `tsconfig.base.json`.
 - ESLint flat config and Prettier at the root. Packages run `eslint .` and pick up the root config.
 - Vitest for all tests.
-- `@cashflow/shared` exports TypeScript source directly. Consumers compile it: tsx for the API in dev, tsup for the API build, Next `transpilePackages`, and Metro for Expo.
+- `@cashflow/shared` exports TypeScript source directly. Consumers compile it: tsx for the API (dev and Docker), Next `transpilePackages`, and Metro for Expo.
 
 ## Commands
 
@@ -45,7 +45,9 @@ pnpm db:reset                # drop volume, recreate, migrate, seed
 pnpm check:copy              # fail on any em dash in tracked files
 ```
 
-Per package: `pnpm --filter @cashflow/api dev`, `pnpm --filter @cashflow/shared test`, and so on. API specific commands (`db:migrate`, `db:seed`, `job:run`) are documented in `apps/api/README.md`.
+Per package: `pnpm --filter @cashflow/api dev`, `pnpm --filter @cashflow/shared test`, and so on. API specific commands (`db:migrate`, `db:seed`, `job:run`) are documented in `apps/api/README.md`. Mobile specifics (sandbox bank scenarios, `EXPO_PUBLIC_API_URL`) are in `apps/mobile/README.md`.
+
+Docs to read before changing behavior: `ARCHITECTURE.md` (providers, ledger, payment lifecycle) and `apps/api/UNDERWRITING.md` (the cash flow underwriting model).
 
 ## Conventions
 

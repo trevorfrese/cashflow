@@ -31,7 +31,7 @@ In the live product, landlord payouts are funded from a dedicated capital pool, 
 
 - **Short duration.** Each advance is outstanding for two to four weeks. Capital turns over roughly twice a month, so a modest pool supports a large volume of rent.
 - **Small, predictable fee per turn.** A fee of a few percent of rent per month compounds into a strong annualized return for the pool while still being far cheaper than the alternatives for the business.
-- **Underwriting on real bank data.** Decisions use connected bank balances and cash flow, not just stated revenue, and limits are set relative to verified monthly deposits.
+- **Underwriting on real bank data.** Decisions come from twelve months of bank transactions, not a credit score: verified revenue, cash buffer, overdrafts, existing debt, and how comfortably rent fits inside free cash flow. Limits are set so repayments stay covered with a margin of safety. The engine is open and explained in [`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md).
 - **Collections aligned to deposits.** Installments are drawn from the same operating account that receives the business's revenue, shortly after it arrives.
 
 In this repository, that capital pool is a mock: a database-backed fund that fronts payouts and is replenished by installment collections, with every movement recorded in a double-entry ledger. The `CapitalProvider` interface marks the exact seam where a real facility, fund, or balance sheet would connect. The same is true for bank data (Plaid-shaped) and payment rails (Stripe-shaped). Swapping a provider is a configuration change, not a rewrite.
@@ -55,7 +55,7 @@ pnpm dev        # API on :4000, marketing site on :3000
 pnpm dev:mobile # Expo dev server, in a second terminal
 ```
 
-Sign in to the mobile app with the seeded demo account to walk through an approved business with a live rent plan and payment history.
+Sign in to the mobile app with the seeded demo account (`demo@cashflow.local` / `demo-password-123`) to see three businesses at three stages: an approved bakery with a live rent plan and payment history, a barbershop that was declined for overdrafts, and a yoga studio that still needs to connect a bank. Or create your own account and pick what kind of bank history the sandbox bank should return to see every underwriting outcome.
 
 ## Repository tour
 
@@ -64,7 +64,7 @@ Sign in to the mobile app with the seeded demo account to walk through an approv
 - `apps/web` is the one page marketing site at splitmylease.com.
 - `packages/shared` holds the schemas and installment math shared across all three.
 
-`ARCHITECTURE.md` explains the provider interfaces, the ledger, and the rent payment lifecycle in detail. `CLAUDE.md` covers repo conventions and commands for contributors.
+[`ARCHITECTURE.md`](ARCHITECTURE.md) explains the provider interfaces, the ledger, and the rent payment lifecycle in detail. [`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md) documents the cash flow underwriting model. [`CLAUDE.md`](CLAUDE.md) covers repo conventions and commands for contributors.
 
 ## Contributing
 

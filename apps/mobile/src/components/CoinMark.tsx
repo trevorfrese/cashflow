@@ -1,7 +1,12 @@
 import Svg, { Circle, ClipPath, Defs, G, LinearGradient, Path, Stop } from 'react-native-svg';
 
-const SYMBOL = 'M117.92 83.29 A26 26 0 1 0 117.92 116.71';
-const BAR = 'M100 55.5 V81.5 M100 118.5 V144.5';
+/** The cents symbol: an open C plus a vertical bar, offset by (dx, dy) for the bevel layers. */
+function symbol(dx: number, dy: number): string {
+  return `M${117.92 + dx} ${83.29 + dy} A26 26 0 1 0 ${117.92 + dx} ${116.71 + dy}`;
+}
+function bar(dx: number, dy: number): string {
+  return `M${100 + dx} ${55.5 + dy} V${81.5 + dy} M${100 + dx} ${118.5 + dy} V${144.5 + dy}`;
+}
 
 /** The CashFlow coin from the brand canvas: flat gold coin with a cents symbol. */
 export function CoinMark({ size = 64 }: { size?: number }) {
@@ -36,17 +41,17 @@ export function CoinMark({ size = 64 }: { size?: number }) {
         <Circle cx="103" cy="104" r="60" fill="#F4B323" />
       </G>
       <Circle cx="100" cy="100" r="60.5" fill="none" stroke="url(#coinRing)" strokeWidth="2.5" />
-      <G fill="none" strokeWidth="15" stroke="#FFF6C4" transform="translate(1.5 2)">
-        <Path d={SYMBOL} />
-        <Path d={BAR} />
+      <G fill="none" strokeWidth="15" stroke="#FFF6C4">
+        <Path d={symbol(1.5, 2)} />
+        <Path d={bar(1.5, 2)} />
       </G>
-      <G fill="none" strokeWidth="15" stroke="#A86E00" transform="translate(-1.2 -1.5)">
-        <Path d={SYMBOL} />
-        <Path d={BAR} />
+      <G fill="none" strokeWidth="15" stroke="#A86E00">
+        <Path d={symbol(-1.2, -1.5)} />
+        <Path d={bar(-1.2, -1.5)} />
       </G>
       <G fill="none" strokeWidth="15" stroke="url(#coinSym)">
-        <Path d={SYMBOL} />
-        <Path d={BAR} />
+        <Path d={symbol(0, 0)} />
+        <Path d={bar(0, 0)} />
       </G>
     </Svg>
   );

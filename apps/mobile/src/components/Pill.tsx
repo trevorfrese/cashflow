@@ -38,6 +38,7 @@ export function statusPill(status: string): { label: string; tone: PillTone } {
   switch (status) {
     case 'PAID':
     case 'SUCCEEDED':
+      return { label: 'Paid', tone: 'paid' };
     case 'APPROVED':
     case 'ACTIVE':
     case 'LINKED':

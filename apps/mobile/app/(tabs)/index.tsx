@@ -1,6 +1,7 @@
 import type { Installment, Lease } from '@cashflow/shared';
 import { formatBps, formatCents } from '@cashflow/shared';
 import { router } from 'expo-router';
+import { useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -24,6 +25,7 @@ import {
   useApplications,
   useInstallments,
   useLeases,
+  usePayInstallment,
   useRentPlan,
   useRentPlans,
 } from '@/lib/queries';
@@ -262,17 +264,11 @@ function PlanSummary({ planId, lease }: { planId: string; lease: Lease | undefin
 
       <Card>
         {next ? (
-          <View style={styles.rowBetween}>
-            <View style={{ gap: 2 }}>
-              <Text variant="number" numberOfLines={1} adjustsFontSizeToFit>
-                {formatCents(next.totalCents)}
-              </Text>
-              <Text variant="caption" tone="muted">
-                Due {formatDate(next.dueDate)} · from your bank
-              </Text>
-            </View>
-            <Pill {...nextPill(next)} />
-          </View>
+          <NextPayment
+            installment={next}
+            planId={planId}
+            payable={periodPayout?.status === 'PAID'}
+          />
         ) : (
           <Text variant="body" tone="muted">
             Nothing due right now.
@@ -305,7 +301,70 @@ function PlanSummary({ planId, lease }: { planId: string; lease: Lease | undefin
   );
 }
 
-/** One block per installment in the period, filled gold once it is paid. */
+/** The next installment with a Pay now button once CashFlow has paid the landlord. */
+function NextPayment({
+  installment: i,
+  planId,
+  payable,
+}: {
+  installment: Installment;
+  planId: string;
+  payable: boolean;
+}) {
+  const pay = usePayInstallment(planId);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canPay =
+    payable && (i.status === 'SCHEDULED' || i.status === 'FAILED' || i.status === 'LATE');
+
+  const onPay = async () => {
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    setError(null);
+    try {
+      await pay.mutateAsync({ installmentId: i.id });
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <>
+      <View style={styles.rowBetween}>
+        <View style={{ gap: 2, flex: 1, minWidth: 0 }}>
+          <Text variant="number" numberOfLines={1} adjustsFontSizeToFit>
+            {formatCents(i.totalCents)}
+          </Text>
+          <Text variant="caption" tone="muted">
+            Due {formatDate(i.dueDate)} · from your bank
+          </Text>
+        </View>
+        <Pill {...nextPill(i)} />
+      </View>
+      {error ? <Notice tone="danger" message={error} /> : null}
+      {canPay ? (
+        <View style={{ gap: spacing.sm, marginTop: spacing.xs }}>
+          <Button
+            title={confirming ? `Confirm ${formatCents(i.totalCents)}` : 'Pay now'}
+            variant={confirming ? 'primary' : 'secondary'}
+            size="sm"
+            onPress={() => void onPay()}
+            loading={pay.isPending}
+          />
+          {confirming ? (
+            <Button title="Cancel" variant="text" size="sm" onPress={() => setConfirming(false)} />
+          ) : null}
+        </View>
+      ) : null}
+    </>
+  );
+}
+
+/** One block per installment in the period, filled ink once it is paid. */
 function Blocks({ items }: { items: Installment[] }) {
   return (
     <View style={styles.blocks}>

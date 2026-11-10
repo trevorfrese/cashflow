@@ -2,7 +2,7 @@
 
 The CashFlow app for business owners, built with Expo and Expo Router. Sign in, set up a
 business, connect a bank account, get an instant cash flow based underwriting decision,
-link a lease, and manage the rent plan: upcoming installments, payment history, pay now.
+link a lease, and manage the rent plan: next payment, pay now, payment history.
 
 Everything runs against the local API in sandbox mode.
 
@@ -30,7 +30,7 @@ Sign in with the demo account (`demo@cashflow.local` / `demo-password-123`) or t
 ```
 app/                 Expo Router routes
   (auth)/            sign-in, register
-  (tabs)/            home, schedule, history, settings
+  (tabs)/            home, history, settings
   business/new       business profile
   bank/connect       sandbox bank picker (Plaid Link in production)
   application/new    underwriting application

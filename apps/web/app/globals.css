@@ -108,7 +108,7 @@ a:hover {
   font-size: clamp(52px, 10vw, 120px);
   line-height: 0.95;
   letter-spacing: -0.025em;
-  color: var(--azure);
+  color: var(--ink);
 }
 
 .tagline {

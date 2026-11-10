@@ -1,6 +1,6 @@
 /**
- * CashFlow brand tokens, taken from the brand canvas.
- * Gold carries the brand. Charcoal, Forest, or Plum as dark backgrounds.
+ * CashFlow brand tokens, taken from the final board of the brand canvas.
+ * Gold carries the brand on Paper. Azure is the accent for actions and the app icon.
  */
 export const brand = {
   name: 'CashFlow',
@@ -8,14 +8,14 @@ export const brand = {
   github: 'https://github.com/trevorfrese/cashflow',
   colors: {
     // Coin golds
-    highlight: '#FCE7A2',
-    gold: '#D8AA36',
-    deepGold: '#9C7012',
-    bronze: '#5E440A',
-    // Dark backgrounds
-    charcoal: '#2A2620',
-    forest: '#0E241B',
-    plum: '#24142F',
+    brightGold: '#FFD43B',
+    gold: '#F4B323',
+    deepGold: '#DE9810',
+    bronze: '#A86E00',
+    cream: '#FFF9D6',
+    // Accent
+    azure: '#0A7CFF',
+    azureDeep: '#0866D6',
     // Neutrals
     ink: '#14120E',
     slate: '#6B655A',

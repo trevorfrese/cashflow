@@ -2,13 +2,14 @@
   --paper: #faf8f3;
   --stone: #efede8;
   --ink: #14120e;
-  --charcoal: #2a2620;
   --slate: #6b655a;
-  --muted: #cfc8b9;
-  --gold: #d8aa36;
-  --highlight: #fce7a2;
-  --deep-gold: #9c7012;
-  --bronze: #5e440a;
+  --bright-gold: #ffd43b;
+  --gold: #f4b323;
+  --deep-gold: #de9810;
+  --bronze: #a86e00;
+  --azure: #0a7cff;
+  --azure-deep: #0866d6;
+  --muted: #b8b1a3;
   --border: rgba(250, 248, 243, 0.14);
 }
 
@@ -24,7 +25,7 @@ body {
 }
 
 body {
-  background: var(--charcoal);
+  background: var(--ink);
   color: var(--paper);
   font-family: var(--font-body), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -32,7 +33,7 @@ body {
 }
 
 a {
-  color: var(--highlight);
+  color: var(--bright-gold);
 }
 
 a:hover {
@@ -100,7 +101,7 @@ a:hover {
 .lockup svg {
   width: clamp(72px, 11vw, 150px);
   height: auto;
-  filter: drop-shadow(0 24px 40px rgba(0, 0, 0, 0.35));
+  filter: drop-shadow(0 24px 44px rgba(0, 0, 0, 0.5));
 }
 
 .wordmark {
@@ -111,7 +112,7 @@ a:hover {
   font-weight: 800;
   font-size: clamp(52px, 10vw, 120px);
   line-height: 0.95;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
   color: var(--paper);
 }
 
@@ -150,13 +151,14 @@ a:hover {
 }
 
 .button-primary {
-  background: var(--gold);
-  color: var(--ink);
+  background: var(--azure);
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(10, 124, 255, 0.35);
 }
 
 .button-primary:hover {
-  background: var(--highlight);
-  color: var(--ink);
+  background: var(--azure-deep);
+  color: #fff;
 }
 
 .button-secondary {
@@ -192,112 +194,86 @@ a:hover {
   z-index: 1;
 }
 
-.bg-grid {
+/* Mesh gradient: four big blurred color fields that drift past each other. */
+.bg-mesh {
   position: absolute;
-  inset: 0;
-  background-image: radial-gradient(rgba(250, 248, 243, 0.07) 1px, transparent 1.2px);
-  background-size: 28px 28px;
-  mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, #000 30%, transparent 100%);
-  -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, #000 30%, transparent 100%);
+  border-radius: 50%;
+  filter: blur(80px);
+  will-change: transform;
 }
 
-.bg-glow {
-  position: absolute;
+.bg-mesh-a {
+  width: 70vmax;
+  height: 70vmax;
+  top: -30vmax;
+  left: -20vmax;
+  background: radial-gradient(circle, rgba(255, 212, 59, 0.32) 0%, rgba(255, 212, 59, 0) 65%);
+  animation: mesh-a 40s ease-in-out infinite alternate;
+}
+
+.bg-mesh-b {
   width: 60vmax;
   height: 60vmax;
-  border-radius: 50%;
-  filter: blur(70px);
-  opacity: 0.22;
-  will-change: transform;
-}
-
-.bg-glow-a {
-  top: -20vmax;
-  left: -15vmax;
-  background: radial-gradient(circle at 50% 50%, #d8aa36 0%, rgba(216, 170, 54, 0) 65%);
-  animation: drift-a 38s ease-in-out infinite alternate;
-}
-
-.bg-glow-b {
-  bottom: -25vmax;
+  bottom: -30vmax;
   right: -15vmax;
-  background: radial-gradient(circle at 50% 50%, #9c7012 0%, rgba(156, 112, 18, 0) 65%);
-  animation: drift-b 46s ease-in-out infinite alternate;
+  background: radial-gradient(circle, rgba(222, 152, 16, 0.38) 0%, rgba(222, 152, 16, 0) 65%);
+  animation: mesh-b 48s ease-in-out infinite alternate;
 }
 
-@keyframes drift-a {
-  from {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
+.bg-mesh-c {
+  width: 50vmax;
+  height: 50vmax;
+  top: 30%;
+  right: -20vmax;
+  background: radial-gradient(circle, rgba(10, 124, 255, 0.3) 0%, rgba(10, 124, 255, 0) 65%);
+  animation: mesh-c 56s ease-in-out infinite alternate;
+}
+
+.bg-mesh-d {
+  width: 45vmax;
+  height: 45vmax;
+  bottom: -10vmax;
+  left: 20%;
+  background: radial-gradient(circle, rgba(168, 110, 0, 0.35) 0%, rgba(168, 110, 0, 0) 65%);
+  animation: mesh-d 44s ease-in-out infinite alternate;
+}
+
+@keyframes mesh-a {
   to {
-    transform: translate3d(18vmax, 10vmax, 0) scale(1.15);
+    transform: translate3d(22vmax, 14vmax, 0) scale(1.15);
   }
 }
 
-@keyframes drift-b {
-  from {
-    transform: translate3d(0, 0, 0) scale(1.1);
-  }
+@keyframes mesh-b {
   to {
-    transform: translate3d(-16vmax, -12vmax, 0) scale(0.95);
+    transform: translate3d(-18vmax, -16vmax, 0) scale(0.9);
   }
 }
 
-.bg-ribbons {
+@keyframes mesh-c {
+  to {
+    transform: translate3d(-24vmax, -10vmax, 0) scale(1.2);
+  }
+}
+
+@keyframes mesh-d {
+  to {
+    transform: translate3d(16vmax, -12vmax, 0) scale(1.1);
+  }
+}
+
+/* Fine grain so the gradients read as print, not plastic. */
+.bg-grain {
   position: absolute;
   inset: 0;
-  transform: rotate(-4deg) scale(1.15);
-  transform-origin: 50% 60%;
-}
-
-.bg-ribbon {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 200%;
+  width: 100%;
   height: 100%;
-  overflow: visible;
-  will-change: transform;
-}
-
-.bg-ribbon-a {
-  color: rgba(216, 170, 54, 0.26);
-  animation: flow 46s linear infinite;
-}
-
-.bg-ribbon-b {
-  color: rgba(252, 231, 162, 0.16);
-  animation: flow 64s linear infinite reverse;
-}
-
-.bg-ribbon-c {
-  color: rgba(156, 112, 18, 0.3);
-  animation: flow 38s linear infinite;
-}
-
-
-.bg-ribbon-d {
-  color: rgba(216, 170, 54, 0.12);
-  animation: flow 80s linear infinite reverse;
-}
-
-.bg-ribbon-e {
-  color: rgba(252, 231, 162, 0.1);
-  animation: flow 72s linear infinite;
-}
-
-@keyframes flow {
-  from {
-    transform: translate3d(0, 0, 0);
-  }
-  to {
-    transform: translate3d(-50%, 0, 0);
-  }
+  opacity: 0.12;
+  mix-blend-mode: screen;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bg-glow,
-  .bg-ribbon {
+  .bg-mesh {
     animation: none;
   }
 }

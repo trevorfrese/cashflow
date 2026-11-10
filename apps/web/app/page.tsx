@@ -27,7 +27,7 @@ export default function Home() {
 
       <section className="hero">
         <div className="lockup">
-          <CoinMark size={200} title="CashFlow gold coin with an engraved C" />
+          <CoinMark size={200} title="CashFlow gold coin with a cents symbol" />
           <h1 className="wordmark">CashFlow</h1>
         </div>
         <p className="tagline">

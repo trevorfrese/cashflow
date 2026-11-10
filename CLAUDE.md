@@ -72,7 +72,7 @@ Per package: `pnpm --filter @cashflow/api dev`, `pnpm --filter @cashflow/shared 
 
 ## Brand
 
-Design tokens live in `packages/shared/src/brand.ts` and come from the CashFlow brand canvas. Primary is Coin Gold `#D8AA36` on Paper `#FAF8F3` or Charcoal `#2A2620`. The mark is a gold coin with an engraved C. The wordmark is Archivo at 125% width, weight 800. Product state colors: Paid green, Due soon amber, Late red. Use the tokens, not ad hoc hex values.
+Design tokens live in `packages/shared/src/brand.ts` and come from the final board of the CashFlow brand canvas. Coin Gold `#F4B323` and Bright Gold `#FFD43B` carry the brand on Paper `#FAF8F3` with Ink `#14120E` text. Azure `#0A7CFF` is the accent for primary actions and the app icon. The mark is a flat gold coin with a cents symbol. The wordmark is Archivo at 125% width, weight 800. Product state colors: Paid green, Due soon amber, Late red. Use the tokens, not ad hoc hex values.
 
 ## Working with the owner
 

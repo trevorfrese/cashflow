@@ -1,8 +1,12 @@
+import { useId } from 'react';
+
 /**
- * The CashFlow coin: a face-on gold coin with a beveled rim, reeded edge, and an engraved C.
- * Taken from the brand canvas (logo v1). Pure SVG, scales to any size.
+ * The CashFlow coin: a flat gold coin with a shaded inner field and a cents symbol.
+ * Taken from the final board of the brand canvas. Pure SVG, scales to any size.
+ * Gradient and clip ids are made unique per instance so many coins can share a page.
  */
-const TICKS = 44;
+const SYMBOL = 'M117.92 83.29 A26 26 0 1 0 117.92 116.71';
+const BAR = 'M100 55.5 V81.5 M100 118.5 V144.5';
 
 export function CoinMark({
   size = 160,
@@ -13,7 +17,10 @@ export function CoinMark({
   title?: string;
   decorative?: boolean;
 }) {
-  const ticks = Array.from({ length: TICKS }, (_, i) => (360 / TICKS) * i);
+  const id = useId().replace(/:/g, '');
+  const clip = `${id}-clip`;
+  const ring = `${id}-ring`;
+  const sym = `${id}-sym`;
   const a11y = decorative
     ? { 'aria-hidden': true as const }
     : { role: 'img' as const, 'aria-label': title };
@@ -21,53 +28,39 @@ export function CoinMark({
   return (
     <svg width={size} height={size} viewBox="0 0 200 200" {...a11y}>
       <defs>
-        <radialGradient id="cfFace" cx="0.38" cy="0.32" r="0.8">
-          <stop offset="0" stopColor="#FCE7A2" />
-          <stop offset="0.55" stopColor="#D8AA36" />
-          <stop offset="1" stopColor="#9C7012" />
-        </radialGradient>
-        <linearGradient id="cfRim" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#FFF3C8" />
-          <stop offset="0.5" stopColor="#C99A2A" />
-          <stop offset="1" stopColor="#6E500C" />
+        <clipPath id={clip}>
+          <circle cx="100" cy="100" r="60" />
+        </clipPath>
+        <linearGradient id={ring} x1="1" y1="1" x2="0" y2="0">
+          <stop offset="0" stopColor="#FFFBD6" />
+          <stop offset="0.5" stopColor="#F5B800" />
+          <stop offset="1" stopColor="#8F5E00" />
         </linearGradient>
-        <linearGradient id="cfRimIn" x1="1" y1="1" x2="0" y2="0">
-          <stop offset="0" stopColor="#FFF3C8" />
-          <stop offset="0.5" stopColor="#C99A2A" />
-          <stop offset="1" stopColor="#6E500C" />
-        </linearGradient>
-        <linearGradient id="cfField" x1="1" y1="1" x2="0" y2="0">
-          <stop offset="0" stopColor="#EBC660" />
-          <stop offset="1" stopColor="#BE901F" />
+        <linearGradient id={sym} gradientUnits="userSpaceOnUse" x1="62" y1="62" x2="138" y2="138">
+          <stop offset="0" stopColor="#FFFCE6" />
+          <stop offset="0.25" stopColor="#FFEC8C" />
+          <stop offset="1" stopColor="#FFD43B" />
         </linearGradient>
       </defs>
-      <circle cx="100" cy="100" r="82" fill="url(#cfFace)" />
-      <circle cx="100" cy="100" r="79" fill="none" stroke="url(#cfRim)" strokeWidth="5" />
-      <g
-        transform="translate(4 0)"
-        stroke="#7A5A0E"
-        strokeOpacity="0.7"
-        strokeWidth="2.4"
-        strokeLinecap="round"
-      >
-        {ticks.map((deg) => (
-          <line key={deg} x1="96" y1="28" x2="96" y2="34" transform={`rotate(${deg} 96 100)`} />
-        ))}
+      <circle cx="100" cy="100" r="82" fill="#FFD43B" />
+      <circle cx="100" cy="100" r="60" fill="#F4B323" />
+      <g clipPath={`url(#${clip})`}>
+        <circle cx="100" cy="100" r="60" fill="#DE9810" />
+        <circle cx="103" cy="104" r="60" fill="#F4B323" />
       </g>
-      <circle cx="100" cy="100" r="58" fill="url(#cfField)" />
-      <circle cx="100" cy="100" r="58" fill="none" stroke="url(#cfRimIn)" strokeWidth="2.5" />
-      <path
-        d="M120.92 84.29 A26 26 0 1 0 120.92 117.71"
-        fill="none"
-        stroke="#FCE7A2"
-        strokeWidth="15"
-      />
-      <path
-        d="M119.92 83.29 A26 26 0 1 0 119.92 116.71"
-        fill="none"
-        stroke="#5E440A"
-        strokeWidth="15"
-      />
+      <circle cx="100" cy="100" r="60.5" fill="none" stroke={`url(#${ring})`} strokeWidth="2.5" />
+      <g fill="none" strokeWidth="15" stroke="#FFF6C4" transform="translate(1.5 2)">
+        <path d={SYMBOL} />
+        <path d={BAR} />
+      </g>
+      <g fill="none" strokeWidth="15" stroke="#A86E00" transform="translate(-1.2 -1.5)">
+        <path d={SYMBOL} />
+        <path d={BAR} />
+      </g>
+      <g fill="none" strokeWidth="15" stroke={`url(#${sym})`}>
+        <path d={SYMBOL} />
+        <path d={BAR} />
+      </g>
     </svg>
   );
 }

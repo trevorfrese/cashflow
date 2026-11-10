@@ -1,74 +1,64 @@
 # CashFlow
 
-**Buy now, pay later for small business rent.** CashFlow pays a small business's landlord the full rent on the due date, and the business pays it back in two smaller installments over the month.
+Buy now, pay later for small business rent. CashFlow pays the landlord in full on the due date and the business repays in two installments, on the 1st and the 15th, plus a flat fee.
 
-CashFlow was a startup. I am winding it down and releasing the complete product in public: the mobile app, the API, the underwriting and ledger logic, and the marketing site, all MIT licensed and runnable on a laptop. The repo is a reference for anyone who wants to build embedded finance for small businesses, or who is curious how a rent financing product actually works end to end.
+This was a startup. It wound down, and the whole product is released here as a reference implementation: Expo app, Fastify API, underwriting engine, double entry ledger, scheduled jobs, and the marketing site. MIT licensed.
 
-No real money moves in this code. Every component that touches funds or risk runs against a mock provider by default. Read on for how a real capital source would plug in.
+No real money moves in this code. Every bank, payment, and capital integration is an interface with a mock implementation that is selected by default.
 
-## The problem
+## Stack
 
-Rent is the largest fixed cost for most small businesses, and it is due in one lump sum on the first of the month. Revenue does not arrive that way. A restaurant, a salon, a gym, or a retail shop earns money every day and pays its people every week or two. The result is a predictable squeeze at the start of each month: owners drain their operating account to make rent, then spend the next two weeks short on cash for inventory, payroll, and surprises.
+- pnpm workspaces, Turborepo, Node 22, TypeScript strict, ESLint, Prettier, Vitest
+- `apps/api`: Fastify 5, Prisma 7 on Postgres, Zod validated routes, OpenAPI at `/docs`, node-cron jobs
+- `apps/mobile`: Expo SDK 58, Expo Router, TanStack Query
+- `apps/web`: Next.js static export, one page
+- `packages/shared`: Zod schemas, enums, brand tokens, installment math
 
-The usual fixes are poor. Credit cards carry high rates and most landlords will not take them. Merchant cash advances are expensive and opaque. A bank line of credit takes months to open and is out of reach for most businesses under five years old. So owners pay late and eat the fee, borrow from friends, or simply keep less inventory than they should.
+## Run it
 
-Landlords feel this too. Late rent means collections calls, uncertainty about their own mortgage payment, and strained relationships with tenants they would rather keep.
-
-## What CashFlow does
-
-1. **A business applies in minutes** from the mobile app. It shares basic information, connects its bank account, and gets an underwriting decision in seconds, not weeks.
-2. **It links a lease**: landlord, rent amount, due date, and where the landlord gets paid.
-3. **On the due date, CashFlow pays the landlord in full.** The landlord sees a normal on-time payment. Nothing changes on their side.
-4. **The business repays in two installments** over the month, timed to when revenue actually comes in, plus a small flat fee per month.
-
-The business gets smoother cash flow and never pays a late fee. The landlord gets paid in full, on time, every month. CashFlow earns a transparent fee that is a fraction of what a card, an advance, or a late penalty would cost.
-
-## Where the money comes from
-
-Fronting rent for thousands of businesses takes capital, and this is the part of the business that matters most.
-
-In the live product, landlord payouts are funded from a dedicated capital pool, typically a credit facility from a specialty lender or a fund set up for this purpose. The economics are attractive for a capital partner:
-
-- **Short duration.** Each advance is outstanding for two to four weeks. Capital turns over roughly twice a month, so a modest pool supports a large volume of rent.
-- **Small, predictable fee per turn.** A fee of a few percent of rent per month compounds into a strong annualized return for the pool while still being far cheaper than the alternatives for the business.
-- **Underwriting on real bank data.** Decisions come from twelve months of bank transactions, not a credit score: verified revenue, cash buffer, overdrafts, existing debt, and how comfortably rent fits inside free cash flow. Limits are set so repayments stay covered with a margin of safety. The engine is open and explained in [`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md).
-- **Collections aligned to deposits.** Installments are drawn from the same operating account that receives the business's revenue, shortly after it arrives.
-
-In this repository, that capital pool is a mock: a database-backed fund that fronts payouts and is replenished by installment collections, with every movement recorded in a double-entry ledger. The `CapitalProvider` interface marks the exact seam where a real facility, fund, or balance sheet would connect. The same is true for bank data (Plaid-shaped) and payment rails (Stripe-shaped). Swapping a provider is a configuration change, not a rewrite.
-
-## Why open source
-
-Most fintech products are a black box. The interesting parts, underwriting rules, payment scheduling, ledgering, provider abstractions, are exactly the parts nobody shares. Releasing CashFlow whole is more useful than another blog post about lessons learned, and it gives the idea a chance to live on with someone who has the capital relationships to run it.
-
-If you fork it and take it to market, I would love to hear about it.
-
-## Try it locally
-
-You need Node 22, pnpm, and Docker.
+Requires Node 22, pnpm 10, and Docker.
 
 ```sh
 git clone https://github.com/trevorfrese/cashflow.git
 cd cashflow
 pnpm install
-pnpm setup      # starts Postgres, runs migrations, seeds demo data
-pnpm dev        # API on :4000, marketing site on :3000
-pnpm dev:mobile # Expo dev server, in a second terminal
+pnpm setup        # Postgres in Docker, migrate, seed
+pnpm dev          # API :4000, web :3000
+pnpm dev:mobile   # Expo dev server, second terminal
 ```
 
-Sign in to the mobile app with the seeded demo account (`demo@cashflow.local` / `demo-password-123`) to see three businesses at three stages: an approved bakery with a live rent plan and payment history, a barbershop that was declined for overdrafts, and a yoga studio that still needs to connect a bank. Or create your own account and pick what kind of bank history the sandbox bank should return to see every underwriting outcome.
+Sign in with the seeded demo account, `demo@cashflow.local` / `demo-password-123`. It owns three businesses: one with an active $10,000 rent plan and payment history, one declined for overdrafts, and one that still needs a bank. Or register and pick a sandbox bank scenario to walk through every underwriting outcome.
 
-## Repository tour
+Other commands: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm db:reset`, and `pnpm --filter @cashflow/api job:run --as-of YYYY-MM-DD` to run the payout and collection jobs for a given day.
 
-- `apps/mobile` is the Expo app a business owner uses.
-- `apps/api` is the Fastify service behind it, with the underwriting, scheduling, ledger, and provider code.
-- `apps/web` is the one page marketing site at splitmylease.com.
-- `packages/shared` holds the schemas and installment math shared across all three.
+## How it works
 
-[`ARCHITECTURE.md`](ARCHITECTURE.md) explains the provider interfaces, the ledger, and the rent payment lifecycle in detail. [`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md) documents the cash flow underwriting model. [`CLAUDE.md`](CLAUDE.md) covers repo conventions and commands for contributors.
+1. A business registers, connects a bank (mock), and submits an application.
+2. The underwriting engine scores twelve months of transactions and returns approved, declined, or needs info, with reasons and a rent limit. See [`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md).
+3. The business links a lease and starts a rent plan.
+4. `generate-periods` creates next month's landlord payout and installments 30 days ahead.
+5. `process-payouts` reserves capital and pays the landlord on the due date.
+6. `collect-installments` charges each installment on its date, retries failures, and marks late after three days.
 
-## Contributing
+Every money movement posts a balanced ledger transaction in the same database transaction as the status change. Balances are derived from entries, never stored. The jobs are idempotent.
 
-Issues and pull requests are welcome. Keep in mind the one hard rule: nothing in this repo may move real money by default.
+## Provider seams
+
+| Interface              | Env var                 | Default                           |
+| ---------------------- | ----------------------- | --------------------------------- |
+| `UnderwritingProvider` | `UNDERWRITING_PROVIDER` | `cashflow`, the in-house engine   |
+| `BankLinkProvider`     | `BANK_LINK_PROVIDER`    | `mock`, synthetic histories       |
+| `PaymentsProvider`     | `PAYMENTS_PROVIDER`     | `mock`, fails if token has `fail` |
+| `CapitalProvider`      | `CAPITAL_PROVIDER`      | `mock`, a pool in the ledger      |
+
+Each lives in `apps/api/src/providers/<name>/` with `types.ts`, the mock, and an `index.ts` factory. Plaid and Stripe shaped skeletons show where a real adapter goes; they refuse to run without configuration.
+
+## Docs
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md): providers, ledger, and the payment lifecycle
+- [`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md): the cash flow underwriting model
+- [`apps/api/README.md`](apps/api/README.md), [`apps/mobile/README.md`](apps/mobile/README.md), [`apps/web/README.md`](apps/web/README.md): per package notes
+- [`CLAUDE.md`](CLAUDE.md): conventions and commands
 
 ## License
 

@@ -8,3 +8,6 @@ pnpm-lock.yaml
 **/generated/**
 **/migrations/**
 apps/web/next-env.d.ts
+apps/mobile/dist
+.expo
+apps/mobile/expo-env.d.ts

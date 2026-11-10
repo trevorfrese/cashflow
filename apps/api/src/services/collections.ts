@@ -1,3 +1,4 @@
+import { effectiveAt } from '../dates.ts';
 import { addDays, type IsoDate } from '@cashflow/shared';
 
 import type { AppContext } from '../context.ts';
@@ -87,6 +88,7 @@ export async function collectInstallment(
         provider: providers.payments.name,
         providerRef: result.providerRef,
         status: 'SUCCEEDED',
+        createdAt: effectiveAt(asOf),
       },
     });
 
@@ -119,7 +121,7 @@ export async function collectInstallment(
 
     await tx.installment.update({
       where: { id: installment.id },
-      data: { status: 'PAID', paidAt: new Date() },
+      data: { status: 'PAID', paidAt: effectiveAt(asOf) },
     });
     ctx.log.info(
       { installmentId: installment.id, amountCents: installment.totalCents },

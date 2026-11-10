@@ -1,3 +1,4 @@
+import { effectiveAt } from '../dates.ts';
 import type { IsoDate } from '@cashflow/shared';
 
 import type { AppContext } from '../context.ts';
@@ -75,7 +76,7 @@ export async function processPayout(
       where: { id: payout.id },
       data: {
         status: 'PAID',
-        paidAt: new Date(),
+        paidAt: effectiveAt(asOf),
         providerRef: result.providerRef,
         failureReason: null,
       },

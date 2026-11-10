@@ -35,10 +35,11 @@ export const keys = {
   repayments: (planId: string) => ['rent-plans', planId, 'repayments'] as const,
 };
 
-export function useBusinesses() {
+export function useBusinesses(enabled = true) {
   return useQuery({
     queryKey: keys.businesses,
     queryFn: () => api('/businesses', { schema: z.array(Business) }),
+    enabled,
   });
 }
 
@@ -185,4 +186,29 @@ export function usePayInstallment(planId: string) {
       api('/repayments', { method: 'POST', body, schema: Installment }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['rent-plans', planId] }),
   });
+}
+
+/** Re-run underwriting on an application that needs info, optionally with a new bank link. */
+export function useResubmitApplication() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { applicationId: string; bankLinkId?: string }) =>
+      api(`/underwriting/applications/${input.applicationId}/submit`, {
+        method: 'POST',
+        body: input.bankLinkId ? { bankLinkId: input.bankLinkId } : undefined,
+        schema: UnderwritingApplication,
+      }),
+    onSuccess: (app) => {
+      void qc.invalidateQueries({ queryKey: keys.applications(app.businessId) });
+      void qc.invalidateQueries({ queryKey: keys.businesses });
+    },
+  });
+}
+
+export function useApplication(applicationId: string | undefined, businessId: string | undefined) {
+  const list = useApplications(businessId);
+  return {
+    ...list,
+    data: list.data?.find((a) => a.id === applicationId),
+  };
 }

@@ -1,21 +1,13 @@
 import type { Metadata } from 'next';
-import { Archivo, Inter_Tight } from 'next/font/google';
+import { Archivo } from 'next/font/google';
 
 import './globals.css';
-import { Background } from '@/components/Background';
 
-const wordmark = Archivo({
+const archivo = Archivo({
   subsets: ['latin'],
   weight: 'variable',
   axes: ['wdth'],
-  variable: '--font-wordmark',
-  display: 'swap',
-});
-
-const body = Inter_Tight({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  variable: '--font-body',
+  variable: '--font-archivo',
   display: 'swap',
 });
 
@@ -42,11 +34,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${wordmark.variable} ${body.variable}`}>
-      <body>
-        <Background />
-        {children}
-      </body>
+    <html lang="en" className={archivo.variable}>
+      <body>{children}</body>
     </html>
   );
 }

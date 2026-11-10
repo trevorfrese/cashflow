@@ -1,36 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
   <defs>
-    <clipPath id="clip"><circle cx="100" cy="100" r="60"/></clipPath>
-    <linearGradient id="ring" x1="1" y1="1" x2="0" y2="0">
-      <stop offset="0" stop-color="#FFFBD6"/>
-      <stop offset="0.5" stop-color="#F5B800"/>
-      <stop offset="1" stop-color="#8F5E00"/>
-    </linearGradient>
-    <linearGradient id="sym" gradientUnits="userSpaceOnUse" x1="62" y1="62" x2="138" y2="138">
-      <stop offset="0" stop-color="#FFFCE6"/>
-      <stop offset="0.25" stop-color="#FFEC8C"/>
-      <stop offset="1" stop-color="#FFD43B"/>
-    </linearGradient>
+    <mask id="cent" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
+      <g fill="none" stroke="#FFFFFF" stroke-width="14">
+        <path d="M117.92 83.29 A26 26 0 1 0 117.92 116.71"/>
+        <path d="M100 55.5 V81.5 M100 118.5 V144.5"/>
+      </g>
+    </mask>
   </defs>
-  <g transform="translate(100 100) scale(1.2195) translate(-100 -100)">
-    <circle cx="100" cy="100" r="82" fill="#FFD43B"/>
-    <circle cx="100" cy="100" r="60" fill="#F4B323"/>
-    <g clip-path="url(#clip)">
-      <circle cx="100" cy="100" r="60" fill="#DE9810"/>
-      <circle cx="103" cy="104" r="60" fill="#F4B323"/>
+  <g transform="translate(100 100) scale(1.05) translate(-105 -105)">
+    <circle cx="107" cy="107" r="82" fill="#15121C"/>
+    <circle cx="100" cy="100" r="82" fill="#FFD43B" stroke="#15121C" stroke-width="6"/>
+    <circle cx="100" cy="100" r="58" fill="#F4B323" stroke="#15121C" stroke-width="4"/>
+    <g fill="none" stroke="#15121C" stroke-width="22">
+      <path d="M120.24 86.53 A26 26 0 1 0 120.24 113.47"/>
+      <path d="M100 51.5 V81.5 M100 118.5 V148.5"/>
     </g>
-    <circle cx="100" cy="100" r="60.5" fill="none" stroke="url(#ring)" stroke-width="2.5"/>
-    <g fill="none" stroke-width="15" stroke="#FFF6C4" transform="translate(1.5 2)">
-      <path d="M117.92 83.29 A26 26 0 1 0 117.92 116.71"/>
-      <path d="M100 55.5 V81.5 M100 118.5 V144.5"/>
-    </g>
-    <g fill="none" stroke-width="15" stroke="#A86E00" transform="translate(-1.2 -1.5)">
-      <path d="M117.92 83.29 A26 26 0 1 0 117.92 116.71"/>
-      <path d="M100 55.5 V81.5 M100 118.5 V144.5"/>
-    </g>
-    <g fill="none" stroke-width="15" stroke="url(#sym)">
-      <path d="M117.92 83.29 A26 26 0 1 0 117.92 116.71"/>
-      <path d="M100 55.5 V81.5 M100 118.5 V144.5"/>
+    <g mask="url(#cent)">
+      <rect width="200" height="200" fill="#15121C"/>
+      <g fill="none" stroke="#FFD43B" stroke-width="14" transform="translate(1.5 1.5)">
+        <path d="M117.92 83.29 A26 26 0 1 0 117.92 116.71"/>
+        <path d="M100 55.5 V81.5 M100 118.5 V144.5"/>
+      </g>
     </g>
   </g>
 </svg>

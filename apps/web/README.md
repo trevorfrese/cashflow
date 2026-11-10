@@ -1,6 +1,6 @@
 # @cashflow/web
 
-The CashFlow marketing site at splitmylease.com. One full screen page that points to the open source project.
+The CashFlow marketing site at splitmylease.com. One page in the neo-brutalist design system (shared brand tokens, Archivo set wide, 3px ink borders, hard shadows) that explains the rent split and points to the open source project.
 
 ## Develop
 

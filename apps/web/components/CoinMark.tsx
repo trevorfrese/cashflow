@@ -1,13 +1,22 @@
 import { useId } from 'react';
 
-/**
- * The CashFlow coin: a flat gold coin with a shaded inner field and a cents symbol.
- * Taken from the final board of the brand canvas. Pure SVG, scales to any size.
- * Gradient and clip ids are made unique per instance so many coins can share a page.
- */
-const SYMBOL = 'M117.92 83.29 A26 26 0 1 0 117.92 116.71';
-const BAR = 'M100 55.5 V81.5 M100 118.5 V144.5';
+import { brand } from '@cashflow/shared';
 
+/** The cents symbol: an open C plus a vertical bar. */
+const CENT_ARC = 'M117.92 83.29 A26 26 0 1 0 117.92 116.71';
+const CENT_BAR = 'M100 55.5 V81.5 M100 118.5 V144.5';
+/** The same symbol grown outward, drawn underneath as the ink outline. */
+const CENT_ARC_OUT = 'M120.24 86.53 A26 26 0 1 0 120.24 113.47';
+const CENT_BAR_OUT = 'M100 51.5 V81.5 M100 118.5 V148.5';
+
+const { ink, brightGold, gold } = brand.colors;
+
+/**
+ * The CashFlow coin from the final board of the brand canvas: a flat two-gold coin with ink
+ * outlines, a hard ink drop shadow, and the cents symbol pressed into the face. The same
+ * drawing as the mobile app's CoinMark, in plain SVG. Ids are unique per instance so many
+ * coins can share a page.
+ */
 export function CoinMark({
   size = 160,
   title = 'CashFlow coin mark',
@@ -17,10 +26,7 @@ export function CoinMark({
   title?: string;
   decorative?: boolean;
 }) {
-  const id = useId().replace(/:/g, '');
-  const clip = `${id}-clip`;
-  const ring = `${id}-ring`;
-  const sym = `${id}-sym`;
+  const maskId = `coin-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   const a11y = decorative
     ? { 'aria-hidden': true as const }
     : { role: 'img' as const, 'aria-label': title };
@@ -28,38 +34,26 @@ export function CoinMark({
   return (
     <svg width={size} height={size} viewBox="0 0 200 200" {...a11y}>
       <defs>
-        <clipPath id={clip}>
-          <circle cx="100" cy="100" r="60" />
-        </clipPath>
-        <linearGradient id={ring} x1="1" y1="1" x2="0" y2="0">
-          <stop offset="0" stopColor="#FFFBD6" />
-          <stop offset="0.5" stopColor="#F5B800" />
-          <stop offset="1" stopColor="#8F5E00" />
-        </linearGradient>
-        <linearGradient id={sym} gradientUnits="userSpaceOnUse" x1="62" y1="62" x2="138" y2="138">
-          <stop offset="0" stopColor="#FFFCE6" />
-          <stop offset="0.25" stopColor="#FFEC8C" />
-          <stop offset="1" stopColor="#FFD43B" />
-        </linearGradient>
+        <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
+          <g fill="none" stroke="#FFFFFF" strokeWidth="14">
+            <path d={CENT_ARC} />
+            <path d={CENT_BAR} />
+          </g>
+        </mask>
       </defs>
-      <circle cx="100" cy="100" r="82" fill="#FFD43B" />
-      <circle cx="100" cy="100" r="60" fill="#F4B323" />
-      <g clipPath={`url(#${clip})`}>
-        <circle cx="100" cy="100" r="60" fill="#DE9810" />
-        <circle cx="103" cy="104" r="60" fill="#F4B323" />
+      <circle cx="107" cy="107" r="82" fill={ink} />
+      <circle cx="100" cy="100" r="82" fill={brightGold} stroke={ink} strokeWidth="6" />
+      <circle cx="100" cy="100" r="58" fill={gold} stroke={ink} strokeWidth="4" />
+      <g fill="none" stroke={ink} strokeWidth="22">
+        <path d={CENT_ARC_OUT} />
+        <path d={CENT_BAR_OUT} />
       </g>
-      <circle cx="100" cy="100" r="60.5" fill="none" stroke={`url(#${ring})`} strokeWidth="2.5" />
-      <g fill="none" strokeWidth="15" stroke="#FFF6C4" transform="translate(1.5 2)">
-        <path d={SYMBOL} />
-        <path d={BAR} />
-      </g>
-      <g fill="none" strokeWidth="15" stroke="#A86E00" transform="translate(-1.2 -1.5)">
-        <path d={SYMBOL} />
-        <path d={BAR} />
-      </g>
-      <g fill="none" strokeWidth="15" stroke={`url(#${sym})`}>
-        <path d={SYMBOL} />
-        <path d={BAR} />
+      <g mask={`url(#${maskId})`}>
+        <rect width="200" height="200" fill={ink} />
+        <g fill="none" stroke={brightGold} strokeWidth="14" transform="translate(1.5 1.5)">
+          <path d={CENT_ARC} />
+          <path d={CENT_BAR} />
+        </g>
       </g>
     </svg>
   );

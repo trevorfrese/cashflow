@@ -12,105 +12,34 @@ function GitHubIcon() {
   );
 }
 
-function ArrowIcon() {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M5 12h14M13 5l7 7-7 7" />
-    </svg>
-  );
-}
-
-const STEPS = [
-  {
-    label: 'Day 1',
-    title: 'Landlord paid in full',
-    body: 'CashFlow pays the whole $10,000 to your landlord on the due date. Nothing changes on their side.',
-  },
-  {
-    label: 'The 1st and 15th',
-    title: 'You repay in two halves',
-    body: '$5,000 comes out of your business account on the 1st and $5,000 on the 15th, plus a flat 1.5% fee.',
-  },
-  {
-    label: 'No credit score',
-    title: 'Underwritten on cash flow',
-    body: 'Decisions come from your real bank activity, not a bureau. Instant, explainable, and open source.',
-  },
-];
-
 export default function Home() {
   return (
     <main className="page">
       <header className="top">
         <a href="/" className="wordmark-small" aria-label="CashFlow home">
-          <CoinMark size={32} decorative />
+          <CoinMark size={28} decorative />
           CashFlow
         </a>
-        <a className="button button-secondary button-sm" href={GITHUB} rel="noopener">
-          <GitHubIcon />
+        <a className="top-link" href={GITHUB} rel="noopener">
           GitHub
         </a>
       </header>
 
-      <section className="hero card">
-        <div className="hero-art">
-          <img
-            src="/city-dusk.jpg"
-            alt="A city skyline at dusk in flat poster colors"
-            width={1024}
-            height={1024}
-          />
+      <section className="hero">
+        <div className="lockup">
+          <CoinMark size={200} title="CashFlow gold coin with a cents symbol" />
+          <h1 className="wordmark">CashFlow</h1>
         </div>
-        <div className="hero-body">
-          <div className="lockup">
-            <CoinMark size={120} title="CashFlow gold coin with a cents symbol" />
-            <div>
-              <p className="eyebrow">Split rent</p>
-              <h1 className="wordmark">CashFlow</h1>
-            </div>
-          </div>
-          <p className="tagline">
-            Buy now, pay later for small business rent. Your landlord gets paid in full, you pay
-            in two halves. Now an open source project.
-          </p>
-          <div className="actions">
-            <a className="button button-primary button-lg" href={GITHUB} rel="noopener">
-              View on GitHub
-              <ArrowIcon />
-            </a>
-          </div>
-        </div>
-      </section>
-
-      <section className="steps" aria-label="How it works">
-        {STEPS.map((step) => (
-          <article className="card step" key={step.title}>
-            <p className="tag">{step.label}</p>
-            <h2>{step.title}</h2>
-            <p>{step.body}</p>
-          </article>
-        ))}
-      </section>
-
-      <footer className="foot">
-        <p>
-          Built in public after the startup wound down. No real money moves in this code: every
-          payment, bank, and capital provider runs in sandbox mode.
+        <p className="tagline">
+          Buy now, pay later for small business rent. Now an open source project.
         </p>
-        <a href={GITHUB} rel="noopener">
-          github.com/trevorfrese/cashflow
-        </a>
-      </footer>
+        <div className="actions">
+          <a className="button button-primary" href={GITHUB} rel="noopener">
+            <GitHubIcon />
+            View on GitHub
+          </a>
+        </div>
+      </section>
     </main>
   );
 }

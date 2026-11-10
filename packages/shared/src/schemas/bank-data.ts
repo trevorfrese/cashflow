@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { CommerceSummary } from './commerce';
 import { Cents, IsoDateSchema } from './common';
 
 /**
@@ -62,7 +63,8 @@ export const MonthlyCashFlow = z.object({
 export type MonthlyCashFlow = z.infer<typeof MonthlyCashFlow>;
 
 /**
- * Features the underwriting engine derives from bank transactions. Stored with every
+ * Features the underwriting engine derives from bank transactions, and from platform sales
+ * when a commerce account is connected. Stored with every
  * decision so a decision can be explained and audited later. Ratios are in basis points
  * so they stay integers; coverage is a ratio times 100 (125 = 1.25x).
  */
@@ -102,5 +104,8 @@ export const CashFlowSummary = z.object({
   rentCoverageRatio: z.number().int(),
 
   monthly: z.array(MonthlyCashFlow),
+
+  /** Platform sales features when a POS or commerce account was connected. */
+  commerce: CommerceSummary.nullable().default(null),
 });
 export type CashFlowSummary = z.infer<typeof CashFlowSummary>;

@@ -1,5 +1,5 @@
 import type { CashFlowSummary, CreditGrade, DecisionReason } from '@cashflow/shared';
-import { formatCents } from '@cashflow/shared';
+import { COMMERCE_PLATFORM_LABELS as PLATFORM_LABEL, formatCents } from '@cashflow/shared';
 
 /**
  * Transparent scorecard. Each factor maps one feature onto points through a piecewise
@@ -45,7 +45,7 @@ export const WEIGHTS = {
   revenueStability: 10,
   revenueTrend: 10,
   debtLoad: 5,
-  historyDepth: 5,
+  dataDepth: 5,
 } as const;
 
 export const GRADE_FLOORS: ReadonlyArray<readonly [CreditGrade, number]> = [
@@ -159,7 +159,7 @@ export function scoreCashFlow(s: CashFlowSummary): Scorecard {
     WEIGHTS.revenueStability,
     s.monthsOfHistory < 3
       ? 'Not enough months to measure revenue stability.'
-      : `Monthly revenue varies by ${pct(vol)} around its average.`,
+      : `Monthly ${s.commerce ? 'sales' : 'revenue'} vary by ${pct(vol)} around the average${s.commerce ? `, measured from ${PLATFORM_LABEL[s.commerce.platform]}` : ''}.`,
   );
 
   // 6. Revenue trend: last three months versus the prior three.
@@ -199,18 +199,24 @@ export function scoreCashFlow(s: CashFlowSummary): Scorecard {
       : `Existing loan and advance payments take ${pct(debt)} of monthly revenue (${formatCents(s.monthlyDebtServiceCents, { showCents: false })} a month).`,
   );
 
-  // 8. Depth of bank history available.
+  // 8. Depth and breadth of data: months of bank history, plus a point for a second
+  // source (a point of sale) that verifies sales independently of deposits.
+  const posMonths = s.commerce?.monthsOfHistory ?? 0;
   add(
-    'HISTORY_DEPTH',
-    'Bank history',
+    'DATA_DEPTH',
+    'Data history',
     curve(s.monthsOfHistory, [
       [3, 0],
-      [6, 2],
-      [9, 4],
-      [12, 5],
-    ]),
-    WEIGHTS.historyDepth,
-    `${s.monthsOfHistory} month${s.monthsOfHistory === 1 ? '' : 's'} of bank history reviewed.`,
+      [6, 1.5],
+      [9, 3],
+      [12, 4],
+    ]) + (posMonths >= 3 ? 1 : 0),
+    WEIGHTS.dataDepth,
+    `${s.monthsOfHistory} month${s.monthsOfHistory === 1 ? '' : 's'} of bank history reviewed${
+      posMonths >= 3
+        ? `, plus ${posMonths} month${posMonths === 1 ? '' : 's'} of ${PLATFORM_LABEL[s.commerce!.platform]} sales.`
+        : '. Connecting your point of sale adds a second source.'
+    }`,
   );
 
   const score = Math.min(

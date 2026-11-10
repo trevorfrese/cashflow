@@ -17,7 +17,7 @@ const INSTITUTIONS = [
  * Deterministic fake bank. The public token picks the institution, the scenario, and the
  * revenue level, so demos and tests are repeatable. Keywords in the token select a scenario
  * (see SCENARIOS in synthetic.ts): healthy (default), growing, thin_margin, declining,
- * volatile, overdrafts, heavy_debt, seasonal, new_business, low_balance, no_balance.
+ * volatile, overdrafts, heavy_debt, seasonal, new_business, low_balance, no_balance, batched.
  * `rev_48000` pins monthly revenue to $48,000 and `rent_6200` pins the observed rent.
  * A token containing `fail` makes the exchange fail.
  *

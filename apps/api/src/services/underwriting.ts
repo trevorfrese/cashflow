@@ -3,7 +3,7 @@ import { addDays } from '@cashflow/shared';
 
 import { todayIso } from '../dates.ts';
 import type { Db } from '../db.ts';
-import type { BankLink, Prisma } from '../generated/prisma/client.ts';
+import type { BankLink, CommerceLink, Prisma } from '../generated/prisma/client.ts';
 import type { Providers } from '../providers/index.ts';
 import type { EngineInput } from '../underwriting/engine.ts';
 
@@ -16,11 +16,14 @@ export interface UnderwriteParams {
   applicationId: string;
   /** The bank link to underwrite against, or null to decide without bank data. */
   bankLink: BankLink | null;
+  /** A connected point of sale, or null to rely on bank deposits alone. */
+  commerceLink?: CommerceLink | null;
   asOf?: IsoDate;
 }
 
 /**
- * Pull bank data for the link, run the underwriting provider, and persist the decision
+ * Pull bank data for the link (and platform sales when a commerce link is given), run the
+ * underwriting provider, and persist the decision
  * together with the application status change. Approval also activates the business.
  */
 export async function underwriteApplication({
@@ -28,6 +31,7 @@ export async function underwriteApplication({
   providers,
   applicationId,
   bankLink,
+  commerceLink = null,
   asOf = todayIso(),
 }: UnderwriteParams) {
   const application = await db.underwritingApplication.findUniqueOrThrow({
@@ -45,11 +49,24 @@ export async function underwriteApplication({
     }
   }
 
+  let commerceData: EngineInput['commerceData'] = null;
+  if (commerceLink) {
+    commerceData = {
+      platform: commerceLink.platform,
+      connectedSince: commerceLink.connectedSince,
+      dailySales: await providers.commerce.getDailySales(commerceLink.providerItemId, {
+        from: addDays(asOf, -(UNDERWRITING_LOOKBACK_DAYS - 1)),
+        to: asOf,
+      }),
+    };
+  }
+
   const result = await providers.underwriting.decide({
     statedMonthlyRevenueCents: application.statedMonthlyRevenueCents,
     timeInBusinessMonths: application.timeInBusinessMonths,
     requestedMonthlyRentCents: application.requestedMonthlyRentCents,
     bankData,
+    commerceData,
   });
 
   return db.$transaction(async (tx) => {
@@ -58,6 +75,7 @@ export async function underwriteApplication({
       where: { id: applicationId },
       data: {
         bankLinkId: bankLink?.id ?? null,
+        commerceLinkId: commerceLink?.id ?? null,
         status: result.outcome,
         submittedAt: new Date(),
         decision: {

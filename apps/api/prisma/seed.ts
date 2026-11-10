@@ -46,7 +46,7 @@ async function main() {
     TRUNCATE TABLE
       "LedgerEntry", "LedgerTransaction", "LedgerAccount",
       "Repayment", "Installment", "LandlordPayout", "RentPlan",
-      "Lease", "UnderwritingDecision", "UnderwritingApplication", "BankLink",
+      "Lease", "UnderwritingDecision", "UnderwritingApplication", "BankLink", "CommerceLink",
       "Business", "RefreshToken", "User", "JobRun"
     RESTART IDENTITY CASCADE
   `);
@@ -90,10 +90,26 @@ async function main() {
       availableBalanceCents: bakeryBank.availableBalanceCents,
     },
   });
+  // The bakery also connects its Square account, so its decision shows two sources.
+  const bakeryPos = await providers.commerce.exchangePublicToken(
+    'seed_blue_door_square_healthy_sales_60000',
+    'SQUARE',
+  );
+  const bakeryCommerce = await db.commerceLink.create({
+    data: {
+      businessId: bakery.id,
+      provider: providers.commerce.name,
+      platform: bakeryPos.platform,
+      providerItemId: bakeryPos.providerItemId,
+      locationName: bakeryPos.locationName,
+      connectedSince: bakeryPos.connectedSince,
+    },
+  });
   const bakeryDraft = await db.underwritingApplication.create({
     data: {
       businessId: bakery.id,
       bankLinkId: bakeryLink.id,
+      commerceLinkId: bakeryCommerce.id,
       statedMonthlyRevenueCents: 6_000_000,
       timeInBusinessMonths: 68,
       requestedMonthlyRentCents: 1_000_000,
@@ -104,6 +120,7 @@ async function main() {
     providers,
     applicationId: bakeryDraft.id,
     bankLink: bakeryLink,
+    commerceLink: bakeryCommerce,
   });
   if (bakeryApp.status !== 'APPROVED') {
     throw new Error(`Seed expected Blue Door Bakery to be approved, got ${bakeryApp.status}`);

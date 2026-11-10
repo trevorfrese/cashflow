@@ -1,6 +1,7 @@
 import type {
   BankLink as BankLinkDto,
   Business as BusinessDto,
+  CommerceLink as CommerceLinkDto,
   Installment as InstallmentDto,
   LandlordPayout as PayoutDto,
   Lease as LeaseDto,
@@ -14,6 +15,7 @@ import type {
 import type {
   BankLink,
   Business,
+  CommerceLink,
   Installment,
   LandlordPayout,
   Lease,
@@ -64,6 +66,17 @@ export const toBankLink = (l: BankLink): BankLinkDto => ({
   createdAt: iso(l.createdAt),
 });
 
+export const toCommerceLink = (l: CommerceLink): CommerceLinkDto => ({
+  id: l.id,
+  businessId: l.businessId,
+  provider: l.provider,
+  platform: l.platform,
+  locationName: l.locationName,
+  status: l.status,
+  connectedSince: l.connectedSince,
+  createdAt: iso(l.createdAt),
+});
+
 export const toDecision = (d: UnderwritingDecision): DecisionDto => ({
   id: d.id,
   applicationId: d.applicationId,
@@ -85,6 +98,7 @@ export const toApplication = (
   id: a.id,
   businessId: a.businessId,
   bankLinkId: a.bankLinkId ?? undefined,
+  commerceLinkId: a.commerceLinkId ?? undefined,
   statedMonthlyRevenueCents: a.statedMonthlyRevenueCents,
   timeInBusinessMonths: a.timeInBusinessMonths,
   requestedMonthlyRentCents: a.requestedMonthlyRentCents,

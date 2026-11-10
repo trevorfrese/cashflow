@@ -1,7 +1,9 @@
 import type {
   BankTransaction,
   CashFlowSummary,
+  CommercePlatform,
   CreditGrade,
+  DailySales,
   DecisionOutcome,
   DecisionReason,
   IsoDate,
@@ -16,7 +18,8 @@ import { scoreCashFlow } from './scorecard.ts';
  *
  * Order of operations:
  *   1. Missing data -> NEEDS_INFO. We never decline for information we have not received.
- *   2. Features from bank transactions, then a 0 to 100 score and letter grade.
+ *   2. Features from bank transactions (and platform sales when a POS is connected), then a
+ *      0 to 100 score and letter grade.
  *   3. Hard policy rules -> DECLINED regardless of score.
  *   4. Capacity: the largest monthly rent the business can carry with a margin of safety,
  *      bounded by a share of verified revenue and by free cash flow coverage.
@@ -31,6 +34,12 @@ export interface EngineInput {
     transactions: BankTransaction[];
     currentBalanceCents: number | null;
     asOf: IsoDate;
+  } | null;
+  /** Daily sales from a connected point of sale. Optional; verifies revenue at the source. */
+  commerceData?: {
+    platform: CommercePlatform;
+    dailySales: DailySales[];
+    connectedSince: IsoDate;
   } | null;
 }
 
@@ -55,6 +64,8 @@ export const POLICY = {
   minVerifiedRevenueCents: 500_000,
   /** Stated revenue more than this far above verified revenue needs explaining. 5000 bps = 50%. */
   maxStatedRevenueVarianceBps: 5000,
+  /** Bank deposits must cover this share of POS net sales before POS sales count as verified revenue. */
+  minDepositMatchBps: 7000,
   /** Hard limits on conduct in the last 90 days. */
   maxNsf90: 2,
   maxNegativeBalanceDays90: 10,
@@ -142,6 +153,7 @@ export function decide(input: EngineInput): EngineResult {
     asOf: input.bankData.asOf,
     statedMonthlyRevenueCents: input.statedMonthlyRevenueCents,
     requestedMonthlyRentCents: input.requestedMonthlyRentCents,
+    commerce: input.commerceData ?? null,
   });
 
   if (cashFlow.monthsOfHistory < POLICY.minMonthsOfHistory) {
@@ -172,6 +184,23 @@ export function decide(input: EngineInput): EngineResult {
   const card = scoreCashFlow(cashFlow);
   const reasons: DecisionReason[] = card.factors.map((f) => reason(f.code, f.message, f.impact));
   const knockouts: DecisionReason[] = [];
+
+  // A connected POS whose sales are not showing up in the bank is information, never a
+  // decline. We fall back to the bank figure and tell the applicant why.
+  const commerce = cashFlow.commerce;
+  if (
+    commerce &&
+    commerce.depositMatchBps !== null &&
+    commerce.depositMatchBps < POLICY.minDepositMatchBps
+  ) {
+    reasons.push(
+      reason(
+        'DEPOSIT_MISMATCH',
+        `Bank deposits cover ${(commerce.depositMatchBps / 100).toFixed(0)}% of the sales your point of sale reports, so we verified revenue from the bank. Connect any other account that receives your sales.`,
+        'INFO',
+      ),
+    );
+  }
 
   if (input.timeInBusinessMonths < POLICY.minTimeInBusinessMonths) {
     knockouts.push(

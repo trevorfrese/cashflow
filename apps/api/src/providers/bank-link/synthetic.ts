@@ -27,6 +27,7 @@ export const SCENARIOS = [
   'new_business',
   'low_balance',
   'no_balance',
+  'batched',
 ] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
@@ -149,6 +150,9 @@ const PARAMS: Record<Scenario, Params> = {
   new_business: { ...BASE, days: 120, openingBalanceMonths: 0.6 },
   low_balance: { ...BASE, openingBalanceMonths: 0.04, ownerDraw: 0.1 },
   no_balance: { ...BASE, days: 0 },
+  // Card sales are settled every other week, so monthly deposits swing with the number of
+  // settlement days in the month even though daily sales are steady.
+  batched: BASE,
 };
 
 /** Small deterministic PRNG so every token yields the same history. */
@@ -215,6 +219,7 @@ export function generateHistory(
   let negativeStreak = 0;
   let monthLevel = 1;
   let currentMonth = '';
+  let pendingSettlement = 0;
   const start = addDays(asOf, -(p.days - 1));
   const shockDays = new Set<number>();
   for (let i = 0; i < p.shocks; i++) shockDays.add(p.days - 1 - Math.floor(rand() * 85));
@@ -242,13 +247,28 @@ export function generateHistory(
     const dayShare = WEEKDAY_WEIGHT[dow]! / WEEK_WEIGHT_SUM;
     if (dayShare > 0) {
       const sales = weeklyRevenue * level * dayShare * Math.exp(normal(rand) * p.dailyNoise);
-      push(date, Math.round(sales * 0.85), 'SQUARE INC SETTLEMENT', 'CARD_SETTLEMENT');
-      balance += Math.round(sales * 0.85);
+      if (spec.scenario === 'batched') {
+        pendingSettlement += Math.round(sales * 0.85);
+      } else {
+        push(date, Math.round(sales * 0.85), 'SQUARE INC SETTLEMENT', 'CARD_SETTLEMENT');
+        balance += Math.round(sales * 0.85);
+      }
       if (dow === 2) {
         const cash = Math.round(weeklyRevenue * level * 0.15);
         push(date, cash, 'CASH DEPOSIT BRANCH 0142', 'CASH_DEPOSIT');
         balance += cash;
       }
+    }
+
+    if (
+      spec.scenario === 'batched' &&
+      dow === 4 &&
+      Math.floor(i / 7) % 2 === 1 &&
+      pendingSettlement > 0
+    ) {
+      push(date, pendingSettlement, 'SQUARE INC BIWEEKLY SETTLEMENT', 'CARD_SETTLEMENT');
+      balance += pendingSettlement;
+      pendingSettlement = 0;
     }
 
     // Outflows. A debit that overdraws the account draws one NSF fee for the day.

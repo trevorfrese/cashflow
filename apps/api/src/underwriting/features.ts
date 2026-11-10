@@ -1,6 +1,9 @@
 import type {
   BankTransaction,
   CashFlowSummary,
+  CommercePlatform,
+  CommerceSummary,
+  DailySales,
   IsoDate,
   MonthlyCashFlow,
   TransactionCategory,
@@ -8,7 +11,8 @@ import type {
 import { addDays, feeForRent, parseIsoDate, toIsoDate } from '@cashflow/shared';
 
 /**
- * Turn raw bank transactions into the features the scorecard needs.
+ * Turn raw bank transactions, and platform sales when a POS is connected, into the
+ * features the scorecard needs.
  *
  * Everything here is pure arithmetic over the transaction list and the current balance.
  * Ratios are returned in basis points so the summary is all integers and easy to store.
@@ -43,9 +47,18 @@ export interface FeatureInput {
   requestedMonthlyRentCents: number;
   /** Fee assumed when measuring coverage before pricing is known. */
   provisionalFeeBps?: number;
+  /** Daily sales from a connected point of sale, if any. */
+  commerce?: {
+    platform: CommercePlatform;
+    dailySales: DailySales[];
+    connectedSince: IsoDate;
+  } | null;
 }
 
 export const DEFAULT_PROVISIONAL_FEE_BPS = 250;
+
+/** Bank deposits must cover this share of POS net sales before the POS figure is trusted. */
+export const MIN_DEPOSIT_MATCH_BPS = 7000;
 
 interface MonthAgg {
   month: string;
@@ -191,13 +204,32 @@ export function computeCashFlowFeatures(input: FeatureInput): CashFlowSummary {
     nsfCount: m.nsf,
   }));
 
-  const revenues = monthly.map((m) => m.revenueCents);
-  const last3 = revenues.slice(-3);
-  const prior3 = revenues.slice(-6, -3);
-  const verifiedMonthlyRevenueCents = Math.round(mean(last3));
-  const revenueGrowthBps =
-    prior3.length === 3 && mean(prior3) > 0 ? bps(mean(last3) - mean(prior3), mean(prior3)) : 0;
-  const revenueVolatilityBps = revenues.length >= 3 ? bps(stdev(revenues), mean(revenues)) : 0;
+  const commerce = input.commerce ? summarizeCommerce(input.commerce, input.asOf, monthly) : null;
+
+  // Revenue. The POS sees every sale on the day it happens, so when its sales reconcile with
+  // bank deposits it is the better source for level, trend, and stability. Otherwise, or
+  // without a POS, the bank's operating inflows are the verified figure.
+  const bankRevenues = monthly.map((m) => m.revenueCents);
+  const bankLast3 = bankRevenues.slice(-3);
+  const bankPrior3 = bankRevenues.slice(-6, -3);
+  const usePos =
+    commerce !== null &&
+    commerce.monthsOfHistory >= 3 &&
+    (commerce.depositMatchBps === null || commerce.depositMatchBps >= MIN_DEPOSIT_MATCH_BPS);
+  const verifiedMonthlyRevenueCents = usePos
+    ? commerce.verifiedMonthlySalesCents
+    : Math.round(mean(bankLast3));
+  const revenueGrowthBps = usePos
+    ? commerce.trendBps
+    : bankPrior3.length === 3 && mean(bankPrior3) > 0
+      ? bps(mean(bankLast3) - mean(bankPrior3), mean(bankPrior3))
+      : 0;
+  const revenueVolatilityBps = usePos
+    ? commerce.volatilityBps
+    : bankRevenues.length >= 3
+      ? bps(stdev(bankRevenues), mean(bankRevenues))
+      : 0;
+  const revenues = bankRevenues;
 
   const monthlyOperatingOutflowsCents = Math.round(
     mean(monthly.map((m) => m.operatingOutflowsCents)),
@@ -253,8 +285,11 @@ export function computeCashFlowFeatures(input: FeatureInput): CashFlowSummary {
     trailingTwelveMonthRevenueCents: revenues.reduce((a, b) => a + b, 0),
     revenueGrowthBps,
     revenueVolatilityBps,
-    depositDaysPerMonth:
-      monthly.length > 0 ? Math.round(mean(monthly.map((m) => m.depositDays)) * 10) / 10 : 0,
+    depositDaysPerMonth: usePos
+      ? commerce.salesDaysPerMonth
+      : monthly.length > 0
+        ? Math.round(mean(monthly.map((m) => m.depositDays)) * 10) / 10
+        : 0,
     statedRevenueVarianceBps: bps(
       input.statedMonthlyRevenueCents - verifiedMonthlyRevenueCents,
       verifiedMonthlyRevenueCents,
@@ -280,5 +315,95 @@ export function computeCashFlowFeatures(input: FeatureInput): CashFlowSummary {
         : 10_000,
     rentCoverageRatio,
     monthly,
+    commerce,
+  };
+}
+
+interface SalesMonth {
+  month: string;
+  gross: number;
+  refunds: number;
+  chargebacks: number;
+  net: number;
+  days: Set<string>;
+}
+
+/**
+ * Aggregate platform sales by full calendar month and compare them with the bank's operating
+ * inflows over the same months. Months before the first sale are dropped, as for the bank.
+ */
+export function summarizeCommerce(
+  commerce: NonNullable<FeatureInput['commerce']>,
+  asOf: IsoDate,
+  bankMonthly: MonthlyCashFlow[],
+): CommerceSummary {
+  const sales = commerce.dailySales
+    .filter((d) => d.date <= asOf)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const lastFullMonth = previousMonthKey(asOf);
+  const first = sales[0];
+  const firstMonth = first
+    ? parseIsoDate(first.date).day <= 7
+      ? first.date.slice(0, 7)
+      : nextMonthKey(first.date.slice(0, 7))
+    : undefined;
+  const keys = monthKeysEnding(lastFullMonth, 12).filter(
+    (k) => firstMonth !== undefined && k >= firstMonth,
+  );
+  const months = new Map<string, SalesMonth>(
+    keys.map((k) => [
+      k,
+      { month: k, gross: 0, refunds: 0, chargebacks: 0, net: 0, days: new Set<string>() },
+    ]),
+  );
+  for (const d of sales) {
+    const m = months.get(d.date.slice(0, 7));
+    if (!m) continue;
+    m.gross += d.grossCents;
+    m.refunds += d.refundsCents;
+    m.chargebacks += d.chargebacksCents;
+    m.net += d.grossCents - d.refundsCents - d.chargebacksCents;
+    if (d.grossCents > 0) m.days.add(d.date);
+  }
+  const rows = keys.map((k) => months.get(k)!);
+  const nets = rows.map((m) => Math.max(0, m.net));
+  const last3 = rows.slice(-3);
+  const prior3 = nets.slice(-6, -3);
+  const grossLast3 = last3.reduce((a, m) => a + m.gross, 0);
+  const netLast3 = last3.reduce((a, m) => a + Math.max(0, m.net), 0);
+
+  // Bank inflows over the same three months, when the bank has them.
+  const bankByMonth = new Map(bankMonthly.map((m) => [m.month, m.revenueCents]));
+  const comparable = last3.filter((m) => bankByMonth.has(m.month));
+  const bankSum = comparable.reduce((a, m) => a + (bankByMonth.get(m.month) ?? 0), 0);
+  const posSum = comparable.reduce((a, m) => a + Math.max(0, m.net), 0);
+  const depositMatchBps =
+    comparable.length === 0 || posSum === 0 ? null : Math.min(20_000, bps(bankSum, posSum));
+
+  const { year, month } = parseIsoDate(asOf);
+  const since = parseIsoDate(commerce.connectedSince);
+  const monthsOnPlatform = Math.max(0, (year - since.year) * 12 + (month - since.month));
+
+  return {
+    platform: commerce.platform,
+    monthsOfHistory: rows.filter((m) => m.gross > 0).length,
+    monthsOnPlatform,
+    verifiedMonthlySalesCents: last3.length > 0 ? Math.round(netLast3 / last3.length) : 0,
+    salesDaysPerMonth:
+      rows.length > 0 ? Math.round(mean(rows.map((m) => m.days.size)) * 10) / 10 : 0,
+    refundRateBps: bps(
+      last3.reduce((a, m) => a + m.refunds, 0),
+      grossLast3,
+    ),
+    chargebackRateBps: bps(
+      last3.reduce((a, m) => a + m.chargebacks, 0),
+      grossLast3,
+    ),
+    trendBps:
+      prior3.length === 3 && mean(prior3) > 0
+        ? bps(mean(nets.slice(-3)) - mean(prior3), mean(prior3))
+        : 0,
+    volatilityBps: nets.length >= 3 ? bps(stdev(nets), mean(nets)) : 0,
+    depositMatchBps,
   };
 }

@@ -29,6 +29,7 @@ export const strongProfile: CashFlowSummary = {
   rentToRevenueBps: 1292,
   rentCoverageRatio: 176,
   monthly: [],
+  commerce: null,
 };
 
 describe('curve', () => {

@@ -11,6 +11,7 @@ export const CreateApplicationRequest = z.object({
   timeInBusinessMonths: z.number().int().min(0).max(1200),
   requestedMonthlyRentCents: Cents.refine((v) => v > 0, 'Rent must be greater than zero'),
   bankLinkId: Id.optional(),
+  commerceLinkId: Id.optional(),
 });
 export type CreateApplicationRequest = z.infer<typeof CreateApplicationRequest>;
 

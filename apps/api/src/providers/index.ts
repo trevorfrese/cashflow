@@ -1,12 +1,14 @@
 import type { Config } from '../config.ts';
 import { createBankLinkProvider, type BankLinkProvider } from './bank-link/index.ts';
 import { createCapitalProvider, type CapitalProvider } from './capital/index.ts';
+import { createCommerceDataProvider, type CommerceDataProvider } from './commerce/index.ts';
 import { createPaymentsProvider, type PaymentsProvider } from './payments/index.ts';
 import { createUnderwritingProvider, type UnderwritingProvider } from './underwriting/index.ts';
 
 export interface Providers {
   underwriting: UnderwritingProvider;
   bankLink: BankLinkProvider;
+  commerce: CommerceDataProvider;
   payments: PaymentsProvider;
   capital: CapitalProvider;
 }
@@ -16,9 +18,16 @@ export function createProviders(config: Config): Providers {
   return {
     underwriting: createUnderwritingProvider(config),
     bankLink: createBankLinkProvider(config),
+    commerce: createCommerceDataProvider(config),
     payments: createPaymentsProvider(config),
     capital: createCapitalProvider(config),
   };
 }
 
-export type { BankLinkProvider, CapitalProvider, PaymentsProvider, UnderwritingProvider };
+export type {
+  BankLinkProvider,
+  CapitalProvider,
+  CommerceDataProvider,
+  PaymentsProvider,
+  UnderwritingProvider,
+};

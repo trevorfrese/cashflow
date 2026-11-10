@@ -22,6 +22,7 @@ const ConfigSchema = z.object({
 
   UNDERWRITING_PROVIDER: z.enum(['cashflow', 'mock']).default('cashflow'),
   BANK_LINK_PROVIDER: z.enum(['mock', 'plaid']).default('mock'),
+  COMMERCE_PROVIDER: z.enum(['mock', 'square']).default('mock'),
   PAYMENTS_PROVIDER: z.enum(['mock', 'stripe']).default('mock'),
   CAPITAL_PROVIDER: z.enum(['mock']).default('mock'),
 
@@ -34,6 +35,9 @@ const ConfigSchema = z.object({
   PLAID_SECRET: z.string().optional(),
   PLAID_ENV: z.enum(['sandbox', 'development', 'production']).default('sandbox'),
   STRIPE_SECRET_KEY: z.string().optional(),
+  SQUARE_APPLICATION_ID: z.string().optional(),
+  SQUARE_APPLICATION_SECRET: z.string().optional(),
+  SQUARE_ENV: z.enum(['sandbox', 'production']).default('sandbox'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -56,6 +60,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (config.PLAID_ENV === 'production') {
       throw new Error(
         'Refusing to start: PLAID_ENV=production. This project only runs against sandbox data.',
+      );
+    }
+    if (config.SQUARE_ENV === 'production') {
+      throw new Error(
+        'Refusing to start: SQUARE_ENV=production. This project only reads sandbox sales data.',
       );
     }
   }

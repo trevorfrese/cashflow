@@ -74,10 +74,11 @@ model Business {
   createdAt                 DateTime       @default(now())
   updatedAt                 DateTime       @updatedAt
 
-  bankLinks    BankLink[]
-  applications UnderwritingApplication[]
-  leases       Lease[]
-  rentPlans    RentPlan[]
+  bankLinks     BankLink[]
+  commerceLinks CommerceLink[]
+  applications  UnderwritingApplication[]
+  leases        Lease[]
+  rentPlans     RentPlan[]
 
   @@index([ownerUserId])
 }
@@ -89,6 +90,14 @@ enum BankLinkStatus {
   LINKED
   ERROR
   DISCONNECTED
+}
+
+enum CommercePlatform {
+  SQUARE
+  TOAST
+  SHOPIFY
+  CLOVER
+  STRIPE
 }
 
 model BankLink {
@@ -105,6 +114,27 @@ model BankLink {
   status                BankLinkStatus @default(LINKED)
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
+
+  applications UnderwritingApplication[]
+
+  @@index([businessId])
+}
+
+/// A connected point of sale or commerce platform. Read only: it verifies sales at the
+/// source for underwriting and is never used to move money.
+model CommerceLink {
+  id             String           @id @default(cuid())
+  businessId     String
+  business       Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  provider       String
+  platform       CommercePlatform
+  providerItemId String
+  locationName   String
+  status         BankLinkStatus   @default(LINKED)
+  /// YYYY-MM-DD the business started selling on the platform.
+  connectedSince String
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   applications UnderwritingApplication[]
 
@@ -133,6 +163,8 @@ model UnderwritingApplication {
   business                  Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
   bankLinkId                String?
   bankLink                  BankLink?         @relation(fields: [bankLinkId], references: [id])
+  commerceLinkId            String?
+  commerceLink              CommerceLink?     @relation(fields: [commerceLinkId], references: [id])
   statedMonthlyRevenueCents Int
   timeInBusinessMonths      Int
   requestedMonthlyRentCents Int

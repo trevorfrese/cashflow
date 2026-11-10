@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { generateHistory, parseScenario, type Scenario } from '../providers/bank-link/synthetic.ts';
+import { generateSales, parseCommerceScenario } from '../providers/commerce/synthetic.ts';
 import { capacityCents, decide, POLICY, recommendInstallments } from './engine.ts';
 import { strongProfile } from './scorecard.test.ts';
 
@@ -20,6 +21,13 @@ function run(token: string, overrides: Partial<Parameters<typeof decide>[0]> = {
     },
     ...overrides,
   });
+}
+
+/** The same business seen through a connected Square account. */
+function posData(token: string) {
+  const spec = parseCommerceScenario(token, 'SQUARE');
+  const { dailySales, connectedSince } = generateSales(spec, 'abcdef123456', AS_OF);
+  return { platform: spec.platform, dailySales, connectedSince };
 }
 
 describe('underwriting engine', () => {
@@ -107,6 +115,35 @@ describe('underwriting engine', () => {
     }
   });
 
+  it('reads steadier revenue from a point of sale when deposits are batched', () => {
+    const bankOnly = run('batched_rev_40000_rent_5000');
+    const withPos = run('batched_rev_40000_rent_5000', {
+      commerceData: posData('batched_sales_40000'),
+    });
+    const commerce = withPos.cashFlow!.commerce!;
+    expect(commerce.platform).toBe('SQUARE');
+    expect(commerce.monthsOfHistory).toBeGreaterThanOrEqual(11);
+    expect(commerce.depositMatchBps).toBeGreaterThanOrEqual(POLICY.minDepositMatchBps);
+    expect(withPos.cashFlow!.revenueVolatilityBps).toBeLessThan(
+      bankOnly.cashFlow!.revenueVolatilityBps,
+    );
+    expect(withPos.score!).toBeGreaterThanOrEqual(bankOnly.score!);
+    const depth = withPos.reasons.find((x) => x.code === 'DATA_DEPTH');
+    expect(depth?.message).toContain('Square');
+    expect(withPos.reasons.map((x) => x.code)).not.toContain('DEPOSIT_MISMATCH');
+  });
+
+  it('falls back to bank deposits when point of sale sales do not reach the bank', () => {
+    // Bank shows $20,000 a month; the POS claims $60,000.
+    const r = run('healthy_rev_20000_rent_3000', {
+      commerceData: posData('healthy_sales_60000'),
+    });
+    expect(r.cashFlow!.commerce!.depositMatchBps).toBeLessThan(POLICY.minDepositMatchBps);
+    expect(r.cashFlow!.verifiedMonthlyRevenueCents).toBeLessThan(3_000_000);
+    expect(r.reasons.map((x) => x.code)).toContain('DEPOSIT_MISMATCH');
+    expect(['APPROVED', 'DECLINED']).toContain(r.outcome);
+  });
+
   it('is deterministic for the same token and date', () => {
     const a = run('seasonal_rev_40000');
     const b = run('seasonal_rev_40000');
@@ -126,6 +163,7 @@ describe('underwriting engine', () => {
       'new_business',
       'low_balance',
       'no_balance',
+      'batched',
     ];
     for (const s of scenarios) {
       const r = run(`${s}_rev_40000`);

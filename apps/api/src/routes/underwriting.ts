@@ -17,7 +17,7 @@ export async function underwritingRoutes(app: FastifyInstance) {
   const loadOwned = async (id: string, userId: string) => {
     const application = await db.underwritingApplication.findUnique({
       where: { id },
-      include: { decision: true, business: true, bankLink: true },
+      include: { decision: true, business: true, bankLink: true, commerceLink: true },
     });
     if (!application) throw notFound('Application');
     if (application.business.ownerUserId !== userId) throw forbidden();
@@ -43,10 +43,22 @@ export async function underwritingRoutes(app: FastifyInstance) {
           throw unprocessable('BANK_LINK_INVALID', 'Bank link does not belong to this business');
         }
       }
+      if (request.body.commerceLinkId) {
+        const link = await db.commerceLink.findUnique({
+          where: { id: request.body.commerceLinkId },
+        });
+        if (!link || link.businessId !== request.body.businessId) {
+          throw unprocessable(
+            'COMMERCE_LINK_INVALID',
+            'Commerce link does not belong to this business',
+          );
+        }
+      }
       const application = await db.underwritingApplication.create({
         data: {
           businessId: request.body.businessId,
           bankLinkId: request.body.bankLinkId ?? null,
+          commerceLinkId: request.body.commerceLinkId ?? null,
           statedMonthlyRevenueCents: request.body.statedMonthlyRevenueCents,
           timeInBusinessMonths: request.body.timeInBusinessMonths,
           requestedMonthlyRentCents: request.body.requestedMonthlyRentCents,
@@ -57,7 +69,7 @@ export async function underwritingRoutes(app: FastifyInstance) {
     },
   );
 
-  /** Runs underwriting. Can be called again after NEEDS_INFO once a bank link is attached. */
+  /** Runs underwriting. Can be called again after NEEDS_INFO once a bank or POS link is attached. */
   r.post(
     '/underwriting/applications/:id/submit',
     {
@@ -65,7 +77,7 @@ export async function underwritingRoutes(app: FastifyInstance) {
       schema: {
         tags: ['underwriting'],
         params: Params,
-        body: z.object({ bankLinkId: Id.optional() }).nullish(),
+        body: z.object({ bankLinkId: Id.optional(), commerceLinkId: Id.optional() }).nullish(),
         response: { 200: UnderwritingApplication },
       },
     },
@@ -95,11 +107,31 @@ export async function underwritingRoutes(app: FastifyInstance) {
         });
       }
 
+      let commerceLink = application.commerceLink;
+      const requestedCommerceId = request.body?.commerceLinkId;
+      if (requestedCommerceId) {
+        const link = await db.commerceLink.findUnique({ where: { id: requestedCommerceId } });
+        if (!link || link.businessId !== application.businessId) {
+          throw unprocessable(
+            'COMMERCE_LINK_INVALID',
+            'Commerce link does not belong to this business',
+          );
+        }
+        commerceLink = link;
+      }
+      if (!commerceLink) {
+        commerceLink = await db.commerceLink.findFirst({
+          where: { businessId: application.businessId, status: 'LINKED' },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
+
       const updated = await underwriteApplication({
         db,
         providers,
         applicationId: application.id,
         bankLink,
+        commerceLink,
       });
       return toApplication(updated);
     },

@@ -22,6 +22,7 @@ export async function healthRoutes(app: FastifyInstance) {
         providers: {
           underwriting: p.underwriting.name,
           bankLink: p.bankLink.name,
+          commerce: p.commerce.name,
           payments: p.payments.name,
           capital: p.capital.name,
         },

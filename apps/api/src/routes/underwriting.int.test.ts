@@ -146,3 +146,72 @@ describe('underwriting', () => {
     expect(list.body).toEqual([]);
   });
 });
+
+describe('commerce links', () => {
+  it('connects a point of sale, feeds it into the decision, and stays private to the owner', async () => {
+    const session = await registerUser(h.app);
+    const api = client(h.app, session);
+    const business = await api.post<{ id: string }>('/v1/businesses', demoBusiness);
+
+    const token = await api.post<{ linkToken: string; provider: string }>(
+      '/v1/commerce-links/link-token',
+      { businessId: business.body.id, platform: 'SQUARE' },
+    );
+    expect(token.status).toBe(200);
+    expect(token.body.provider).toBe('mock');
+
+    const link = await api.post<{ id: string; platform: string; locationName: string }>(
+      '/v1/commerce-links',
+      { businessId: business.body.id, platform: 'SQUARE', publicToken: 'healthy_sales_48000' },
+    );
+    expect(link.status).toBe(201);
+    expect(link.body.platform).toBe('SQUARE');
+    expect(link.body.locationName).toContain('Square');
+
+    const listed = await api.get<Array<{ id: string }>>(
+      `/v1/businesses/${business.body.id}/commerce-links`,
+    );
+    expect(listed.body.map((l) => l.id)).toEqual([link.body.id]);
+
+    const bank = await api.post<{ id: string }>('/v1/bank-links', {
+      businessId: business.body.id,
+      publicToken: 'mock_healthy_rev_48000_rent_6200',
+    });
+    const application = await api.post<{ id: string; commerceLinkId: string }>(
+      '/v1/underwriting/applications',
+      {
+        businessId: business.body.id,
+        statedMonthlyRevenueCents: 4_800_000,
+        timeInBusinessMonths: 36,
+        requestedMonthlyRentCents: 620_000,
+        bankLinkId: bank.body.id,
+        commerceLinkId: link.body.id,
+      },
+    );
+    expect(application.body.commerceLinkId).toBe(link.body.id);
+    const decided = await api.post<{
+      status: string;
+      decision: {
+        reasons: Array<{ code: string; message: string }>;
+        cashFlow: { commerce: { platform: string; monthsOfHistory: number } | null };
+      };
+    }>(`/v1/underwriting/applications/${application.body.id}/submit`);
+    expect(decided.body.status).toBe('APPROVED');
+    expect(decided.body.decision.cashFlow.commerce?.platform).toBe('SQUARE');
+    expect(decided.body.decision.cashFlow.commerce?.monthsOfHistory).toBeGreaterThanOrEqual(11);
+    expect(decided.body.decision.reasons.find((r) => r.code === 'DATA_DEPTH')?.message).toContain(
+      'Square',
+    );
+
+    const stranger = client(h.app, await registerUser(h.app, { email: 'stranger@example.com' }));
+    const denied = await stranger.get(`/v1/businesses/${business.body.id}/commerce-links`);
+    expect(denied.status).toBe(403);
+    const failed = await api.post<{ error: { code: string } }>('/v1/commerce-links', {
+      businessId: business.body.id,
+      platform: 'TOAST',
+      publicToken: 'please_fail',
+    });
+    expect(failed.status).toBe(422);
+    expect(failed.body.error.code).toBe('COMMERCE_LINK_FAILED');
+  });
+});

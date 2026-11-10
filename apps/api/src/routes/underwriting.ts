@@ -4,8 +4,8 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
 import { forbidden, notFound, unprocessable } from '../errors.ts';
-import type { Prisma } from '../generated/prisma/client.ts';
 import { toApplication } from '../serializers.ts';
+import { underwriteApplication } from '../services/underwriting.ts';
 import { currentUserId, getOwnedBusiness } from './helpers.ts';
 
 const Params = z.object({ id: Id });
@@ -95,40 +95,11 @@ export async function underwritingRoutes(app: FastifyInstance) {
         });
       }
 
-      const result = await providers.underwriting.decide({
-        statedMonthlyRevenueCents: application.statedMonthlyRevenueCents,
-        timeInBusinessMonths: application.timeInBusinessMonths,
-        requestedMonthlyRentCents: application.requestedMonthlyRentCents,
-        bankLink: bankLink ? { availableBalanceCents: bankLink.availableBalanceCents } : null,
-      });
-
-      const updated = await db.$transaction(async (tx) => {
-        await tx.underwritingDecision.deleteMany({ where: { applicationId: application.id } });
-        const row = await tx.underwritingApplication.update({
-          where: { id: application.id },
-          data: {
-            bankLinkId: bankLink?.id ?? null,
-            status: result.outcome,
-            submittedAt: new Date(),
-            decision: {
-              create: {
-                outcome: result.outcome,
-                approvedMonthlyLimitCents: result.approvedMonthlyLimitCents,
-                feeBps: result.feeBps,
-                reasons: result.reasons as unknown as Prisma.InputJsonValue,
-                provider: providers.underwriting.name,
-              },
-            },
-          },
-          include: { decision: true },
-        });
-        if (result.outcome === 'APPROVED') {
-          await tx.business.update({
-            where: { id: application.businessId },
-            data: { status: 'ACTIVE' },
-          });
-        }
-        return row;
+      const updated = await underwriteApplication({
+        db,
+        providers,
+        applicationId: application.id,
+        bankLink,
       });
       return toApplication(updated);
     },

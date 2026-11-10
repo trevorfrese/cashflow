@@ -148,16 +148,22 @@ model UnderwritingApplication {
 }
 
 model UnderwritingDecision {
-  id                        String                  @id @default(cuid())
-  applicationId             String                  @unique
-  application               UnderwritingApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  outcome                   DecisionOutcome
-  approvedMonthlyLimitCents Int?
-  feeBps                    Int?
-  /// Array of { code, message }.
-  reasons                   Json
-  provider                  String
-  decidedAt                 DateTime                @default(now())
+  id                              String                  @id @default(cuid())
+  applicationId                   String                  @unique
+  application                     UnderwritingApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  outcome                         DecisionOutcome
+  approvedMonthlyLimitCents       Int?
+  feeBps                          Int?
+  /// CashFlow score 0..100 and letter grade. Null when there was not enough data to score.
+  score                           Int?
+  grade                           String?
+  recommendedInstallmentsPerMonth Int?
+  /// Array of { code, message, impact }.
+  reasons                         Json
+  /// CashFlowSummary features the decision was based on. Null without bank data.
+  cashFlow                        Json?
+  provider                        String
+  decidedAt                       DateTime                @default(now())
 }
 
 // ---------- Lease ----------
@@ -337,13 +343,13 @@ model LedgerAccount {
 }
 
 model LedgerTransaction {
-  id            String   @id @default(cuid())
-  description   String
-  referenceType String?
-  referenceId   String?
+  id             String   @id @default(cuid())
+  description    String
+  referenceType  String?
+  referenceId    String?
   /// Guards against double posting for the same business event.
-  idempotencyKey String? @unique
-  postedAt      DateTime @default(now())
+  idempotencyKey String?  @unique
+  postedAt       DateTime @default(now())
 
   entries LedgerEntry[]
 

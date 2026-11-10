@@ -44,18 +44,32 @@ describe('underwriting', () => {
 
     const link = await api.post<{ id: string; institutionName: string }>('/v1/bank-links', {
       businessId: business.body.id,
-      publicToken: 'mock_public_token',
+      publicToken: 'mock_healthy_rev_48000_rent_6200',
     });
     expect(link.status).toBe(201);
     expect(link.body.institutionName).toBeTruthy();
 
     const approved = await api.post<{
       status: string;
-      decision: { feeBps: number; approvedMonthlyLimitCents: number };
+      decision: {
+        feeBps: number;
+        approvedMonthlyLimitCents: number;
+        score: number;
+        grade: string;
+        reasons: Array<{ code: string; impact: string }>;
+        cashFlow: { monthsOfHistory: number; verifiedMonthlyRevenueCents: number };
+      };
     }>(`/v1/underwriting/applications/${application.body.id}/submit`, { bankLinkId: link.body.id });
     expect(approved.body.status).toBe('APPROVED');
-    expect(approved.body.decision.feeBps).toBe(250);
-    expect(approved.body.decision.approvedMonthlyLimitCents).toBe(1_200_000);
+    expect(['A', 'B']).toContain(approved.body.decision.grade);
+    expect(approved.body.decision.score).toBeGreaterThanOrEqual(68);
+    expect([150, 200]).toContain(approved.body.decision.feeBps);
+    expect(approved.body.decision.approvedMonthlyLimitCents).toBeGreaterThanOrEqual(620_000);
+    expect(approved.body.decision.cashFlow.monthsOfHistory).toBeGreaterThanOrEqual(11);
+    // Verified revenue tracks the pinned $48,000 a month within 15%.
+    expect(approved.body.decision.cashFlow.verifiedMonthlyRevenueCents).toBeGreaterThan(4_080_000);
+    expect(approved.body.decision.cashFlow.verifiedMonthlyRevenueCents).toBeLessThan(5_520_000);
+    expect(approved.body.decision.reasons[0]?.code).toBe('APPROVED');
 
     const refreshed = await api.get<{ status: string }>(`/v1/businesses/${business.body.id}`);
     expect(refreshed.body.status).toBe('ACTIVE');
@@ -67,31 +81,56 @@ describe('underwriting', () => {
     expect(again.body.error.code).toBe('APPLICATION_FINAL');
   });
 
-  it('declines a young business with reasons', async () => {
+  it('declines an account with repeated overdrafts and explains why', async () => {
     const session = await registerUser(h.app);
     const api = client(h.app, session);
     const business = await api.post<{ id: string }>('/v1/businesses', demoBusiness);
     const link = await api.post<{ id: string }>('/v1/bank-links', {
       businessId: business.body.id,
-      publicToken: 'mock_low_balance',
+      publicToken: 'mock_overdrafts_rev_9000_rent_3500',
     });
     const application = await api.post<{ id: string }>('/v1/underwriting/applications', {
       businessId: business.body.id,
-      statedMonthlyRevenueCents: 1_000_000,
-      timeInBusinessMonths: 6,
-      requestedMonthlyRentCents: 400_000,
+      statedMonthlyRevenueCents: 900_000,
+      timeInBusinessMonths: 7,
+      requestedMonthlyRentCents: 350_000,
       bankLinkId: link.body.id,
     });
     const declined = await api.post<{
       status: string;
-      decision: { reasons: Array<{ code: string }> };
+      decision: { score: number; reasons: Array<{ code: string; impact: string }> };
     }>(`/v1/underwriting/applications/${application.body.id}/submit`);
     expect(declined.body.status).toBe('DECLINED');
-    expect(declined.body.decision.reasons.map((r) => r.code).sort()).toEqual([
-      'LOW_BALANCE',
-      'RENT_TO_REVENUE',
-      'TIME_IN_BUSINESS',
-    ]);
+    const codes = declined.body.decision.reasons.map((r) => r.code);
+    expect(codes).toContain('EXCESSIVE_OVERDRAFTS');
+    expect(codes).toContain('RENT_TO_REVENUE');
+    expect(
+      declined.body.decision.reasons.every((r) =>
+        ['POSITIVE', 'NEGATIVE', 'INFO'].includes(r.impact),
+      ),
+    ).toBe(true);
+  });
+
+  it('asks for more information when stated revenue is far above verified revenue', async () => {
+    const session = await registerUser(h.app);
+    const api = client(h.app, session);
+    const business = await api.post<{ id: string }>('/v1/businesses', demoBusiness);
+    const link = await api.post<{ id: string }>('/v1/bank-links', {
+      businessId: business.body.id,
+      publicToken: 'mock_healthy_rev_20000',
+    });
+    const application = await api.post<{ id: string }>('/v1/underwriting/applications', {
+      businessId: business.body.id,
+      statedMonthlyRevenueCents: 6_000_000,
+      timeInBusinessMonths: 36,
+      requestedMonthlyRentCents: 400_000,
+      bankLinkId: link.body.id,
+    });
+    const res = await api.post<{ status: string; decision: { reasons: Array<{ code: string }> } }>(
+      `/v1/underwriting/applications/${application.body.id}/submit`,
+    );
+    expect(res.body.status).toBe('NEEDS_INFO');
+    expect(res.body.decision.reasons[0]?.code).toBe('REVENUE_MISMATCH');
   });
 
   it('keeps businesses private to their owner', async () => {

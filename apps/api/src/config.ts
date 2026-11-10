@@ -20,7 +20,7 @@ const ConfigSchema = z.object({
 
   CORS_ORIGIN: z.string().default('*'),
 
-  UNDERWRITING_PROVIDER: z.enum(['mock']).default('mock'),
+  UNDERWRITING_PROVIDER: z.enum(['cashflow', 'mock']).default('cashflow'),
   BANK_LINK_PROVIDER: z.enum(['mock', 'plaid']).default('mock'),
   PAYMENTS_PROVIDER: z.enum(['mock', 'stripe']).default('mock'),
   CAPITAL_PROVIDER: z.enum(['mock']).default('mock'),

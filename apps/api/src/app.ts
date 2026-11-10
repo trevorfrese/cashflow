@@ -121,11 +121,9 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   });
 
   app.setNotFoundHandler((request, reply) =>
-    reply
-      .code(404)
-      .send({
-        error: { code: 'NOT_FOUND', message: `Route ${request.method} ${request.url} not found` },
-      }),
+    reply.code(404).send({
+      error: { code: 'NOT_FOUND', message: `Route ${request.method} ${request.url} not found` },
+    }),
   );
 
   await app.register(healthRoutes);

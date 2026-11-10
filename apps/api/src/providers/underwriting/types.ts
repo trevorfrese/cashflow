@@ -1,24 +1,13 @@
-import type { DecisionOutcome, DecisionReason } from '@cashflow/shared';
+import type { EngineInput, EngineResult } from '../../underwriting/engine.ts';
 
-export interface UnderwritingInput {
-  statedMonthlyRevenueCents: number;
-  timeInBusinessMonths: number;
-  requestedMonthlyRentCents: number;
-  /** Null when the applicant has not connected a bank account. */
-  bankLink: { availableBalanceCents: number | null } | null;
-}
-
-export interface UnderwritingResult {
-  outcome: DecisionOutcome;
-  approvedMonthlyLimitCents: number | null;
-  feeBps: number | null;
-  reasons: DecisionReason[];
-}
+export type UnderwritingInput = EngineInput;
+export type UnderwritingResult = EngineResult;
 
 /**
  * Decides whether CashFlow will front rent for a business, and on what terms.
- * A real implementation might call a credit bureau, a cash flow underwriting vendor,
- * or an internal model. The mock is a transparent rules engine.
+ * The default implementation is the in-house cash flow engine in src/underwriting. A
+ * vendor backed implementation (a bureau pull, a third party cash flow score) would
+ * implement the same interface and could blend its signal with the engine's.
  */
 export interface UnderwritingProvider {
   readonly name: string;

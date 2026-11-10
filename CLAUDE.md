@@ -60,8 +60,8 @@ Per package: `pnpm --filter @cashflow/api dev`, `pnpm --filter @cashflow/shared 
 
 ## Money and provider rules
 
-- Every external dependency that touches money or risk is an interface in `apps/api/src/providers/<name>/` with `types.ts`, `mock.ts`, and an `index.ts` factory that picks the implementation from an environment variable. The mock is always the default.
-  - `UnderwritingProvider` (`UNDERWRITING_PROVIDER`)
+- Every external dependency that touches money or risk is an interface in `apps/api/src/providers/<name>/` with `types.ts`, a mock or in-house implementation, and an `index.ts` factory that picks the implementation from an environment variable. The mock or in-house implementation is always the default.
+  - `UnderwritingProvider` (`UNDERWRITING_PROVIDER`, default `cashflow`: the in-house cash flow engine in `apps/api/src/underwriting/`, documented in `apps/api/UNDERWRITING.md`)
   - `BankLinkProvider` (`BANK_LINK_PROVIDER`)
   - `PaymentsProvider` (`PAYMENTS_PROVIDER`)
   - `CapitalProvider` (`CAPITAL_PROVIDER`)

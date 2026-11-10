@@ -15,6 +15,7 @@ import { loadConfig } from '../src/config.ts';
 import { todayIso } from '../src/dates.ts';
 import { createDb } from '../src/db.ts';
 import { runAllJobs } from '../src/jobs/index.ts';
+import { underwriteApplication } from '../src/services/underwriting.ts';
 import { ACCOUNTS, ensureSystemAccounts } from '../src/ledger/accounts.ts';
 import { accountBalance } from '../src/ledger/service.ts';
 import { createProviders } from '../src/providers/index.ts';
@@ -75,7 +76,9 @@ async function main() {
       status: 'ACTIVE',
     },
   });
-  const bakeryBank = await providers.bankLink.exchangePublicToken('seed_blue_door');
+  const bakeryBank = await providers.bankLink.exchangePublicToken(
+    'seed_blue_door_healthy_rev_48000_rent_6200',
+  );
   const bakeryLink = await db.bankLink.create({
     data: {
       businessId: bakery.id,
@@ -87,32 +90,24 @@ async function main() {
       availableBalanceCents: bakeryBank.availableBalanceCents,
     },
   });
-  const bakeryDecision = await providers.underwriting.decide({
-    statedMonthlyRevenueCents: 4_800_000,
-    timeInBusinessMonths: 68,
-    requestedMonthlyRentCents: 620_000,
-    bankLink: { availableBalanceCents: bakeryBank.availableBalanceCents },
-  });
-  const bakeryApp = await db.underwritingApplication.create({
+  const bakeryDraft = await db.underwritingApplication.create({
     data: {
       businessId: bakery.id,
       bankLinkId: bakeryLink.id,
       statedMonthlyRevenueCents: 4_800_000,
       timeInBusinessMonths: 68,
       requestedMonthlyRentCents: 620_000,
-      status: bakeryDecision.outcome,
-      submittedAt: new Date(),
-      decision: {
-        create: {
-          outcome: bakeryDecision.outcome,
-          approvedMonthlyLimitCents: bakeryDecision.approvedMonthlyLimitCents,
-          feeBps: bakeryDecision.feeBps,
-          reasons: bakeryDecision.reasons,
-          provider: providers.underwriting.name,
-        },
-      },
     },
   });
+  const bakeryApp = await underwriteApplication({
+    db,
+    providers,
+    applicationId: bakeryDraft.id,
+    bankLink: bakeryLink,
+  });
+  if (bakeryApp.status !== 'APPROVED') {
+    throw new Error(`Seed expected Blue Door Bakery to be approved, got ${bakeryApp.status}`);
+  }
   const planStart = monthsAgo(3);
   const bakeryLease = await db.lease.create({
     data: {
@@ -166,7 +161,9 @@ async function main() {
       statedMonthlyRevenueCents: 900_000,
     },
   });
-  const barbersBank = await providers.bankLink.exchangePublicToken('seed_northside_low_balance');
+  const barbersBank = await providers.bankLink.exchangePublicToken(
+    'seed_northside_overdrafts_rev_9000_rent_3500',
+  );
   const barbersLink = await db.bankLink.create({
     data: {
       businessId: barbers.id,
@@ -178,31 +175,20 @@ async function main() {
       availableBalanceCents: barbersBank.availableBalanceCents,
     },
   });
-  const barbersDecision = await providers.underwriting.decide({
-    statedMonthlyRevenueCents: 900_000,
-    timeInBusinessMonths: 7,
-    requestedMonthlyRentCents: 350_000,
-    bankLink: { availableBalanceCents: barbersBank.availableBalanceCents },
-  });
-  await db.underwritingApplication.create({
+  const barbersDraft = await db.underwritingApplication.create({
     data: {
       businessId: barbers.id,
       bankLinkId: barbersLink.id,
       statedMonthlyRevenueCents: 900_000,
       timeInBusinessMonths: 7,
       requestedMonthlyRentCents: 350_000,
-      status: barbersDecision.outcome,
-      submittedAt: new Date(),
-      decision: {
-        create: {
-          outcome: barbersDecision.outcome,
-          approvedMonthlyLimitCents: barbersDecision.approvedMonthlyLimitCents,
-          feeBps: barbersDecision.feeBps,
-          reasons: barbersDecision.reasons,
-          provider: providers.underwriting.name,
-        },
-      },
     },
+  });
+  await underwriteApplication({
+    db,
+    providers,
+    applicationId: barbersDraft.id,
+    bankLink: barbersLink,
   });
 
   // ---- Lakeview Yoga: needs info ----
@@ -220,31 +206,15 @@ async function main() {
       statedMonthlyRevenueCents: 2_100_000,
     },
   });
-  const yogaDecision = await providers.underwriting.decide({
-    statedMonthlyRevenueCents: 2_100_000,
-    timeInBusinessMonths: 50,
-    requestedMonthlyRentCents: 380_000,
-    bankLink: null,
-  });
-  await db.underwritingApplication.create({
+  const yogaDraft = await db.underwritingApplication.create({
     data: {
       businessId: yoga.id,
       statedMonthlyRevenueCents: 2_100_000,
       timeInBusinessMonths: 50,
       requestedMonthlyRentCents: 380_000,
-      status: yogaDecision.outcome,
-      submittedAt: new Date(),
-      decision: {
-        create: {
-          outcome: yogaDecision.outcome,
-          approvedMonthlyLimitCents: null,
-          feeBps: null,
-          reasons: yogaDecision.reasons,
-          provider: providers.underwriting.name,
-        },
-      },
     },
   });
+  await underwriteApplication({ db, providers, applicationId: yogaDraft.id, bankLink: null });
 
   const pool = await accountBalance(db, ACCOUNTS.CAPITAL_POOL);
   const fees = await accountBalance(db, ACCOUNTS.FEE_REVENUE);

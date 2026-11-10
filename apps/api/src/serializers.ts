@@ -70,7 +70,11 @@ export const toDecision = (d: UnderwritingDecision): DecisionDto => ({
   outcome: d.outcome,
   approvedMonthlyLimitCents: d.approvedMonthlyLimitCents,
   feeBps: d.feeBps,
-  reasons: (d.reasons as Array<{ code: string; message: string }>) ?? [],
+  score: d.score,
+  grade: (d.grade as DecisionDto['grade']) ?? null,
+  recommendedInstallmentsPerMonth: d.recommendedInstallmentsPerMonth,
+  reasons: (d.reasons as DecisionDto['reasons']) ?? [],
+  cashFlow: (d.cashFlow as DecisionDto['cashFlow']) ?? null,
   provider: d.provider,
   decidedAt: iso(d.decidedAt),
 });

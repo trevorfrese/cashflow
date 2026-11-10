@@ -1,5 +1,7 @@
 import type { Config } from '../../config.ts';
-import type { BankLinkProvider, LinkedAccount } from './types.ts';
+import type { BankTransaction } from '@cashflow/shared';
+
+import type { BankLinkProvider, LinkedAccount, TransactionRange } from './types.ts';
 
 /**
  * Skeleton for a Plaid sandbox adapter. It compiles against the interface and documents the
@@ -10,6 +12,8 @@ import type { BankLinkProvider, LinkedAccount } from './types.ts';
  *   createLinkToken  -> plaid.linkTokenCreate({ user: { client_user_id }, products: ['auth', 'transactions'], ... })
  *   exchangePublicToken -> plaid.itemPublicTokenExchange({ public_token }) then accountsBalanceGet
  *   refreshBalance   -> plaid.accountsBalanceGet({ access_token })
+ *   getTransactions  -> plaid.transactionsSync or transactionsGet, then map Plaid's personal_finance_category
+ *                       onto TransactionCategory (see packages/shared/src/schemas/bank-data.ts)
  *
  * The Plaid access token belongs in `providerAccountToken`. For ACH debits you would also
  * create a processor token for your PaymentsProvider (Stripe: processorStripeBankAccountTokenCreate).
@@ -43,6 +47,15 @@ export class PlaidBankLinkProvider implements BankLinkProvider {
   async refreshBalance(_providerItemId: string): Promise<number | null> {
     throw new Error(
       'PlaidBankLinkProvider.refreshBalance is not implemented. See the notes in plaid.ts.',
+    );
+  }
+
+  async getTransactions(
+    _providerItemId: string,
+    _range: TransactionRange,
+  ): Promise<BankTransaction[]> {
+    throw new Error(
+      'PlaidBankLinkProvider.getTransactions is not implemented. See the notes in plaid.ts.',
     );
   }
 }

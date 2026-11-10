@@ -1,3 +1,4 @@
+import { feeForRent } from '@cashflow/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ACCOUNTS, receivableCode } from '../ledger/accounts.ts';
@@ -25,7 +26,6 @@ beforeEach(async () => {
 });
 
 const RENT = 620_000;
-const FEE = 15_500; // 2.5% of 6,200.00
 
 async function fundPool(amountCents: number) {
   const res = await client(h.app).post('/v1/admin/capital/fund', {
@@ -54,7 +54,9 @@ describe('rent payment lifecycle', () => {
     await fundPool(25_000_000);
     const session = await registerUser(h.app);
     const api = client(h.app, session);
-    const { businessId, applicationId } = await approvedBusiness(h.app, session);
+    const { businessId, applicationId, decision } = await approvedBusiness(h.app, session);
+    // Fee per period at the rate underwriting priced for this business.
+    const FEE = feeForRent(RENT, decision.feeBps);
 
     const lease = await api.post<{ id: string; landlordPayout: Record<string, unknown> }>(
       '/v1/leases',
@@ -70,7 +72,8 @@ describe('rent payment lifecycle', () => {
       installmentsPerMonth: 2,
     });
     expect(plan.status).toBe(201);
-    expect(plan.body.feeBps).toBe(250);
+    // The plan inherits the fee the underwriting decision priced.
+    expect(plan.body.feeBps).toBe(decision.feeBps);
 
     // The plan was created "today", so the first period is the next due date from today.
     const detail = await api.get<{

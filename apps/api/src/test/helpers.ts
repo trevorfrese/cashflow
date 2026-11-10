@@ -134,7 +134,7 @@ export async function approvedBusiness(app: FastifyInstance, session: Session) {
   const business = await api.post<{ id: string }>('/v1/businesses', demoBusiness);
   const bankLink = await api.post<{ id: string }>('/v1/bank-links', {
     businessId: business.body.id,
-    publicToken: 'mock_public_token_1',
+    publicToken: 'mock_healthy_rev_48000_rent_6200',
   });
   const application = await api.post<{ id: string }>('/v1/underwriting/applications', {
     businessId: business.body.id,

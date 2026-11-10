@@ -7,8 +7,7 @@
       </g>
     </mask>
   </defs>
-  <g transform="scale(1.149) translate(-15 -15)">
-    <circle cx="107" cy="107" r="82" fill="#15121C"/>
+  <g transform="scale(1.1765) translate(-15 -15)">
     <circle cx="100" cy="100" r="82" fill="#FFD43B" stroke="#15121C" stroke-width="6"/>
     <circle cx="100" cy="100" r="58" fill="#F4B323" stroke="#15121C" stroke-width="4"/>
     <g fill="none" stroke="#15121C" stroke-width="22">

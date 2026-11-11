@@ -25,6 +25,9 @@ apps/api/src/generated/
 .vscode/*
 !.vscode/extensions.json
 
+# dev command state: pids, logs, install and schema hashes
+.dev/
+
 # logs
 *.log
 npm-debug.log*

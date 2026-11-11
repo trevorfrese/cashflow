@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, ChoiceChips, ListRow, Notice, Pill, Screen, Text } from '@/components';
+import { useDevWalkthrough } from '@/dev/DevTools';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { centsToDollarsInput } from '@/lib/forms';
@@ -37,7 +38,11 @@ export default function ConnectBank() {
   const { business } = useBusiness();
   const links = useBankLinks(business?.id);
   const create = useCreateBankLink();
-  const [scenario, setScenario] = useState<ScenarioValue>('healthy');
+  // Dev menu only: a fresh applicant persona preselects the scenario that leads to its
+  // outcome. The screen says so, and any other scenario can still be picked.
+  const preset = useDevWalkthrough();
+  const presetScenario = SCENARIOS.find((s) => s.value === preset?.bankScenario)?.value;
+  const [scenario, setScenario] = useState<ScenarioValue>(presetScenario ?? 'healthy');
   const [error, setError] = useState<string | null>(null);
 
   const connect = async () => {
@@ -47,7 +52,11 @@ export default function ConnectBank() {
     try {
       await create.mutateAsync({
         businessId: business.id,
-        publicToken: `mock_${scenario}_rev_${revenue}_${Date.now()}`,
+        // The preset's own token is stable, so its decision is the same on every run.
+        publicToken:
+          preset && scenario === presetScenario
+            ? preset.bankPublicToken
+            : `mock_${scenario}_rev_${revenue}_${Date.now()}`,
       });
       if (next === 'application') router.replace('/application/new');
       else router.back();
@@ -76,6 +85,13 @@ export default function ConnectBank() {
       }
     >
       {error ? <Notice tone="danger" message={error} /> : null}
+      {preset && presetScenario ? (
+        <Notice
+          tone="info"
+          title={`Dev persona: ${SCENARIOS.find((s) => s.value === presetScenario)!.label} is preselected`}
+          message={`${preset.summary} Pick another history to see a different decision.`}
+        />
+      ) : null}
       <View style={styles.group}>
         <Text variant="label">Account history to simulate</Text>
         <ChoiceChips options={SCENARIOS} value={scenario} onChange={setScenario} />

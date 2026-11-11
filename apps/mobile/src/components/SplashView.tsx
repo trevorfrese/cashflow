@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from './Button';
 import { Text } from './Text';
+import { DevTapTarget } from '@/dev/DevTools';
 import { border, colors, fonts, spacing } from '@/theme';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -26,7 +27,10 @@ export function SplashView({ loading = false }: { loading?: boolean }) {
       </View>
       <View style={styles.panel}>
         <Text style={styles.eyebrow}>SPLIT RENT</Text>
-        <Text style={styles.wordmark}>CashFlow</Text>
+        {/* The brand mark on this screen. With dev tools on, five quick taps open the dev menu. */}
+        <DevTapTarget>
+          <Text style={styles.wordmark}>CashFlow</Text>
+        </DevTapTarget>
         <Button
           title="Sign in"
           size="lg"

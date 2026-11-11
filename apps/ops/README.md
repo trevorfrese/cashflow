@@ -9,10 +9,12 @@ The CashFlow operations console: the staff side of the product. Review queue, mo
 The API has to be running with operator routes on (`ENABLE_ADMIN=true`, `ADMIN_API_TOKEN`, and optionally `REVIEWER_API_TOKEN` in `apps/api/.env`).
 
 ```sh
-cp apps/ops/.env.example apps/ops/.env.local
-# set OPS_SESSION_SECRET in apps/ops/.env.local: openssl rand -hex 32
-pnpm dev:ops                          # http://localhost:3200
+./dev                                 # from the repo root: starts it on http://localhost:3200 with the rest
 ```
+
+`./dev` writes `apps/ops/.env.local` with a generated session secret. By hand: copy
+`.env.example` to `.env.local`, set `OPS_SESSION_SECRET` (`openssl rand -hex 32`), and run
+`pnpm dev:ops`.
 
 Sign in with your name and an operator token. The role (reviewer or admin) comes from the token. Your name is recorded on everything you do, in the audit log.
 

@@ -10,7 +10,7 @@ import {
 } from '@cashflow/shared';
 
 import { CONTROLS_POLICY } from '../controls/policy.ts';
-import { effectiveAt, todayIso } from '../dates.ts';
+import { clockNow, effectiveAt, todayIso } from '../dates.ts';
 import type { Db, Tx } from '../db.ts';
 import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import type { Lease, LeaseChange, Prisma, RentPlan } from '../generated/prisma/client.ts';
@@ -528,7 +528,7 @@ export async function cancelLeaseChange(
       where: { leaseId: lease.id, status: 'PENDING' },
     });
     if (!pending) throw notFound('Pending change');
-    const at = new Date();
+    const at = clockNow();
     await tx.leaseChange.update({
       where: { id: pending.id },
       data: { status: 'CANCELLED', cancelledAt: at },
@@ -609,7 +609,7 @@ export async function decideLeaseChange(
   },
 ): Promise<void> {
   const actor: AuditActor = { type: args.identity.role, id: args.identity.actor };
-  const at = new Date();
+  const at = clockNow();
   if (args.decision === 'APPROVE') {
     const outcome = await applyLeaseChange(ctx, {
       changeId: args.changeId,

@@ -24,6 +24,7 @@ import { authRoutes } from './routes/auth.ts';
 import { bankLinkRoutes } from './routes/bank-links.ts';
 import { businessRoutes } from './routes/businesses.ts';
 import { commerceLinkRoutes } from './routes/commerce-links.ts';
+import { devRoutes, installDevClock } from './routes/dev.ts';
 import { healthRoutes } from './routes/health.ts';
 import { leaseRoutes } from './routes/leases.ts';
 import { rentPlanRoutes } from './routes/rent-plans.ts';
@@ -161,6 +162,12 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
         await v1.register(adminRoutes);
         await v1.register(adminConsoleRoutes);
       }
+      // Dev tools: personas, the simulated clock, resets. Not registered at all unless the
+      // flag is on, so with it off every /v1/dev path is an ordinary 404. `loadConfig`
+      // refuses the flag in production.
+      if (opts.config.ENABLE_DEV_TOOLS) {
+        await v1.register(devRoutes);
+      }
     },
     { prefix: '/v1' },
   );
@@ -168,6 +175,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   app.addHook('onReady', async () => {
     await ensureSystemAccounts(opts.db);
   });
+  if (opts.config.ENABLE_DEV_TOOLS) installDevClock(app);
 
   return app;
 }

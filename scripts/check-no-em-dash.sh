@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 # U+2014 in UTF-8 is the byte sequence E2 80 94.
 EM_DASH="$(printf '\342\200\224')"
 
-files="$(git ls-files -- '*.md' '*.mdx' '*.ts' '*.tsx' '*.js' '*.jsx' '*.json' '*.yml' '*.yaml' '*.html' '*.css' 2>/dev/null || true)"
+files="$(git ls-files -- '*.md' '*.mdx' '*.ts' '*.tsx' '*.js' '*.jsx' '*.json' '*.yml' '*.yaml' '*.html' '*.css' '*.mjs' '*.sh' 'dev' 2>/dev/null || true)"
 
 if [ -z "$files" ]; then
   exit 0

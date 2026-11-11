@@ -15,8 +15,12 @@ export interface TestHarness {
   close: () => Promise<void>;
 }
 
-export async function createTestApp(): Promise<TestHarness> {
-  const config = loadConfig();
+/**
+ * Builds the app against the test database. `env` overrides single variables for one suite,
+ * for example `{ ENABLE_DEV_TOOLS: 'true' }`.
+ */
+export async function createTestApp(env: Record<string, string> = {}): Promise<TestHarness> {
+  const config = loadConfig({ ...process.env, ...env });
   const db = createDb(config.DATABASE_URL);
   const providers = createProviders(config);
   const app = await buildApp({ config, db, providers, logger: false });

@@ -49,6 +49,13 @@ const ConfigSchema = z.object({
   ADMIN_API_TOKEN: OptionalToken,
   REVIEWER_API_TOKEN: OptionalToken,
 
+  /**
+   * Dev tools under /v1/dev: sign in as a persona without a password, move the simulated
+   * clock, rebuild demo data. Off unless the local .env turns it on, and never in
+   * production: see the refusal in `loadConfig`. With it off the routes are not registered.
+   */
+  ENABLE_DEV_TOOLS: Bool.default(false),
+
   /** Request rate limiting. Off under test so the suites stay fast and deterministic. */
   RATE_LIMIT_ENABLED: Bool.default(true),
   /** Requests per client address per window, across all routes. */
@@ -94,6 +101,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   // Safety rails. A production build must never run with a live key by accident.
   if (config.NODE_ENV === 'production') {
+    // Dev tools hand out sessions without a password and can wipe the database.
+    if (config.ENABLE_DEV_TOOLS) {
+      throw new Error(
+        'Refusing to start: ENABLE_DEV_TOOLS=true with NODE_ENV=production. Dev tools impersonate users, reset data and move the clock. They only run in local development.',
+      );
+    }
     if (config.STRIPE_SECRET_KEY?.startsWith('sk_live_')) {
       throw new Error(
         'Refusing to start: STRIPE_SECRET_KEY is a live key. This project never moves real money.',

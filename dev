@@ -1,0 +1,26 @@
+#!/bin/sh
+# One command from a fresh clone to a running, seeded system:
+#
+#   ./dev            set up and start everything
+#   ./dev help       every command and flag
+#
+# This wrapper only finds Node. The work is in scripts/dev/cli.mjs, which uses nothing but
+# Node built-ins, so it runs before `pnpm install` has.
+set -eu
+cd "$(dirname "$0")"
+
+if ! command -v node >/dev/null 2>&1; then
+  required="$(cat .nvmrc 2>/dev/null || echo 22)"
+  echo "" >&2
+  echo "  Stopped: Node.js is not installed (or not on your PATH)." >&2
+  echo "" >&2
+  echo "    This project needs Node $required. Install it with one of:" >&2
+  echo "      nvm install $required && nvm use $required" >&2
+  echo "      brew install node@$required" >&2
+  echo "      https://nodejs.org/en/download" >&2
+  echo "    then run ./dev again. On Windows, use WSL." >&2
+  echo "" >&2
+  exit 1
+fi
+
+exec node scripts/dev/cli.mjs "$@"

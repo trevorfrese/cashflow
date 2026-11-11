@@ -1,3 +1,4 @@
+import { clockNow } from '../dates.ts';
 import type { Tx } from '../db.ts';
 import type {
   Prisma,
@@ -51,7 +52,7 @@ export function currentDecision(tx: Tx, applicationId: string) {
 export async function supersedeCurrentDecision(
   tx: Tx,
   applicationId: string,
-  at: Date = new Date(),
+  at: Date = clockNow(),
 ): Promise<string | null> {
   const current = await currentDecision(tx, applicationId);
   if (!current) return null;

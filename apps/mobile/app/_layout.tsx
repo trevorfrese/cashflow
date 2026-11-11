@@ -7,6 +7,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { DevIndicator, DevToolsProvider } from '@/dev/DevTools';
 import { AuthProvider } from '@/lib/auth';
 import { BusinessProvider } from '@/lib/business';
 import { border, colors, fontAssets, hardShadow, radii } from '@/theme';
@@ -35,26 +36,29 @@ export default function RootLayout() {
           <BusinessProvider>
             <StatusBar style="dark" />
             <PhoneFrame>
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  contentStyle: { backgroundColor: colors.background },
-                }}
-              >
-                <Stack.Screen name="index" />
-                <Stack.Screen name="welcome" />
-                <Stack.Screen name="(auth)" />
-                <Stack.Screen name="(tabs)" />
-                <Stack.Screen name="business/new" options={{ presentation: 'modal' }} />
-                <Stack.Screen name="bank/connect" options={{ presentation: 'modal' }} />
-                <Stack.Screen name="application/new" />
-                <Stack.Screen name="application/[id]" />
-                <Stack.Screen name="lease/new" />
-                <Stack.Screen name="plan/new" />
-                <Stack.Screen name="settings/rent" />
-                <Stack.Screen name="settings/businesses" />
-                <Stack.Screen name="settings/banks" />
-              </Stack>
+              <DevToolsProvider>
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    contentStyle: { backgroundColor: colors.background },
+                  }}
+                >
+                  <Stack.Screen name="index" />
+                  <Stack.Screen name="welcome" />
+                  <Stack.Screen name="(auth)" />
+                  <Stack.Screen name="(tabs)" />
+                  <Stack.Screen name="business/new" options={{ presentation: 'modal' }} />
+                  <Stack.Screen name="bank/connect" options={{ presentation: 'modal' }} />
+                  <Stack.Screen name="application/new" />
+                  <Stack.Screen name="application/[id]" />
+                  <Stack.Screen name="lease/new" />
+                  <Stack.Screen name="plan/new" />
+                  <Stack.Screen name="settings/rent" />
+                  <Stack.Screen name="settings/businesses" />
+                  <Stack.Screen name="settings/banks" />
+                </Stack>
+                <DevIndicator />
+              </DevToolsProvider>
             </PhoneFrame>
           </BusinessProvider>
         </AuthProvider>

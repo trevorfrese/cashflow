@@ -14,17 +14,32 @@ instanced from the Google Fonts variable font (SIL Open Font License, see `OFL.t
 ## Run
 
 ```sh
-pnpm setup                      # once: Postgres, migrations, demo data (from the repo root)
-pnpm --filter @cashflow/api dev # terminal 1
-pnpm dev:mobile                 # terminal 2, then press i (iOS), a (Android), or w (web)
+./dev                           # from the repo root: everything, with the app on http://localhost:8099
+pnpm dev:mobile                 # for a phone or simulator: press i (iOS) or a (Android)
 ```
 
 Copy `.env.example` to `.env` if the API is not on `http://localhost:4000`. On a physical
 device use your computer's LAN address; on the Android emulator use `http://10.0.2.2:4000`.
 
 Sign in with the demo account (`demo@cashflow.local` / `demo-password-123`) or tap
-"Use the demo account". It owns five businesses that show the underwriting outcomes and a
-plan that is current, one that is delinquent, and one that was charged off.
+"Use the demo account": Blue Door Bakery, with an active plan and three months of history.
+Every other state has its own login, reached through the dev menu.
+
+## Dev menu
+
+Hidden unless `EXPO_PUBLIC_DEV_TOOLS=true` (which `./dev` writes into `.env`) and the API runs
+with `ENABLE_DEV_TOOLS=true`. Open it with five quick taps on the coin in the home title, or
+on the CashFlow wordmark on the welcome screen (that screen has no coin), or with Ctrl+`on
+web. It is a full screen modal: pick a persona to sign in as, move the simulated clock (one
+day, one week, to the persona's next event) and read what changed, reset the persona or
+everything, sign out, and jump to the ops console or the dev home page. While you are a
+persona a small`DEV` tag sits in the top corner; tapping it reopens the menu.
+
+Fresh applicant personas prefill the business form, preselect the sandbox bank scenario, and
+fill in months and rent, each with a notice saying so. Switching persona replaces the session
+through `replaceSession` in `src/dev/session.ts`, which empties the query cache before the
+app learns who the new user is. With the flag off `DevToolsProvider`, `DevTapTarget` and
+`DevIndicator` return their children untouched: no listener, no request, no menu.
 
 ## Layout
 
@@ -46,6 +61,7 @@ src/
   lib/queries.ts     TanStack Query hooks, one per endpoint
   lib/stage.ts       where a business is in the journey, drives the home screen
   lib/forms.ts       money and date parsing for inputs
+  dev/               the dev menu: flag, tap detector, persona grouping, session switch, UI
   theme.ts           colors, fonts, type scale, hard shadows, from the shared brand tokens
 ```
 
@@ -76,7 +92,7 @@ The app is told only that the account is under review (`Business.verification`,
 ## Tests
 
 ```sh
-pnpm --filter @cashflow/mobile test        # vitest: form parsing, stage derivation
+pnpm --filter @cashflow/mobile test        # vitest: form parsing, stage derivation, dev menu logic
 pnpm --filter @cashflow/mobile typecheck
 pnpm --filter @cashflow/mobile lint
 ```

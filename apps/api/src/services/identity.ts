@@ -1,5 +1,6 @@
 import type { AdminIdentity } from '@cashflow/shared';
 
+import { clockNow } from '../dates.ts';
 import type { Db, Tx } from '../db.ts';
 import { forbidden, notFound, unprocessable } from '../errors.ts';
 import type {
@@ -84,7 +85,7 @@ export async function screenParty(
     aliases,
     country: 'US',
   });
-  const at = args.at ?? new Date();
+  const at = args.at ?? clockNow();
   const actor = args.actor ?? SYSTEM;
   return ctx.db.$transaction(async (tx) => {
     await tx.screeningResult.updateMany({
@@ -234,7 +235,7 @@ export async function runBusinessIdentity(
   options: { actor?: AuditActor; at?: Date } = {},
 ): Promise<IdentityRunResult> {
   const { db, providers } = ctx;
-  const at = options.at ?? new Date();
+  const at = options.at ?? clockNow();
   const actor = options.actor ?? SYSTEM;
   const business = await db.business.findUnique({
     where: { id: businessId },
@@ -415,7 +416,7 @@ export async function clearScreening(
     if (row.result === 'MATCH' && args.identity.role !== 'admin') {
       throw forbidden('Only an admin can clear a confirmed match');
     }
-    const at = new Date();
+    const at = clockNow();
     const actor: AuditActor = { type: args.identity.role, id: args.identity.actor };
     const cleared = await tx.screeningResult.update({
       where: { id: row.id },

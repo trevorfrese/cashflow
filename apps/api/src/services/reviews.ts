@@ -11,7 +11,7 @@ import {
 
 import { CONTROLS_POLICY } from '../controls/policy.ts';
 
-import { todayIso } from '../dates.ts';
+import { clockNow, todayIso } from '../dates.ts';
 import type { Db } from '../db.ts';
 import { notFound, unprocessable } from '../errors.ts';
 import type { Prisma, UnderwritingDecision } from '../generated/prisma/client.ts';
@@ -135,7 +135,7 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
           where: { id: business.id },
           data: {
             verificationStatus: 'VERIFIED',
-            verificationCheckedAt: new Date(),
+            verificationCheckedAt: clockNow(),
             verificationReasons: ['MANUAL_REVIEW'],
           },
         });
@@ -243,7 +243,7 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
       (r) => !HEADLINE_CODES.has(r.code),
     );
 
-    const now = new Date();
+    const now = clockNow();
     await supersedeCurrentDecision(tx, application.id, now);
     const decision = await tx.underwritingDecision.create({
       data: {

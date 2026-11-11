@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, ListRow, Notice, Pill, Screen, Text, TextField } from '@/components';
+import { useDevWalkthrough } from '@/dev/DevTools';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { centsToDollarsInput, dollarsToCents, monthsSince } from '@/lib/forms';
@@ -26,9 +27,15 @@ export default function NewApplication() {
   const links = useBankLinks(business?.id);
   const submit = useSubmitApplication();
   const sameDraft = draft.businessId !== null && draft.businessId === business?.id;
+  // Dev menu only: a fresh applicant persona fills in the months and rent of its preset.
+  const preset = useDevWalkthrough();
   const [revenue, setRevenue] = useState(sameDraft ? draft.revenue : '');
-  const [months, setMonths] = useState(sameDraft ? draft.months : '');
-  const [rent, setRent] = useState(sameDraft ? draft.rent : '');
+  const [months, setMonths] = useState(
+    sameDraft ? draft.months : preset ? String(preset.timeInBusinessMonths) : '',
+  );
+  const [rent, setRent] = useState(
+    sameDraft ? draft.rent : preset ? centsToDollarsInput(preset.requestedMonthlyRentCents) : '',
+  );
   const [bankLinkId, setBankLinkId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -102,6 +109,13 @@ export default function NewApplication() {
       }
     >
       {errors.form ? <Notice tone="danger" message={errors.form} /> : null}
+      {preset ? (
+        <Notice
+          tone="info"
+          title="Dev persona: months and rent are prefilled"
+          message={preset.summary}
+        />
+      ) : null}
       {business ? (
         <Card tone="paper" shadow="none">
           <Text variant="label">Applying as</Text>

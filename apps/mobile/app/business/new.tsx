@@ -5,9 +5,15 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, ChoiceChips, Notice, Screen, Text, TextField } from '@/components';
+import { useDevWalkthrough } from '@/dev/DevTools';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
-import { dollarsToCents, normalizeMonthInput, percentToBps } from '@/lib/forms';
+import {
+  centsToDollarsInput,
+  dollarsToCents,
+  normalizeMonthInput,
+  percentToBps,
+} from '@/lib/forms';
 import { useCreateBusiness } from '@/lib/queries';
 import { colors, fonts, spacing } from '@/theme';
 
@@ -24,21 +30,24 @@ const INDUSTRIES: ReadonlyArray<{ value: Industry; label: string }> = [
 export default function NewBusiness() {
   const create = useCreateBusiness();
   const { select } = useBusiness();
+  // Dev menu only: a fresh applicant persona carries the inputs that lead to its outcome.
+  const preset = useDevWalkthrough();
+  const p = preset?.business;
   const [form, setForm] = useState({
-    legalName: '',
-    dba: '',
-    industry: null as Industry | null,
-    line1: '',
-    line2: '',
-    city: '',
-    state: '',
-    postalCode: '',
-    foundedOn: '',
-    revenue: '',
-    taxIdLast4: '',
-    ownerName: '',
-    ownerTitle: 'Owner',
-    ownership: '100',
+    legalName: p?.legalName ?? '',
+    dba: p?.dba ?? '',
+    industry: (p?.industry ?? null) as Industry | null,
+    line1: p?.address.line1 ?? '',
+    line2: p?.address.line2 ?? '',
+    city: p?.address.city ?? '',
+    state: p?.address.state ?? '',
+    postalCode: p?.address.postalCode ?? '',
+    foundedOn: p?.foundedOn.slice(0, 7) ?? '',
+    revenue: p ? centsToDollarsInput(p.statedMonthlyRevenueCents) : '',
+    taxIdLast4: p?.taxIdLast4 ?? '',
+    ownerName: p?.owners[0]?.fullName ?? '',
+    ownerTitle: p?.owners[0]?.title ?? 'Owner',
+    ownership: p?.owners[0] ? String(p.owners[0].ownershipBps / 100) : '100',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = (key: keyof typeof form) => (value: string) =>
@@ -113,6 +122,13 @@ export default function NewBusiness() {
       }
     >
       {errors.form ? <Notice tone="danger" message={errors.form} /> : null}
+      {preset ? (
+        <Notice
+          tone="info"
+          title="Dev persona: this form is prefilled"
+          message={`${preset.summary} Change anything you like before saving.`}
+        />
+      ) : null}
       <TextField
         label="Legal name"
         value={form.legalName}

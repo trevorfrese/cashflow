@@ -16,6 +16,7 @@ import {
   Text,
   statusPill,
 } from '@/components';
+import { DevTapTarget } from '@/dev/DevTools';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { formatDate, formatPeriod, ordinal, todayIso } from '@/lib/forms';
@@ -58,7 +59,9 @@ export default function Home() {
       >
         <View style={styles.topBar}>
           <View style={styles.brand}>
-            <CoinMark size={40} />
+            <DevTapTarget>
+              <CoinMark size={40} />
+            </DevTapTarget>
             <Text variant="display">CashFlow</Text>
           </View>
         </View>

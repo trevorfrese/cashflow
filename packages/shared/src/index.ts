@@ -15,3 +15,4 @@ export * from './schemas/ledger';
 export * from './schemas/identity';
 export * from './schemas/monitoring';
 export * from './schemas/operator';
+export * from './schemas/dev';

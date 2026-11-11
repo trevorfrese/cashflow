@@ -13,7 +13,7 @@ import type {
 } from '@cashflow/shared';
 
 import type { AppContext } from '../context.ts';
-import { effectiveAt } from '../dates.ts';
+import { clockNow, effectiveAt } from '../dates.ts';
 import type { Db, Tx } from '../db.ts';
 import { notFound, unprocessable } from '../errors.ts';
 import type { Alert, AuditEvent, JobRun, Prisma } from '../generated/prisma/client.ts';
@@ -273,7 +273,7 @@ export async function acknowledgeAlert(
         `This alert is ${alert.status.toLowerCase()}, not open`,
       );
     }
-    const at = new Date();
+    const at = clockNow();
     const updated = await tx.alert.update({
       where: { id: alert.id },
       data: {
@@ -310,7 +310,7 @@ export async function resolveAlert(
     if (alert.status === 'RESOLVED') {
       throw unprocessable('ALERT_RESOLVED', 'This alert is already resolved');
     }
-    const at = new Date();
+    const at = clockNow();
     const updated = await tx.alert.update({
       where: { id: alert.id },
       data: {

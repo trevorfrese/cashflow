@@ -1,10 +1,13 @@
-import type { LoginRequest, RegisterRequest, User as UserT } from '@cashflow/shared';
+import type { AuthTokens, LoginRequest, RegisterRequest, User as UserT } from '@cashflow/shared';
 import { AuthResponse, User } from '@cashflow/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { replaceSession } from '@/dev/session';
+
 import { api, tokenStore } from './api';
+import { storage } from './storage';
 
 type AuthState = {
   /** Undefined while the stored session is being restored. */
@@ -12,6 +15,11 @@ type AuthState = {
   signIn: (input: LoginRequest) => Promise<void>;
   register: (input: RegisterRequest) => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * Replace the session with one obtained elsewhere, dropping everything cached for the
+   * previous account first. Used by the dev menu to sign in as a persona.
+   */
+  adoptSession: (session: { user: UserT; tokens: AuthTokens }) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -87,9 +95,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(res.user);
   }, []);
 
+  const adoptSession = useCallback(
+    (session: { user: UserT; tokens: AuthTokens }) =>
+      replaceSession(session, { queryClient, tokenStore, storage, setUser }),
+    [queryClient],
+  );
+
   const value = useMemo(
-    () => ({ user, signIn, register, signOut }),
-    [user, signIn, register, signOut],
+    () => ({ user, signIn, register, signOut, adoptSession }),
+    [user, signIn, register, signOut, adoptSession],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

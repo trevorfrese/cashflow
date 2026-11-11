@@ -11,6 +11,7 @@ import pino from 'pino';
 import { loadConfig } from '../config.ts';
 import { todayIso } from '../dates.ts';
 import { createDb } from '../db.ts';
+import { loadDevClock } from '../dev/clock.ts';
 import { createProviders } from '../providers/index.ts';
 import { JOBS, runAllJobs, type JobName } from './index.ts';
 
@@ -39,6 +40,8 @@ const db = createDb(config.DATABASE_URL);
 const providers = createProviders(config);
 
 try {
+  // With dev tools on, "today" is the simulated date the API is on, not the wall clock.
+  if (config.ENABLE_DEV_TOOLS) await loadDevClock(db);
   const argv = process.argv.slice(2);
   const ctx = { config, db, providers, log };
   const only = readOnly(argv);

@@ -13,7 +13,8 @@ apps/mobile       Expo app: auth, onboarding, underwriting, lease linking, rent 
 apps/api          Fastify API: Prisma + Postgres, Zod, provider interfaces, underwriting engine, scheduled jobs
 packages/shared   Zod schemas, enums, types, brand tokens, pure installment math
 docker/           Postgres init SQL for docker compose
-scripts/          Repo-level scripts (em dash check)
+dev               The one command entry point (sh wrapper around scripts/dev/cli.mjs)
+scripts/          Repo-level scripts: the dev CLI and supervisor (scripts/dev), em dash check
 .github/          CI workflow
 ```
 
@@ -32,10 +33,16 @@ Package names are scoped: `@cashflow/shared`, `@cashflow/api`, `@cashflow/web`, 
 Run from the repo root unless noted.
 
 ```sh
-pnpm install                 # install everything
-pnpm setup                   # start Postgres (docker), migrate, seed demo data
-pnpm dev                     # API + web in parallel
-pnpm dev:mobile              # Expo dev server (separate terminal)
+./dev                        # one command: install, .env files, Postgres, migrate, seed, start everything
+./dev --detach               # the same in the background, returns when healthy (use this from an agent)
+./dev status --json          # what is running, ports, pids, health, simulated date, log paths
+./dev smoke                  # scripted happy path over HTTP, exits non-zero on a failed step
+./dev stop                   # stop what ./dev started
+./dev help                   # every command and flag
+pnpm install                 # install only
+pnpm setup                   # the older three steps by hand: Postgres (docker), migrate, seed
+pnpm dev                     # API + web in parallel, without the supervisor
+pnpm dev:mobile              # Expo dev server for a phone (separate terminal)
 pnpm dev:ops                 # operations console on :3200 (separate terminal, needs apps/ops/.env.local)
 pnpm build                   # build all packages
 pnpm lint                    # eslint across packages + em dash check
@@ -48,6 +55,8 @@ pnpm check:copy              # fail on any em dash in tracked files
 ```
 
 Per package: `pnpm --filter @cashflow/api dev`, `pnpm --filter @cashflow/shared test`, and so on. API specific commands (`db:migrate`, `db:seed`, `job:run`) are documented in `apps/api/README.md`. Mobile specifics (sandbox bank scenarios, `EXPO_PUBLIC_API_URL`) are in `apps/mobile/README.md`. The operations console (session cookie, proxy, pages) is in `apps/ops/README.md`.
+
+`AGENTS.md` has the full run, verify, drive and teardown loop for an agent, the personas, and common failure signatures. This file stays the source for conventions.
 
 Docs to read before changing behavior: `ARCHITECTURE.md` (providers, ledger, payment lifecycle) and `apps/api/UNDERWRITING.md` (the cash flow underwriting model).
 
@@ -75,6 +84,12 @@ Docs to read before changing behavior: `ARCHITECTURE.md` (providers, ledger, pay
 - Status changes and their ledger postings happen in the same database transaction.
 - Scheduled jobs are idempotent and record a `JobRun`.
 - Never add a real payment, bank, or capital integration that is active by default. Skeleton adapters may exist but must refuse to run without explicit configuration.
+
+## Dev tools
+
+- Everything that can impersonate a user, reset data, or move the clock lives under `apps/api/src/dev/` and `/v1/dev`, behind `ENABLE_DEV_TOOLS` (default off, refused when `NODE_ENV=production`, routes not registered when off). The app's side is `apps/mobile/src/dev/`, behind `EXPO_PUBLIC_DEV_TOOLS`. Keep new dev-only code behind the same two flags and add a test that it is absent with the flag off.
+- Personas are defined in one file, `apps/api/src/dev/personas.ts`. The seed, the dev routes, the dev menu, the CLI and the dev home page all read it.
+- "Today" comes from `todayIso()` and `clockNow()` in `apps/api/src/dates.ts`, never from `new Date()`, for anything that is business behavior. That is what lets the simulated clock work.
 
 ## Brand
 

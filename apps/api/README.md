@@ -11,16 +11,15 @@ default.
 From the repo root, with Docker running:
 
 ```sh
-pnpm setup                        # Postgres up, migrate, seed demo data
-pnpm --filter @cashflow/api dev   # http://localhost:4000, docs at /docs
+./dev --only api                  # from the repo root: Postgres, migrate, seed, http://localhost:4000, docs at /docs
 ```
 
-If port 5432 is taken on your machine, set `POSTGRES_PORT=5433` in the root `.env` and update
-`DATABASE_URL` in `apps/api/.env` to match.
+Or by hand: `pnpm setup`, then `pnpm --filter @cashflow/api dev`. If port 5432 is taken,
+`./dev` picks the next free port and writes it to the root `.env`.
 
-Demo login after seeding: `demo@cashflow.local` / `demo-password-123`. A second owner,
-`sam@cashflow.local` with the same password, has the businesses that give the operator
-routes something to show.
+Demo login after seeding: `demo@cashflow.local` / `demo-password-123`. Every seeded business
+is its own login with that password: the list is in the header of `prisma/seed.ts` and in
+`AGENTS.md`.
 
 `.env.example` has `ENABLE_ADMIN=true` with placeholder operator tokens so a local copy
 starts. See "Operator routes" below before the API is reachable by anyone else.
@@ -101,7 +100,7 @@ seed, or a test, and not across separate `job:run` invocations.
 
 The seed has one business in each state: Blue Door Bakery is current, Cedar Street Cycles is
 delinquent with a held payout, and Juniper Print Studio was charged off and has since paid
-one of its two written off installments. Under `sam@cashflow.local`, Alder & Ash Florist has
+one of its two written off installments. Alder & Ash Florist has
 a landlord payout change inside its cooling-off period with the payout held, Meridian Supply
 is in review on a possible screening match, and Tidewater Sign Works has been in review for
 34 days. The seed replays the `monitor` job with the others, so the open alerts (at least one
@@ -193,6 +192,48 @@ no customer route uses them.
 Owner routes added in this area: `PATCH /v1/leases/:id` now returns `pendingChange` and
 `pendingRentIncrease` (see "Lease change control" in `ARCHITECTURE.md`), and
 `POST /v1/leases/:id/pending-change/cancel` cancels a pending landlord change.
+
+## Dev tools
+
+With `ENABLE_DEV_TOOLS=true` the API mounts `/v1/dev`. Without it the routes are not
+registered (404), and the API refuses to start with it when `NODE_ENV=production`. They take
+no credentials, so they also answer 404 to any caller that is not on this machine or a
+private network. `./dev` turns the flag on in the `.env` it generates.
+
+| Route                                | What it does                                                                                                   |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/dev/personas`               | Every persona: what it demonstrates, its state now, its next event, and the preset inputs of a fresh applicant |
+| `POST /v1/dev/personas/:key/session` | Sign in as a persona. The same session shape as `/v1/auth/login`, plus the persona and the screen to land on   |
+| `POST /v1/dev/personas/:key/reset`   | Rebuild one persona as a new account and sign in as it. 409 for the four personas that are replayed history    |
+| `GET /v1/dev/clock`                  | The simulated date, the real date, and the days between                                                        |
+| `POST /v1/dev/clock/advance`         | `{ days }`, `{ toDate }` or `{ toNextEventFor }`. Runs every job for each day crossed and returns what changed |
+| `POST /v1/dev/reset`                 | Wipe everything, rebuild every persona as of the real date. The clock goes back with it                        |
+| `GET /v1/dev/overview`               | Counts, plans by standing, open alerts, pool, trial balance, providers                                         |
+| `GET /v1/dev/feed`                   | The latest job runs, audit events and open alerts. Read only                                                   |
+
+**Personas** are in `src/dev/personas.ts`, one definition each, built by `src/dev/builders.ts`.
+`prisma/seed.ts` builds all of them through `src/dev/seed.ts`.
+
+**The clock.** The simulated date is the latest as-of date in `JobRun` when that is ahead of
+the wall clock. `src/dates.ts` holds it for the process: `todayIso()`, `clockNow()` and
+`effectiveAt()` read it, and every route, service, job and sandbox provider gets "today"
+from those. The API re-reads it from the database at start and at most every two seconds,
+so `job:run --as-of` or the operator jobs route moves it too. With the flag off nothing sets
+it and those functions read the wall clock. Still on the wall clock with the dev clock
+ahead: `createdAt` and `updatedAt` defaults written by the database, `JobRun.startedAt` and
+`finishedAt`, access and refresh token expiry, login lockout, and rate limit windows.
+
+**Resets.** `LedgerEntry`, `LedgerTransaction` and `AuditEvent` reject UPDATE and DELETE, so a
+persona with ledger history cannot be deleted. `POST /v1/dev/reset` truncates every table
+(triggers do not fire on TRUNCATE) and reseeds: about eight seconds. A per-persona reset
+builds a new account with new ids. The old account is deleted when it never opened a rent
+plan (it has no ledger postings; its audit events stay, pointing at ids that no longer
+exist). An old account that did open a plan is archived instead: login renamed, sessions
+revoked, business renamed, plans closed, bank and landlord account references changed so
+integrity checks do not match it against its replacement. It stays in the book as a former
+customer: its ledger entries stay in the trial balance, which stays balanced because
+nothing is removed, and the monitoring rules, which read the whole book, keep counting it
+until the next full reset.
 
 ## Rate limiting and lockout
 

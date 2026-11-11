@@ -1,5 +1,6 @@
 import type { AdminIdentity, CircuitBreakerStatus } from '@cashflow/shared';
 
+import { clockNow } from '../dates.ts';
 import type { Db, Tx } from '../db.ts';
 import { unprocessable } from '../errors.ts';
 import type { CircuitBreaker } from '../generated/prisma/client.ts';
@@ -99,7 +100,7 @@ export async function resetBreaker(db: Db, args: { identity: AdminIdentity; reas
     if (!current?.tripped) {
       throw unprocessable('BREAKER_NOT_TRIPPED', 'The circuit breaker is not tripped');
     }
-    const at = new Date();
+    const at = clockNow();
     const row = await tx.circuitBreaker.update({
       where: { id: APPROVALS_BREAKER },
       data: {

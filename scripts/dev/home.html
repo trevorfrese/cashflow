@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>CashFlow dev home</title>
+    <style>
+      /* Colors come from packages/shared/src/brand.ts, injected by the supervisor. */
+      /*BRAND_TOKENS*/
+      @font-face {
+        font-family: 'Archivo';
+        font-weight: 400;
+        src: url('/fonts/Archivo-Regular.ttf');
+      }
+      @font-face {
+        font-family: 'Archivo';
+        font-weight: 500;
+        src: url('/fonts/Archivo-Medium.ttf');
+      }
+      @font-face {
+        font-family: 'Archivo';
+        font-weight: 700;
+        src: url('/fonts/Archivo-Bold.ttf');
+      }
+      @font-face {
+        font-family: 'Archivo Expanded';
+        font-weight: 800;
+        src: url('/fonts/ArchivoExpanded-ExtraBold.ttf');
+      }
+      @font-face {
+        font-family: 'Archivo Expanded';
+        font-weight: 900;
+        src: url('/fonts/ArchivoExpanded-Black.ttf');
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        background: var(--paper);
+        color: var(--ink);
+      }
+      body {
+        margin: 0;
+        font:
+          400 15px/1.45 'Archivo',
+          system-ui,
+          sans-serif;
+      }
+      a {
+        color: var(--azure-deep);
+        font-weight: 700;
+      }
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 24px 20px 64px;
+        display: grid;
+        gap: 24px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      h1 {
+        font:
+          900 30px/1.1 'Archivo Expanded',
+          'Archivo',
+          sans-serif;
+        letter-spacing: -0.5px;
+        margin: 0;
+      }
+      h2 {
+        font:
+          800 18px/1.2 'Archivo Expanded',
+          'Archivo',
+          sans-serif;
+        margin: 0 0 12px;
+      }
+      h3 {
+        font:
+          700 12px/1.3 'Archivo',
+          sans-serif;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        margin: 16px 0 8px;
+      }
+      .spacer {
+        flex: 1;
+      }
+      .card {
+        background: var(--white);
+        border: 3px solid var(--ink);
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: 5px 5px 0 var(--ink);
+      }
+      .card.gold {
+        background: var(--bright-gold);
+      }
+      .grid {
+        display: grid;
+        gap: 14px;
+        grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      }
+      .two {
+        display: grid;
+        gap: 24px;
+        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+        align-items: start;
+      }
+      .pill {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font:
+          700 11px/1.5 'Archivo',
+          sans-serif;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        background: var(--stone);
+        color: var(--slate);
+        white-space: nowrap;
+      }
+      .pill.paid,
+      .pill.healthy {
+        background: var(--success-bg);
+        color: var(--paid-text);
+      }
+      .pill.due,
+      .pill.starting {
+        background: var(--warning-bg);
+        color: var(--ink);
+      }
+      .pill.late,
+      .pill.exited,
+      .pill.down {
+        background: var(--danger-bg);
+        color: var(--late-text);
+      }
+      .pill.info {
+        background: var(--info-bg);
+        color: var(--azure-deep);
+      }
+      .pill.gold {
+        background: var(--bright-gold);
+        color: var(--ink);
+      }
+      .svc {
+        display: grid;
+        gap: 4px;
+      }
+      .svc .name {
+        font-weight: 700;
+      }
+      .muted {
+        color: var(--slate);
+      }
+      .small {
+        font-size: 13px;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+      }
+      button {
+        font:
+          800 13px/1 'Archivo Expanded',
+          'Archivo',
+          sans-serif;
+        padding: 9px 12px;
+        border: 3px solid var(--ink);
+        border-radius: 10px;
+        background: var(--white);
+        color: var(--ink);
+        box-shadow: 3px 3px 0 var(--ink);
+        cursor: pointer;
+      }
+      button:active {
+        transform: translate(3px, 3px);
+        box-shadow: none;
+      }
+      button.primary {
+        background: var(--bright-gold);
+      }
+      button.danger {
+        background: var(--jet-red);
+        color: var(--white);
+      }
+      button:disabled {
+        background: var(--sand);
+        border-style: dashed;
+        box-shadow: none;
+        color: var(--slate);
+        cursor: default;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .date {
+        font:
+          900 34px/1.1 'Archivo Expanded',
+          'Archivo',
+          sans-serif;
+        letter-spacing: -1px;
+      }
+      .persona {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 6px 12px;
+        padding: 12px 0;
+        border-bottom: 2px solid var(--ink);
+      }
+      .persona:last-child {
+        border-bottom: 0;
+      }
+      .persona .title {
+        font-weight: 700;
+      }
+      .stat {
+        display: grid;
+        gap: 2px;
+      }
+      .stat b {
+        font:
+          900 24px/1.1 'Archivo Expanded',
+          'Archivo',
+          sans-serif;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      td,
+      th {
+        text-align: left;
+        padding: 5px 8px 5px 0;
+        border-bottom: 1px solid var(--sand);
+        vertical-align: top;
+      }
+      th {
+        font:
+          700 11px/1.4 'Archivo',
+          sans-serif;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: var(--slate);
+      }
+      pre {
+        margin: 0;
+        background: var(--night);
+        color: var(--cream);
+        border: 3px solid var(--ink);
+        border-radius: 10px;
+        padding: 12px;
+        height: 320px;
+        overflow: auto;
+        font:
+          12px/1.5 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .tabs button.on {
+        background: var(--ink);
+        color: var(--bright-gold);
+      }
+      .notice {
+        border: 3px solid var(--ink);
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: var(--info-bg);
+      }
+      .notice.bad {
+        background: var(--danger-bg);
+        box-shadow: 4px 4px 0 var(--jet-red);
+      }
+      .notice.good {
+        background: var(--success-bg);
+      }
+      ul {
+        margin: 6px 0 0;
+        padding-left: 18px;
+      }
+      .scroll {
+        max-height: 330px;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <svg width="46" height="46" viewBox="0 0 200 200" role="img" aria-label="CashFlow coin">
+          <circle cx="107" cy="107" r="82" fill="var(--ink)" />
+          <circle
+            cx="100"
+            cy="100"
+            r="82"
+            fill="var(--bright-gold)"
+            stroke="var(--ink)"
+            stroke-width="6"
+          />
+          <circle
+            cx="100"
+            cy="100"
+            r="58"
+            fill="var(--gold)"
+            stroke="var(--ink)"
+            stroke-width="4"
+          />
+          <g fill="none" stroke="var(--ink)" stroke-width="14" stroke-linecap="butt">
+            <path d="M117.92 83.29 A26 26 0 1 0 117.92 116.71" />
+            <path d="M100 55.5 V81.5 M100 118.5 V144.5" />
+          </g>
+        </svg>
+        <div>
+          <h1>CashFlow dev home</h1>
+          <div class="muted small">
+            Sandbox only. No real money moves in this code. This page exists only while
+            <span class="mono">./dev</span> is running, on this machine.
+          </div>
+        </div>
+        <div class="spacer"></div>
+        <span class="pill" id="updated">loading</span>
+      </header>
+
+      <div id="banner"></div>
+
+      <section>
+        <h2>Services</h2>
+        <div class="grid" id="services"></div>
+      </section>
+
+      <div class="two">
+        <section class="card gold">
+          <h2>Simulated clock</h2>
+          <div class="date" id="clock-date">...</div>
+          <div class="small" id="clock-note"></div>
+          <div class="row" style="margin-top: 12px">
+            <button data-advance='{"days":1}'>+1 day</button>
+            <button data-advance='{"days":7}'>+1 week</button>
+            <button data-advance='{"days":30}'>+30 days</button>
+            <button class="danger" id="reset-all">Reset everything</button>
+          </div>
+          <div class="small" style="margin-top: 10px">
+            Advancing runs every job once for each day crossed. Reset rebuilds the demo data and
+            puts the clock back on the real date.
+          </div>
+          <div id="advance-result" style="margin-top: 12px"></div>
+        </section>
+        <section class="card">
+          <h2>The book</h2>
+          <div
+            class="grid"
+            id="counts"
+            style="grid-template-columns: repeat(auto-fill, minmax(120px, 1fr))"
+          ></div>
+          <h3>Plans by standing</h3>
+          <div class="row" id="standing"></div>
+          <h3>Open alerts</h3>
+          <div class="row" id="alerts-by"></div>
+        </section>
+      </div>
+
+      <section class="card">
+        <h2>Personas</h2>
+        <div class="small muted" id="persona-note"></div>
+        <div id="personas"></div>
+      </section>
+
+      <div class="two">
+        <section class="card">
+          <h2>Recent job runs</h2>
+          <div class="scroll"><table id="jobs"></table></div>
+        </section>
+        <section class="card">
+          <h2>What just happened</h2>
+          <div class="scroll"><table id="events"></table></div>
+        </section>
+      </div>
+
+      <section>
+        <h2>Logs</h2>
+        <div class="row tabs" id="log-tabs" style="margin-bottom: 10px"></div>
+        <pre id="log"></pre>
+      </section>
+
+      <section class="small muted" id="footer"></section>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const esc = (v) =>
+        String(v ?? '').replace(
+          /[&<>"']/g,
+          (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch],
+        );
+      const usd = (cents) =>
+        (cents / 100).toLocaleString('en-US', {
+          style: 'currency',
+          currency: 'USD',
+          maximumFractionDigits: 0,
+        });
+      const get = async (path) => {
+        const res = await fetch(path, { cache: 'no-store' });
+        if (!res.ok)
+          throw Object.assign(
+            new Error((await res.json().catch(() => ({}))).error?.message ?? `HTTP ${res.status}`),
+            { status: res.status },
+          );
+        return res.json();
+      };
+      const post = async (path, body) => {
+        const res = await fetch(path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-cashflow-dev': '1' },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error?.message ?? data.error ?? `HTTP ${res.status}`);
+        return data;
+      };
+
+      let status = null;
+      let logName = 'api';
+      let busy = false;
+
+      function banner(kind, html) {
+        $('banner').innerHTML = html ? `<div class="notice ${kind}">${html}</div>` : '';
+      }
+
+      function renderStatus() {
+        const cards = status.services
+          .filter((s) => s.selected !== false)
+          .map(
+            (s) => `
+          <div class="card svc">
+            <div class="row"><span class="name">${esc(s.title)}</span><span class="spacer"></span><span class="pill ${esc(s.health)}">${esc(s.health)}</span></div>
+            <a href="${esc(s.url)}" target="_blank" rel="noreferrer">${esc(s.url.replace('http://', ''))}</a>
+            <div class="small muted">port ${esc(s.port)}${s.pid ? `, pid ${esc(s.pid)}` : ''}${s.health === 'healthy' && !s.managed ? ', reused' : ''}</div>
+            ${s.name === 'api' ? `<div class="small"><a href="${esc(s.url)}/docs" target="_blank" rel="noreferrer">OpenAPI docs</a></div>` : ''}
+          </div>`,
+          );
+        const pg = status.postgres;
+        const pgHealth = !pg.reachable ? 'down' : pg.seeded ? 'healthy' : 'starting';
+        cards.push(`
+          <div class="card svc">
+            <div class="row"><span class="name">Postgres</span><span class="spacer"></span><span class="pill ${pgHealth}">${!pg.reachable ? 'down' : !pg.migrated ? 'not migrated' : pg.seeded ? 'healthy' : 'no demo data'}</span></div>
+            <div class="mono">${esc(pg.host)}:${esc(pg.port)}/${esc(pg.database)}</div>
+            <div class="small muted">${pg.accounts === null ? 'accounts unknown' : `${pg.accounts} accounts`}</div>
+          </div>`);
+        $('services').innerHTML = cards.join('');
+        $('updated').textContent = `updated ${new Date().toLocaleTimeString()}`;
+        $('updated').className = `pill ${status.healthy ? 'healthy' : 'starting'}`;
+        $('footer').innerHTML = `
+          <b>Dev menu in the app:</b> ${esc(status.menuHint)}.<br />
+          <b>Ops console:</b> sign in with ADMIN_API_TOKEN or REVIEWER_API_TOKEN from <span class="mono">${esc(status.envFiles.api)}</span>. This page never sees them.<br />
+          <b>Terminal:</b> <span class="mono">./dev status</span>, <span class="mono">./dev smoke</span>, <span class="mono">./dev advance --days 7</span>, <span class="mono">./dev reset</span>, <span class="mono">./dev stop</span>. Logs are in <span class="mono">${esc(status.logs.dir)}</span>.`;
+        const mobile = status.services.find((s) => s.name === 'mobile');
+        window.mobileUrl = mobile && mobile.selected !== false ? mobile.url : null;
+      }
+
+      function renderOverview(o) {
+        const ahead = o.clock.aheadDays;
+        $('clock-date').textContent = o.clock.today;
+        $('clock-note').textContent =
+          ahead > 0
+            ? `Simulated: ${ahead} ${ahead === 1 ? 'day' : 'days'} ahead of the real date, ${o.clock.wallToday}.`
+            : 'The real date. Nothing has been advanced.';
+        const stats = [
+          ['Businesses', o.counts.businesses],
+          ['Rent plans', o.counts.plans],
+          ['In review', o.counts.applicationsInReview],
+          ['Held payouts', o.counts.heldPayouts],
+          ['Capital pool', usd(o.ledger.capitalPoolCents)],
+          ['Receivables', usd(o.ledger.receivablesCents)],
+        ];
+        $('counts').innerHTML =
+          stats
+            .map(
+              ([k, v]) =>
+                `<div class="stat"><b>${esc(v)}</b><span class="small muted">${esc(k)}</span></div>`,
+            )
+            .join('') +
+          `<div class="stat"><span class="pill ${o.ledger.balanced ? 'paid' : 'late'}">${o.ledger.balanced ? 'balanced' : 'UNBALANCED'}</span><span class="small muted">Trial balance</span></div>` +
+          `<div class="stat"><span class="pill ${o.circuitBreakerTripped ? 'late' : 'paid'}">${o.circuitBreakerTripped ? 'tripped' : 'closed'}</span><span class="small muted">Circuit breaker</span></div>`;
+        const tone = {
+          CURRENT: 'paid',
+          GRACE: 'due',
+          DELINQUENT: 'late',
+          DEFAULT: 'late',
+          CHARGED_OFF: 'late',
+          CRITICAL: 'late',
+          HIGH: 'late',
+          WARNING: 'due',
+          INFO: 'info',
+        };
+        const pills = (map, order) =>
+          order
+            .filter((k) => map[k])
+            .map(
+              (k) =>
+                `<span class="pill ${tone[k] ?? ''}">${esc(k.replace('_', ' '))} ${esc(map[k])}</span>`,
+            )
+            .join('') || '<span class="muted small">none</span>';
+        $('standing').innerHTML = pills(o.counts.plansByStanding, [
+          'CURRENT',
+          'GRACE',
+          'DELINQUENT',
+          'DEFAULT',
+          'CHARGED_OFF',
+        ]);
+        $('alerts-by').innerHTML = pills(o.counts.openAlerts, [
+          'CRITICAL',
+          'HIGH',
+          'WARNING',
+          'INFO',
+        ]);
+      }
+
+      function renderPersonas(list) {
+        $('persona-note').textContent =
+          `Each is its own login with the password ${list.password}. "Open app as" signs the app in as that persona in a new tab.`;
+        let html = '';
+        let section = '';
+        for (const p of list.personas) {
+          const heading = `${p.group === 'FRESH' ? 'Fresh applicants' : 'Existing customers'}: ${p.section}`;
+          if (heading !== section) {
+            section = heading;
+            html += `<h3>${esc(heading)}</h3>`;
+          }
+          const open = window.mobileUrl
+            ? `<a href="${esc(window.mobileUrl)}/?devPersona=${encodeURIComponent(p.key)}" target="_blank" rel="noreferrer"><button class="primary">Open app as</button></a>`
+            : '';
+          html += `
+            <div class="persona">
+              <div>
+                <div class="row"><span class="title">${esc(p.title)}</span><span class="pill ${esc(p.state.tone)}">${esc(p.state.label)}</span><span class="mono muted">${esc(p.key)}</span></div>
+                <div class="small">${esc(p.demonstrates)}</div>
+                <div class="small muted">${esc(p.email)}. Screens: ${esc(p.screens.join(', '))}.${p.nextEvent ? ` Next: ${esc(p.nextEvent.label)} on ${esc(p.nextEvent.date)}.` : ''}</div>
+              </div>
+              <div class="row" style="justify-content: flex-end">
+                ${open}
+                ${p.nextEvent ? `<button data-advance='${esc(JSON.stringify({ toNextEventFor: p.key }))}'>To next event</button>` : ''}
+                ${p.resettable ? `<button data-reset="${esc(p.key)}">Reset</button>` : ''}
+              </div>
+            </div>`;
+        }
+        $('personas').innerHTML = html;
+      }
+
+      function renderFeed(feed) {
+        $('jobs').innerHTML =
+          '<tr><th>As of</th><th>Job</th><th></th><th>Summary</th></tr>' +
+          feed.jobRuns
+            .map((r) => {
+              const summary =
+                r.error ??
+                Object.entries(r.summary ?? {})
+                  .filter(([k, v]) => !k.startsWith('rule:') && v !== 0 && v !== false)
+                  .map(([k, v]) => `${k} ${v}`)
+                  .join(', ');
+              return `<tr><td class="mono">${esc(r.asOf)}</td><td>${esc(r.name)}</td><td><span class="pill ${r.ok ? 'paid' : r.ok === false ? 'late' : 'due'}">${r.ok ? 'ok' : r.ok === false ? 'failed' : 'running'}</span></td><td class="small muted">${esc(summary || 'nothing to do')}</td></tr>`;
+            })
+            .join('');
+        const rows = [
+          ...feed.alerts.map((a) => ({
+            at: a.createdAt,
+            html: `<span class="pill ${a.severity === 'INFO' ? 'info' : a.severity === 'WARNING' ? 'due' : 'late'}">${esc(a.severity)}</span> ${esc(a.title)}`,
+          })),
+          ...feed.auditEvents.map((e) => ({
+            at: e.at,
+            html: `<b>${esc(e.eventType)}</b> <span class="muted">${esc(e.subjectType)} by ${esc(e.actorType)}</span>`,
+          })),
+        ]
+          .sort((a, b) => (a.at < b.at ? 1 : -1))
+          .slice(0, 40);
+        $('events').innerHTML =
+          '<tr><th>When</th><th>Event</th></tr>' +
+          rows
+            .map(
+              (r) =>
+                `<tr><td class="mono">${esc(r.at.slice(0, 16).replace('T', ' '))}</td><td>${r.html}</td></tr>`,
+            )
+            .join('');
+      }
+
+      async function refreshStatus() {
+        try {
+          status = await get('/api/status');
+          renderStatus();
+        } catch {
+          $('updated').textContent = 'supervisor not answering';
+          $('updated').className = 'pill down';
+        }
+      }
+
+      async function refreshDev() {
+        if (busy) return;
+        try {
+          const [overview, personas, feed] = await Promise.all([
+            get('/api/dev/overview'),
+            get('/api/dev/personas'),
+            get('/api/dev/feed'),
+          ]);
+          renderOverview(overview);
+          renderPersonas(personas);
+          renderFeed(feed);
+          if ($('banner').dataset.kind === 'api') {
+            banner('', '');
+            delete $('banner').dataset.kind;
+          }
+        } catch (err) {
+          $('banner').dataset.kind = 'api';
+          banner(
+            'bad',
+            err.status === 404
+              ? 'The API is running with dev tools off, so personas, the clock and the feeds are not available. Set <span class="mono">ENABLE_DEV_TOOLS=true</span> in <span class="mono">apps/api/.env</span> and restart.'
+              : 'The API is not answering yet. Service health above is still live.',
+          );
+        }
+      }
+
+      async function refreshLog() {
+        try {
+          const data = await get(`/api/logs?service=${logName}&lines=200`);
+          const pre = $('log');
+          const pinned = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
+          pre.textContent = data.lines.join('\n') || `(${logName}.log is empty)`;
+          if (pinned) pre.scrollTop = pre.scrollHeight;
+        } catch {
+          $('log').textContent = `(no ${logName}.log)`;
+        }
+      }
+
+      function renderTabs() {
+        $('log-tabs').innerHTML = ['api', 'mobile', 'ops', 'web', 'setup', 'supervisor']
+          .map((n) => `<button data-log="${n}" class="${n === logName ? 'on' : ''}">${n}</button>`)
+          .join('');
+      }
+
+      async function act(label, fn) {
+        if (busy) return;
+        busy = true;
+        document.querySelectorAll('button').forEach((b) => (b.disabled = true));
+        $('advance-result').innerHTML = `<div class="notice">${esc(label)}...</div>`;
+        try {
+          $('advance-result').innerHTML = await fn();
+        } catch (err) {
+          $('advance-result').innerHTML = `<div class="notice bad">${esc(err.message)}</div>`;
+        } finally {
+          busy = false;
+          await refreshDev();
+          document.querySelectorAll('button').forEach((b) => (b.disabled = false));
+        }
+      }
+
+      document.addEventListener('click', (event) => {
+        const el = event.target.closest('button');
+        if (!el) return;
+        if (el.dataset.log) {
+          logName = el.dataset.log;
+          renderTabs();
+          void refreshLog();
+          return;
+        }
+        if (el.dataset.advance) {
+          void act('Advancing the clock and running the jobs', async () => {
+            const r = await post('/api/dev/clock/advance', JSON.parse(el.dataset.advance));
+            return `<div class="notice good"><b>${esc(r.from)} to ${esc(r.to)}</b>${r.event ? `: ${esc(r.event.label)}` : ''}<ul>${r.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></div>`;
+          });
+          return;
+        }
+        if (el.dataset.reset) {
+          void act(`Rebuilding ${el.dataset.reset}`, async () => {
+            const r = await post(`/api/dev/personas/${encodeURIComponent(el.dataset.reset)}/reset`);
+            return `<div class="notice good">${esc(r.persona.title)} was rebuilt as a new account: ${esc(r.persona.state.label)}.</div>`;
+          });
+          return;
+        }
+        if (el.id === 'reset-all') {
+          if (
+            !confirm(
+              'Wipe the database and rebuild every persona? Anything you created is lost. The clock goes back to the real date.',
+            )
+          )
+            return;
+          void act('Rebuilding the demo data', async () => {
+            const r = await post('/api/dev/reset');
+            return `<div class="notice good">Rebuilt ${r.personas.length} personas in ${r.seconds.toFixed(1)}s. The date is ${esc(r.clock.today)}.</div>`;
+          });
+        }
+      });
+
+      renderTabs();
+      void refreshStatus().then(refreshDev);
+      void refreshLog();
+      setInterval(refreshStatus, 4000);
+      setInterval(refreshDev, 5000);
+      setInterval(refreshLog, 3000);
+    </script>
+  </body>
+</html>

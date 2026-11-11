@@ -62,3 +62,26 @@ jobs:
       # and the operations console.
       - name: Build
         run: pnpm build
+
+      # End to end: the one command brings the API up against its own database on the same
+      # Postgres service (created, migrated and seeded by ./dev), then the scripted happy
+      # path runs over HTTP: fresh applicant, bank and point of sale, approval, lease, plan,
+      # clock to the due date, landlord paid, installments collected, trial balance.
+      - name: Smoke
+        env:
+          DATABASE_URL: postgresql://cashflow:cashflow@localhost:5432/cashflow_smoke
+          NODE_ENV: development
+        run: |
+          ./dev --only api --detach --timeout 180
+          ./dev smoke
+
+      - name: Smoke logs
+        if: failure()
+        run: |
+          ./dev status --json || true
+          ./dev logs setup --tail 80 || true
+          ./dev logs api --tail 200 || true
+
+      - name: Stop
+        if: always()
+        run: ./dev stop || true

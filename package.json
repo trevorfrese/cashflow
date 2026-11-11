@@ -9,6 +9,10 @@
     "node": ">=22.0.0"
   },
   "scripts": {
+    "dev:up": "./dev",
+    "dev:stop": "./dev stop",
+    "dev:status": "./dev status",
+    "smoke": "./dev smoke",
     "setup": "docker compose up -d --wait && pnpm --filter @cashflow/api db:migrate:deploy && pnpm --filter @cashflow/api db:seed",
     "dev": "turbo run dev --filter=@cashflow/api --filter=@cashflow/web",
     "dev:mobile": "pnpm --filter @cashflow/mobile start",
@@ -16,7 +20,8 @@
     "build": "turbo run build",
     "lint": "turbo run lint && pnpm check:copy",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
+    "test": "turbo run test && pnpm test:dev-cli",
+    "test:dev-cli": "node --test \"scripts/dev/test/*.test.mjs\"",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:copy": "sh scripts/check-no-em-dash.sh",

@@ -55,9 +55,21 @@ export function monthsSince(iso: string, now: Date = new Date()): number {
   return Math.max(0, months);
 }
 
+let simulatedToday: string | null = null;
+
+/**
+ * Dev menu only: make `todayIso()` return the API's simulated date, or pass null to go back
+ * to the device clock. Nothing calls this unless the dev tools flag is set.
+ */
+export function setSimulatedToday(date: string | null): void {
+  simulatedToday = date;
+}
+
 /** Today as YYYY-MM-DD in UTC, matching how the API reasons about calendar dates. */
-export function todayIso(now: Date = new Date()): string {
-  return toIsoDate(now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate());
+export function todayIso(now?: Date): string {
+  if (!now && simulatedToday) return simulatedToday;
+  const d = now ?? new Date();
+  return toIsoDate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
 }
 
 /** "2026-11-16" to "Nov 16, 2026". */

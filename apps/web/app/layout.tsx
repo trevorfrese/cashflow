@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { Archivo } from 'next/font/google';
 
+import { Background } from '@/components/Background';
+
 import './globals.css';
 
 const archivo = Archivo({
@@ -35,7 +37,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={archivo.variable}>
-      <body>{children}</body>
+      <body>
+        <Background />
+        {children}
+      </body>
     </html>
   );
 }

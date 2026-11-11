@@ -37,7 +37,19 @@ a:hover {
   color: var(--ink);
 }
 
+/* The halftone field: fixed behind everything, never in the way of a click. */
+.background {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
 .page {
+  position: relative;
+  z-index: 1;
   min-height: 100svh;
   display: flex;
   flex-direction: column;

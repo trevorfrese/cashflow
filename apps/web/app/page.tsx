@@ -20,7 +20,7 @@ export default function Home() {
           <CoinMark size={28} decorative />
           CashFlow
         </a>
-        <a className="top-link" href={GITHUB} rel="noopener">
+        <a className="top-link" href={GITHUB} target="_blank" rel="noopener noreferrer">
           GitHub
         </a>
       </header>
@@ -34,7 +34,7 @@ export default function Home() {
           Buy now, pay later for small business rent. Now an open source project.
         </p>
         <div className="actions">
-          <a className="button button-primary" href={GITHUB} rel="noopener">
+          <a className="button button-primary" href={GITHUB} target="_blank" rel="noopener noreferrer">
             <GitHubIcon />
             View on GitHub
           </a>

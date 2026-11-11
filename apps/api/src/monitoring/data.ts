@@ -175,7 +175,8 @@ async function exhaustedFacts(tx: Tx): Promise<ExhaustedFact[]> {
   return [...byPlan.values()];
 }
 
-async function planFacts(tx: Tx): Promise<PlanFact[]> {
+/** Every plan with its installments, as the portfolio rules and the operator views read it. */
+export async function planFacts(tx: Tx): Promise<PlanFact[]> {
   const plans = await tx.rentPlan.findMany({
     include: {
       business: { select: { legalName: true, industry: true } },
@@ -227,7 +228,8 @@ async function planFacts(tx: Tx): Promise<PlanFact[]> {
   });
 }
 
-async function exposureFacts(tx: Tx, providers: Providers): Promise<ExposureFact> {
+/** Pool capital and committed rent by industry and by business. */
+export async function exposureFacts(tx: Tx, providers: Providers): Promise<ExposureFact> {
   const pool = await gatherPoolState(tx, providers);
   const plans = await tx.rentPlan.findMany({
     where: { status: { in: ['ACTIVE', 'PAUSED'] } },

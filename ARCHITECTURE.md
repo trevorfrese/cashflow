@@ -40,6 +40,7 @@ flowchart LR
 | `apps/api`        | Fastify 5 with `fastify-type-provider-zod`, Prisma 7 on Postgres, pino logging, OpenAPI at `/docs`. Owns all business rules.                                                                      |
 | `apps/mobile`     | Expo app for business owners. Thin client: validates server responses with the shared schemas and renders them.                                                                                   |
 | `apps/web`        | One page marketing site, statically exported and hosted on Vercel.                                                                                                                                |
+| `apps/ops`        | Operations console for staff, a Next.js app run locally and never deployed. Reads and acts only through the API's operator routes, by way of its own server-side proxy.                           |
 
 Shared contracts are the spine. A schema is added to `packages/shared` first, the API
 validates with it on both input and output, and the mobile app parses responses with the
@@ -512,6 +513,40 @@ a tighter limit to register, login and refresh. Separately, five wrong passwords
 lock an account for 15 minutes and write a `LOGIN_LOCKED` audit event. Rate limiting counts
 requests per address; lockout counts failures per account, which is what stops guessing that
 comes from many addresses. Both are configurable, and rate limiting is off under test.
+
+### The operations console
+
+`apps/ops` is the staff interface over the operator routes: review queue, alerts, lease
+changes, screening, portfolio, customers, audit log, and the policy in force. It has no
+database and no business rules of its own. It is a Next.js app that runs on a staff machine.
+
+The operator token never reaches browser JavaScript:
+
+1. The sign-in page posts the token and the operator's name to the console's own server
+   (`POST /api/session`). The server checks them against `GET /v1/admin/whoami`, which also
+   says which role the token carries.
+2. On success the server seals `{ token, actor, role, expiresAt }` with AES-256-GCM under a
+   key derived from `OPS_SESSION_SECRET` and sets it as a cookie that is `HttpOnly`,
+   `SameSite=Strict`, and `Secure` unless the host is localhost. The response body carries
+   the name and role only. There is no server-side session store.
+3. Every API call from a page goes to the console's `/api/admin/...`. The handler opens the
+   cookie, attaches `Authorization` and `X-Admin-Actor`, and forwards the request, but only
+   to the routes on its allowlist (`apps/ops/lib/server/routes.ts`). Funding the pool and
+   running jobs are not on it. Browser cookies and headers are not forwarded upstream and
+   upstream headers are not passed back.
+4. A state-changing request must carry an `Origin` that names the console's own host (or
+   `Sec-Fetch-Site: same-origin`), on top of the cookie being `SameSite=Strict`.
+
+The role shown in the console only decides which actions it offers. The API enforces the
+role on every request regardless. Responses are parsed in the browser with the same shared
+Zod schemas the API serializes with.
+
+The read routes the console needs beyond the queues live in `routes/admin-console.ts` and
+return operator views from `services/operator.ts`. Those views have their own serializers:
+the customer serializers in `serializers.ts` are unchanged, so nothing internal leaks into a
+customer response. The portfolio view reuses the monitoring data layer (`planFacts`,
+`exposureFacts`, the first payment default cohorts) and `gatherPoolState`, so a number on the
+portfolio page is the number an alert was raised on.
 
 ## Installment math
 

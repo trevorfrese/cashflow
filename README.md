@@ -12,6 +12,7 @@ No real money moves in this code. Every bank, payment, and capital integration i
 - `apps/api`: Fastify 5, Prisma 7 on Postgres, Zod validated routes, OpenAPI at `/docs`, node-cron jobs
 - `apps/mobile`: Expo SDK 58, Expo Router, TanStack Query
 - `apps/web`: Next.js static export, one page
+- `apps/ops`: Next.js operations console for staff, local only
 - `packages/shared`: Zod schemas, enums, brand tokens, installment math
 
 ## Run it
@@ -25,6 +26,7 @@ pnpm install
 pnpm setup        # Postgres in Docker, migrate, seed
 pnpm dev          # API :4000, web :3000
 pnpm dev:mobile   # Expo dev server, second terminal
+pnpm dev:ops      # operations console :3200, needs apps/ops/.env.local
 ```
 
 Sign in with the seeded demo account, `demo@cashflow.local` / `demo-password-123`. It owns five businesses: one with an active $10,000 rent plan and payment history, one that has fallen behind and has a landlord payout on hold, one whose plan was charged off and closed, one declined for overdrafts, and one that still needs a bank. Or register and pick a sandbox bank scenario to walk through every underwriting outcome.
@@ -42,6 +44,17 @@ Other commands: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm db:reset`, and
 
 Every money movement posts a balanced ledger transaction in the same database transaction as the status change. Balances are derived from entries, never stored. The jobs are idempotent.
 
+## Operations console
+
+`apps/ops` is the staff side: the review queue for referred applications, monitoring alerts, lease changes, screening hits, the live portfolio, a customer view with plans, payments and the audit trail, the audit log, and the policy in force. It is a local tool and is not deployed.
+
+```sh
+cp apps/ops/.env.example apps/ops/.env.local   # then set OPS_SESSION_SECRET: openssl rand -hex 32
+pnpm dev:ops                                   # http://localhost:3200
+```
+
+It needs the API running with `ENABLE_ADMIN=true` and an `ADMIN_API_TOKEN` (and optionally a `REVIEWER_API_TOKEN`). Sign in with one of those tokens and your name. The token is kept in an encrypted, httpOnly cookie and attached to API calls by the console's server, so the browser never holds it. See [`apps/ops/README.md`](apps/ops/README.md).
+
 ## Provider seams
 
 | Interface              | Env var                 | Default                           |
@@ -58,7 +71,7 @@ Each lives in `apps/api/src/providers/<name>/` with `types.ts`, the mock, and an
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md): providers, ledger, and the payment lifecycle
 - [`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md): the cash flow underwriting model
-- [`apps/api/README.md`](apps/api/README.md), [`apps/mobile/README.md`](apps/mobile/README.md), [`apps/web/README.md`](apps/web/README.md): per package notes
+- [`apps/api/README.md`](apps/api/README.md), [`apps/mobile/README.md`](apps/mobile/README.md), [`apps/web/README.md`](apps/web/README.md), [`apps/ops/README.md`](apps/ops/README.md): per package notes
 - [`CLAUDE.md`](CLAUDE.md): conventions and commands
 
 ## License

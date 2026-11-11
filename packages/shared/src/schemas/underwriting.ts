@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { CashFlowSummary } from './bank-data';
 
 import { ApplicationStatus, DecisionKind, DecisionOutcome, ReviewDecision } from '../enums';
-import { Bps, Cents, Id, IsoDateTimeSchema } from './common';
+import { Bps, Cents, Id, IsoDateSchema, IsoDateTimeSchema } from './common';
 
 export const CreateApplicationRequest = z.object({
   businessId: Id,
@@ -137,6 +137,9 @@ export const ReviewQueueItem = z.object({
   status: ApplicationStatus,
   requestedMonthlyRentCents: Cents,
   submittedAt: IsoDateTimeSchema.nullable(),
+  /** Whole days since submission, and the date an answer is due by. Null before submission. */
+  ageDays: z.number().int().min(0).nullable().optional(),
+  decisionDueOn: IsoDateSchema.nullable().optional(),
   policyVersion: z.string(),
   score: z.number().int().nullable(),
   grade: CreditGrade.nullable(),

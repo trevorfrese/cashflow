@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   checks:
-    name: Lint, typecheck, test
+    name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -57,3 +57,8 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      # Builds every package that has a build: the API (type build), the marketing site,
+      # and the operations console.
+      - name: Build
+        run: pnpm build

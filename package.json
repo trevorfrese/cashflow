@@ -12,6 +12,7 @@
     "setup": "docker compose up -d --wait && pnpm --filter @cashflow/api db:migrate:deploy && pnpm --filter @cashflow/api db:seed",
     "dev": "turbo run dev --filter=@cashflow/api --filter=@cashflow/web",
     "dev:mobile": "pnpm --filter @cashflow/mobile start",
+    "dev:ops": "pnpm --filter @cashflow/ops dev",
     "build": "turbo run build",
     "lint": "turbo run lint && pnpm check:copy",
     "typecheck": "turbo run typecheck",

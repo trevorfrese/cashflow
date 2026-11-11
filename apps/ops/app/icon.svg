@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <mask id="cent" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
+      <g fill="none" stroke="#FFFFFF" stroke-width="14">
+        <path d="M117.92 83.29 A26 26 0 1 0 117.92 116.71"/>
+        <path d="M100 55.5 V81.5 M100 118.5 V144.5"/>
+      </g>
+    </mask>
+  </defs>
+  <g transform="scale(1.1765) translate(-15 -15)">
+    <circle cx="100" cy="100" r="82" fill="#FFD43B" stroke="#15121C" stroke-width="6"/>
+    <circle cx="100" cy="100" r="58" fill="#F4B323" stroke="#15121C" stroke-width="4"/>
+    <g fill="none" stroke="#15121C" stroke-width="22">
+      <path d="M120.24 86.53 A26 26 0 1 0 120.24 113.47"/>
+      <path d="M100 51.5 V81.5 M100 118.5 V148.5"/>
+    </g>
+    <g mask="url(#cent)">
+      <rect width="200" height="200" fill="#15121C"/>
+      <g fill="none" stroke="#FFD43B" stroke-width="14" transform="translate(1.5 1.5)">
+        <path d="M117.92 83.29 A26 26 0 1 0 117.92 116.71"/>
+        <path d="M100 55.5 V81.5 M100 118.5 V144.5"/>
+      </g>
+    </g>
+  </g>
+</svg>

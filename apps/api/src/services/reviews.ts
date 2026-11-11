@@ -1,10 +1,15 @@
-import type {
-  AdminIdentity,
-  DecisionOutcome,
-  DecisionReason,
-  RecordReviewRequest,
-  ReviewQueueItem,
+import {
+  addDays,
+  daysBetween,
+  type AdminIdentity,
+  type DecisionOutcome,
+  type DecisionReason,
+  type IsoDate,
+  type RecordReviewRequest,
+  type ReviewQueueItem,
 } from '@cashflow/shared';
+
+import { CONTROLS_POLICY } from '../controls/policy.ts';
 
 import { todayIso } from '../dates.ts';
 import type { Db } from '../db.ts';
@@ -351,6 +356,22 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
   });
 }
 
+/**
+ * How long an application has waited and when its answer is due: the notice deadline in the
+ * controls policy, counted from submission.
+ */
+export function decisionClock(
+  submittedAt: Date | null,
+  today: IsoDate,
+): { ageDays: number | null; decisionDueOn: IsoDate | null } {
+  if (!submittedAt) return { ageDays: null, decisionDueOn: null };
+  const submittedOn = submittedAt.toISOString().slice(0, 10);
+  return {
+    ageDays: Math.max(0, daysBetween(submittedOn, today)),
+    decisionDueOn: addDays(submittedOn, CONTROLS_POLICY.decisionNoticeDays),
+  };
+}
+
 /** Applications waiting for a reviewer, oldest first, with what the engine found. */
 export async function listReviewQueue(db: Db): Promise<ReviewQueueItem[]> {
   const rows = await db.underwritingApplication.findMany({
@@ -358,6 +379,7 @@ export async function listReviewQueue(db: Db): Promise<ReviewQueueItem[]> {
     include: { business: true, ...INCLUDE_CURRENT_DECISION },
     orderBy: { submittedAt: 'asc' },
   });
+  const today = todayIso();
   return rows.flatMap((row) => {
     const decision = row.decisions[0];
     if (!decision) return [];
@@ -371,6 +393,7 @@ export async function listReviewQueue(db: Db): Promise<ReviewQueueItem[]> {
         status: row.status,
         requestedMonthlyRentCents: row.requestedMonthlyRentCents,
         submittedAt: row.submittedAt ? row.submittedAt.toISOString() : null,
+        ...decisionClock(row.submittedAt, today),
         policyVersion: decision.policyVersion,
         score: decision.score,
         grade: (decision.grade as ReviewQueueItem['grade']) ?? null,

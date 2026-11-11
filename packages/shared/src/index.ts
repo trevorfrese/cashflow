@@ -14,3 +14,4 @@ export * from './schemas/rent-plan';
 export * from './schemas/ledger';
 export * from './schemas/identity';
 export * from './schemas/monitoring';
+export * from './schemas/operator';

@@ -55,6 +55,15 @@ const ROUTES: Array<{
   { method: 'get', url: '/v1/admin/circuit-breaker', role: 'reviewer' },
   { method: 'get', url: '/v1/admin/monitoring/summary', role: 'reviewer' },
   { method: 'get', url: '/v1/admin/businesses/x/identity', role: 'reviewer' },
+  // Console read routes (routes/admin-console.ts).
+  { method: 'get', url: '/v1/admin/businesses', role: 'reviewer' },
+  { method: 'get', url: '/v1/admin/businesses/x', role: 'reviewer' },
+  { method: 'get', url: '/v1/admin/businesses/x/rent-plans', role: 'reviewer' },
+  { method: 'get', url: '/v1/admin/applications/x', role: 'reviewer' },
+  { method: 'get', url: '/v1/admin/audit-log', role: 'reviewer' },
+  { method: 'get', url: '/v1/admin/portfolio', role: 'reviewer' },
+  { method: 'get', url: '/v1/admin/policy', role: 'reviewer' },
+  { method: 'get', url: '/v1/admin/policy/evaluation', role: 'reviewer' },
   { method: 'get', url: '/v1/admin/reviews', role: 'reviewer' },
   {
     method: 'post',

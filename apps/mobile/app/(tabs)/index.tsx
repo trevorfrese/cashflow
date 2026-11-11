@@ -27,6 +27,7 @@ import {
   useRentPlan,
   useRentPlans,
 } from '@/lib/queries';
+import { heldPayoutNotice, IN_REVIEW_COPY, pastDueNotice } from '@/lib/plan-notices';
 import { deriveStage, type Stage } from '@/lib/stage';
 import { border, colors, spacing } from '@/theme';
 
@@ -135,10 +136,9 @@ function StageCard({ stage, leases }: { stage: Stage; leases: Lease[] }) {
       return (
         <Card>
           <Pill label="In review" tone="due" />
-          <Text variant="title">We are taking a look</Text>
+          <Text variant="title">{IN_REVIEW_COPY.title}</Text>
           <Text variant="body" tone="muted">
-            Our team is reviewing your application before we confirm terms. Nothing more is needed
-            from you right now.
+            {IN_REVIEW_COPY.message}
           </Text>
           <Button
             title="View application"
@@ -246,9 +246,15 @@ function PlanSummary({ planId, lease }: { planId: string; lease: Lease | undefin
     .sort((a, b) => a.sequence - b.sequence);
   const periodPayout = d.payouts.find((p) => p.periodMonth === period) ?? d.nextPayout;
   const feeCents = periodItems.reduce((sum, i) => sum + i.feeCents, 0);
+  const pastDue = pastDueNotice(d);
+  const held = heldPayoutNotice(d.heldPayout);
 
   return (
     <>
+      {pastDue ? (
+        <Notice tone={pastDue.tone} title={pastDue.title} message={pastDue.message} />
+      ) : null}
+      {held ? <Notice tone={held.tone} title={held.title} message={held.message} /> : null}
       <Card tone="gold" shadow="l">
         <Text variant="label">{period ? `${formatPeriod(period)} rent` : 'Rent'}</Text>
         <Text variant="money" numberOfLines={1} adjustsFontSizeToFit>
@@ -376,6 +382,10 @@ function payoutLine(
   if (!payout) return `Paid in full to ${landlord} on the ${ordinal(dueDay)}`;
   if (payout.status === 'PAID')
     return `Paid in full to ${landlord} on ${formatDate((payout.paidAt ?? payout.scheduledFor).slice(0, 10))}`;
+  if (payout.status === 'HELD')
+    return `On hold. It was due to ${landlord} on ${formatDate(payout.scheduledFor)}`;
+  if (payout.status === 'CANCELLED')
+    return `Not sent to ${landlord} for this month. Pay your landlord directly`;
   return `Goes to ${landlord} in full on ${formatDate(payout.scheduledFor)}`;
 }
 

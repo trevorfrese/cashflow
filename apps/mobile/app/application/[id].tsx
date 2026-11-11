@@ -8,6 +8,7 @@ import { Button, Card, Notice, Screen, ScoreGauge, Text } from '@/components';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { formatPeriod } from '@/lib/forms';
+import { IN_REVIEW_COPY } from '@/lib/plan-notices';
 import { useApplication, useBankLinks, useResubmitApplication } from '@/lib/queries';
 import { border, colors, radii, spacing } from '@/theme';
 
@@ -75,6 +76,9 @@ export default function Decision() {
   return (
     <Screen back title={headline(app.status)} footer={footer}>
       {error ? <Notice tone="danger" message={error} /> : null}
+      {app.status === 'IN_REVIEW' ? (
+        <Notice tone="info" title={IN_REVIEW_COPY.title} message={IN_REVIEW_COPY.message} />
+      ) : null}
       {!d ? (
         <Text tone="muted">No decision yet.</Text>
       ) : (
@@ -104,7 +108,7 @@ export default function Decision() {
                 </View>
               </View>
             </Card>
-          ) : (
+          ) : app.status === 'IN_REVIEW' ? null : (
             <Notice
               tone="info"
               title="More information needed"
@@ -116,10 +120,15 @@ export default function Decision() {
             title={
               app.status === 'DECLINED'
                 ? 'Why we could not approve this'
-                : 'What went into the decision'
+                : app.status === 'IN_REVIEW'
+                  ? 'What we have looked at so far'
+                  : 'What went into the decision'
             }
           >
-            {orderReasons(d.reasons).map((r) => (
+            {orderReasons(
+              // The banner above already says it is in review.
+              d.reasons.filter((r) => app.status !== 'IN_REVIEW' || r.code !== 'IN_REVIEW'),
+            ).map((r) => (
               <ReasonRow key={r.code} reason={r} />
             ))}
           </Section>
@@ -148,7 +157,7 @@ function headline(status: string): string {
 
 function summaryLine(status: string): string {
   if (status === 'IN_REVIEW') {
-    return 'Our team is taking a look before we confirm terms. We will be in touch, and we will ask if we need anything.';
+    return 'Your score is in. Terms are confirmed once the review is done.';
   }
   return status === 'DECLINED'
     ? 'The account did not meet our policy on one or more hard rules. The reasons below are specific so you know what would need to change.'

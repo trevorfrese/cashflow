@@ -1,0 +1,29 @@
+{
+  "name": "@cashflow/ops",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CashFlow operations console for staff. Local only, never deployed. Talks to the API through a server-side proxy.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev --port 3200",
+    "build": "next build",
+    "start": "next start --port 3200",
+    "lint": "eslint .",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cashflow/shared": "workspace:*",
+    "next": "^16.4.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

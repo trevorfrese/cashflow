@@ -57,6 +57,33 @@ function tiered(rateBps: number, warnBps: number, criticalBps: number): AlertSev
   return null;
 }
 
+/**
+ * First payment defaults by origination month: plans whose first installment is old enough
+ * to judge, and those where it went `defaultDays` past due, was written off, or was paid
+ * that late. The rule below alerts on it and the operator portfolio view shows it.
+ */
+export function firstPaymentDefaultCohorts(
+  plans: readonly PlanFact[],
+  asOf: IsoDate,
+  defaultDays: number,
+): Map<string, { plans: number; defaults: string[] }> {
+  const matureBefore = addDays(asOf, -defaultDays);
+  const cohorts = new Map<string, { plans: number; defaults: string[] }>();
+  for (const plan of plans) {
+    const first = plan.installments.find((i) => i.first);
+    if (!first || plan.originatedOn === null || first.dueDate > matureBefore) continue;
+    if (first.status === 'VOIDED') continue;
+    const cohort = cohorts.get(plan.originatedOn.slice(0, 7)) ?? { plans: 0, defaults: [] };
+    cohort.plans += 1;
+    const late = addDays(first.dueDate, defaultDays);
+    if (first.chargedOffOn !== null || first.paidOn === null || first.paidOn >= late) {
+      cohort.defaults.push(plan.planId);
+    }
+    cohorts.set(plan.originatedOn.slice(0, 7), cohort);
+  }
+  return cohorts;
+}
+
 export const firstPaymentDefault: Rule = {
   type: 'portfolio.first_payment_default',
   category: 'PORTFOLIO',
@@ -67,20 +94,11 @@ export const firstPaymentDefault: Rule = {
   tripsCircuitBreaker: true,
   evaluate: (inputs, policy) => {
     const p = policy.portfolio;
-    const matureBefore = addDays(inputs.asOf, -p.firstPaymentDefaultDays);
-    const cohorts = new Map<string, { plans: number; defaults: string[] }>();
-    for (const plan of inputs.plans) {
-      const first = plan.installments.find((i) => i.first);
-      if (!first || plan.originatedOn === null || first.dueDate > matureBefore) continue;
-      if (first.status === 'VOIDED') continue;
-      const cohort = cohorts.get(plan.originatedOn.slice(0, 7)) ?? { plans: 0, defaults: [] };
-      cohort.plans += 1;
-      const late = addDays(first.dueDate, p.firstPaymentDefaultDays);
-      if (first.chargedOffOn !== null || first.paidOn === null || first.paidOn >= late) {
-        cohort.defaults.push(plan.planId);
-      }
-      cohorts.set(plan.originatedOn.slice(0, 7), cohort);
-    }
+    const cohorts = firstPaymentDefaultCohorts(
+      inputs.plans,
+      inputs.asOf,
+      p.firstPaymentDefaultDays,
+    );
     const out: AlertCandidate[] = [];
     for (const [month, cohort] of cohorts) {
       if (cohort.plans < p.minPlans) continue;

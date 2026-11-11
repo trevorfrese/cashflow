@@ -8,6 +8,7 @@ There is no real capital behind this repo. Everything that touches money or risk
 
 ```
 apps/web          Next.js one page marketing site for splitmylease.com (Vercel)
+apps/ops          Next.js operations console for staff: queues, alerts, portfolio, customers, audit, policy. Local only, never deployed
 apps/mobile       Expo app: auth, onboarding, underwriting, lease linking, rent plan
 apps/api          Fastify API: Prisma + Postgres, Zod, provider interfaces, underwriting engine, scheduled jobs
 packages/shared   Zod schemas, enums, types, brand tokens, pure installment math
@@ -16,7 +17,7 @@ scripts/          Repo-level scripts (em dash check)
 .github/          CI workflow
 ```
 
-Package names are scoped: `@cashflow/shared`, `@cashflow/api`, `@cashflow/web`, `@cashflow/mobile`. Use them with `pnpm --filter`.
+Package names are scoped: `@cashflow/shared`, `@cashflow/api`, `@cashflow/web`, `@cashflow/ops`, `@cashflow/mobile`. Use them with `pnpm --filter`.
 
 ## Tooling
 
@@ -35,6 +36,7 @@ pnpm install                 # install everything
 pnpm setup                   # start Postgres (docker), migrate, seed demo data
 pnpm dev                     # API + web in parallel
 pnpm dev:mobile              # Expo dev server (separate terminal)
+pnpm dev:ops                 # operations console on :3200 (separate terminal, needs apps/ops/.env.local)
 pnpm build                   # build all packages
 pnpm lint                    # eslint across packages + em dash check
 pnpm typecheck               # tsc --noEmit across packages
@@ -45,7 +47,7 @@ pnpm db:reset                # drop volume, recreate, migrate, seed
 pnpm check:copy              # fail on any em dash in tracked files
 ```
 
-Per package: `pnpm --filter @cashflow/api dev`, `pnpm --filter @cashflow/shared test`, and so on. API specific commands (`db:migrate`, `db:seed`, `job:run`) are documented in `apps/api/README.md`. Mobile specifics (sandbox bank scenarios, `EXPO_PUBLIC_API_URL`) are in `apps/mobile/README.md`.
+Per package: `pnpm --filter @cashflow/api dev`, `pnpm --filter @cashflow/shared test`, and so on. API specific commands (`db:migrate`, `db:seed`, `job:run`) are documented in `apps/api/README.md`. Mobile specifics (sandbox bank scenarios, `EXPO_PUBLIC_API_URL`) are in `apps/mobile/README.md`. The operations console (session cookie, proxy, pages) is in `apps/ops/README.md`.
 
 Docs to read before changing behavior: `ARCHITECTURE.md` (providers, ledger, payment lifecycle) and `apps/api/UNDERWRITING.md` (the cash flow underwriting model).
 

@@ -80,7 +80,7 @@ function landlordView(json: unknown) {
   };
 }
 
-async function leaseChangeViews(db: Db, where: Prisma.LeaseChangeWhereInput) {
+export async function leaseChangeViews(db: Db, where: Prisma.LeaseChangeWhereInput) {
   const rows = await db.leaseChange.findMany({
     where,
     include: {
@@ -149,7 +149,7 @@ async function leaseChangeViews(db: Db, where: Prisma.LeaseChangeWhereInput) {
   });
 }
 
-async function screeningViews(db: Db, where: Prisma.ScreeningResultWhereInput) {
+export async function screeningViews(db: Db, where: Prisma.ScreeningResultWhereInput) {
   const rows = await db.screeningResult.findMany({
     where,
     include: {

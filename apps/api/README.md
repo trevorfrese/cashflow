@@ -54,6 +54,9 @@ src/config.ts            environment parsing and safety rails
 src/auth/                scrypt passwords, JWT access tokens, rotating refresh tokens
 src/ledger/              double-entry ledger: accounts, validation, posting, trial balance
 src/auth/admin.ts        operator tokens, roles, and the X-Admin-Actor identity
+src/routes/admin.ts      operator routes: the queues, the actions, the book
+src/routes/admin-console.ts  read routes for the operations console (apps/ops)
+src/services/operator.ts operator read models: businesses, applications, audit log, portfolio, policy, gates
 src/auth/lockout.ts      login lockout after repeated failures
 src/providers/           underwriting, bank-link, payments, capital, identity (mocks + skeletons)
 src/servicing/policy.ts  servicing rules as data and pure functions, shared with the evals
@@ -167,6 +170,25 @@ body can say who is acting.
 | `GET /v1/admin/ledger/accounts`                | reviewer | The chart of accounts                                                                            |
 | `GET /v1/admin/capital`                        | reviewer | The pool's available balance                                                                     |
 | `GET /v1/admin/audit-events`                   | reviewer | The audit trail for one record: `?subjectType=...&subjectId=...`                                 |
+
+The operations console (`apps/ops`) reads through these as well. They are all reads, in
+`src/routes/admin-console.ts`, and their responses are operator views built in
+`src/services/operator.ts`: they carry what the customer serializers leave out (the engine's
+terms on a referral, integrity flags, the fee build-up, screening detail, policy numbers), so
+no customer route uses them.
+
+| Route                                     | Role     | What it does                                                                                                                                                  |
+| ----------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/admin/businesses`                | reviewer | Businesses by name. `?q=` matches legal name, trading name, owner email, or an id. `status`, `verification`, `limit`, `cursor`                                |
+| `GET /v1/admin/businesses/:id`            | reviewer | One business: verification, owners, bank links, leases (never the payout token), applications, pending lease changes, hits, alerts                            |
+| `GET /v1/admin/businesses/:id/rent-plans` | reviewer | Its plans with standing and freeze, every payout (with hold reason) and every installment with its debits and return codes                                    |
+| `GET /v1/admin/applications/:id`          | reviewer | One application for review: recommendation, score factors, flags, triggers, fee build-up, cash flow, history, reviews, audit trail                            |
+| `GET /v1/admin/audit-log`                 | reviewer | Audit events across every subject, newest first. `subjectType`, `subjectId`, `eventType`, `actorType`, `actor`, `businessId`, `from`, `to`, `limit`, `cursor` |
+| `GET /v1/admin/portfolio`                 | reviewer | The live book: delinquency, pool and utilization, concentration against the caps, first payment default by origination month                                  |
+| `GET /v1/admin/policy`                    | reviewer | The credit, servicing, controls, and monitoring numbers in force                                                                                              |
+| `GET /v1/admin/policy/evaluation`         | reviewer | Gate results of the last default evaluation run, read from `evals/baseline.json`. Simulation, not the live book                                               |
+
+`GET /v1/admin/reviews` also returns `ageDays` and `decisionDueOn` on each item.
 
 Owner routes added in this area: `PATCH /v1/leases/:id` now returns `pendingChange` and
 `pendingRentIncrease` (see "Lease change control" in `ARCHITECTURE.md`), and

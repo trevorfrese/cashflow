@@ -18,6 +18,7 @@ import type { Db } from './db.ts';
 import { AppError } from './errors.ts';
 import { ensureSystemAccounts } from './ledger/accounts.ts';
 import type { Providers } from './providers/index.ts';
+import { adminConsoleRoutes } from './routes/admin-console.ts';
 import { adminRoutes } from './routes/admin.ts';
 import { authRoutes } from './routes/auth.ts';
 import { bankLinkRoutes } from './routes/bank-links.ts';
@@ -156,7 +157,10 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
       await v1.register(underwritingRoutes);
       await v1.register(leaseRoutes);
       await v1.register(rentPlanRoutes);
-      if (opts.config.ENABLE_ADMIN) await v1.register(adminRoutes);
+      if (opts.config.ENABLE_ADMIN) {
+        await v1.register(adminRoutes);
+        await v1.register(adminConsoleRoutes);
+      }
     },
     { prefix: '/v1' },
   );

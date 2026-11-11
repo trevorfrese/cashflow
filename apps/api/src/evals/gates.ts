@@ -1,4 +1,4 @@
-import { type PortfolioMetrics } from './metrics.ts';
+import { type PortfolioMetrics, type ThroughTheDoorMetrics } from './metrics.ts';
 
 /**
  * Pass or fail gates for the "Balanced" risk appetite. A policy change ships only when every
@@ -14,7 +14,14 @@ export const GATE_THRESHOLDS = {
   maxNetLossBps: 75,
   /** Net margin after cost of funds, servicing, and losses must be above zero. */
   minNetMarginCents: 0,
-  /** Score must separate good plans from bad at least this well. */
+  /**
+   * The score must separate good from bad at least this well, measured through the door: on
+   * every honest applicant the engine scored, each funded in a counterfactual run to see
+   * whether it would have gone bad (`runThroughTheDoor`). Measuring on funded plans alone
+   * would judge the score on the applicants it had already let through, where most of the
+   * spread it works with is gone. Fraud archetypes are left out because stopping them is the
+   * job of the integrity checks, which the fraud gate judges.
+   */
   minAuc: 0.7,
   /**
    * Bad rate must not fall as grade worsens from A to D. Grades with fewer than
@@ -121,19 +128,27 @@ export function pooledGradeInversions(
   return inversions;
 }
 
-type OneOrMany = PortfolioMetrics | readonly PortfolioMetrics[];
-const many = (m: OneOrMany): readonly PortfolioMetrics[] =>
-  Array.isArray(m) ? (m as readonly PortfolioMetrics[]) : [m as PortfolioMetrics];
+type OneOrMany<T = PortfolioMetrics> = T | readonly T[];
+const many = <T>(m: OneOrMany<T>): readonly T[] =>
+  Array.isArray(m) ? (m as readonly T[]) : [m as T];
 
 /**
  * Evaluate the gates on one run, or on the same configuration run on several seeds. With
  * several, every gate is judged on the mean of the per seed values, except the two counts:
  * grade inversions are counted on bad rates pooled across seeds, and unfunded payouts are
  * summed, since one unfunded payout on any seed is a failure.
+ *
+ * `throughTheDoor` is the counterfactual run of the same configuration on the same seeds.
+ * Only the AUC gate reads it, and it reads nothing else.
  */
-export function evaluateGates(runs: { base: OneOrMany; mild: OneOrMany }): GateResult[] {
+export function evaluateGates(runs: {
+  base: OneOrMany;
+  mild: OneOrMany;
+  throughTheDoor: OneOrMany<ThroughTheDoorMetrics>;
+}): GateResult[] {
   const base = many(runs.base);
   const mild = many(runs.mild);
+  const throughTheDoor = many(runs.throughTheDoor);
   const t = GATE_THRESHOLDS;
   const withVolume = (f: (m: PortfolioMetrics) => number | null) => (m: PortfolioMetrics) =>
     m.overall.volumeCents > 0 ? f(m) : null;
@@ -181,8 +196,8 @@ export function evaluateGates(runs: { base: OneOrMany; mild: OneOrMany }): GateR
     ),
     gate(
       'auc',
-      'AUC of score against the bad flag at or above 0.70 (base)',
-      base.map((m) => m.rankOrdering.auc),
+      'AUC of score against the bad flag at or above 0.70, all scored honest applicants (base)',
+      throughTheDoor.map((m) => m.honest.auc),
       '>=',
       t.minAuc,
       'AUC',

@@ -2,15 +2,20 @@ import { describe, expect, it } from 'vitest';
 
 import { makeCustomer } from './fixtures.ts';
 import { allGatesPass, evaluateGates, GATE_THRESHOLDS } from './gates.ts';
-import { computeMetrics, type PortfolioMetrics } from './metrics.ts';
-import { emptyBucketRoll, type CustomerResult } from './portfolio.ts';
+import {
+  computeMetrics,
+  throughTheDoorMetrics,
+  type PortfolioMetrics,
+  type ThroughTheDoorMetrics,
+} from './metrics.ts';
+import { emptyBucketRoll, type CustomerResult, type PortfolioResult } from './portfolio.ts';
 
 /**
  * A book built to pass every gate: 200 plans across four grades with bad rates rising from A
  * to D, bads scoring below goods, no losses, fees above costs, and 100 declined applicants
  * including every fraud applicant.
  */
-function passingMetrics(): PortfolioMetrics {
+function passingCustomers(): CustomerResult[] {
   const customers: CustomerResult[] = [];
   const grades = [
     { grade: 'A' as const, score: 90, bads: 1 },
@@ -46,7 +51,11 @@ function passingMetrics(): PortfolioMetrics {
       }),
     );
   }
-  return computeMetrics({
+  return customers;
+}
+
+function resultOf(customers: CustomerResult[]): PortfolioResult {
+  return {
     label: 'base',
     servicingPolicy: 'test',
     stress: 'base',
@@ -62,14 +71,35 @@ function passingMetrics(): PortfolioMetrics {
     bucketEntryRoll: emptyBucketRoll(),
     pool: [],
     customers,
-  });
+  };
 }
 
-function gatesWith(change: (base: PortfolioMetrics, mild: PortfolioMetrics) => void) {
+function passingMetrics(): PortfolioMetrics {
+  return computeMetrics(resultOf(passingCustomers()));
+}
+
+/**
+ * The same book through the door: the 100 declined applicants are funded too. Half of the
+ * honest ones go bad, and so does every fraud applicant.
+ */
+function passingDoor(): ThroughTheDoorMetrics {
+  return throughTheDoorMetrics(
+    passingCustomers().map((c, i) =>
+      c.outcome === 'DECLINED'
+        ? { ...c, payoutCount: 1, payoutCents: 100_000, bad: c.fraud !== null || i % 2 === 0 }
+        : c,
+    ),
+  );
+}
+
+function gatesWith(
+  change: (base: PortfolioMetrics, mild: PortfolioMetrics, door: ThroughTheDoorMetrics) => void,
+) {
   const base = passingMetrics();
   const mild = passingMetrics();
-  change(base, mild);
-  const gates = evaluateGates({ base, mild });
+  const throughTheDoor = passingDoor();
+  change(base, mild, throughTheDoor);
+  const gates = evaluateGates({ base, mild, throughTheDoor });
   return {
     gates,
     failed: gates.filter((g) => !g.pass).map((g) => g.id),
@@ -111,11 +141,31 @@ describe('gates', () => {
   });
 
   it('fails rank ordering below 0.70 or when it cannot be measured', () => {
-    expect(gatesWith((b) => (b.rankOrdering.auc = 0.699)).failed).toEqual(['auc']);
-    expect(gatesWith((b) => (b.rankOrdering.auc = 0.7)).failed).toEqual([]);
-    const unmeasured = gatesWith((b) => (b.rankOrdering.auc = null));
+    expect(gatesWith((_b, _m, d) => (d.honest.auc = 0.699)).failed).toEqual(['auc']);
+    expect(gatesWith((_b, _m, d) => (d.honest.auc = 0.7)).failed).toEqual([]);
+    const unmeasured = gatesWith((_b, _m, d) => (d.honest.auc = null));
     expect(unmeasured.failed).toEqual(['auc']);
     expect(unmeasured.byId.auc!.value).toBeNull();
+  });
+
+  it('judges rank ordering through the door on honest applicants, not on funded plans', () => {
+    // The gate reports the through the door figure for honest applicants.
+    const door = passingDoor();
+    expect(door.honest).toMatchObject({ goods: 227, bads: 48 });
+    expect(door.all).toMatchObject({ goods: 227, bads: 73 });
+    expect(gatesWith(() => {}).byId.auc!.value).toBe(Math.round(door.honest.auc! * 1000) / 1000);
+    // The funded only figure no longer decides anything, in either direction.
+    expect(gatesWith((b) => (b.rankOrdering.auc = 0.5)).failed).toEqual([]);
+    expect(gatesWith((b) => (b.rankOrdering.auc = null)).failed).toEqual([]);
+    expect(
+      gatesWith((b, _m, d) => {
+        b.rankOrdering.auc = 0.99;
+        d.honest.auc = 0.65;
+      }).failed,
+    ).toEqual(['auc']);
+    // Nor does the figure that includes the fraud archetypes.
+    expect(gatesWith((_b, _m, d) => (d.all.auc = 0.5)).failed).toEqual([]);
+    expect(gatesWith(() => {}).byId.auc!.description).toContain('all scored honest applicants');
   });
 
   it('fails when a better grade is worse than the next by more than the tolerance', () => {
@@ -142,11 +192,12 @@ describe('gates', () => {
       b.overall.volumeCents = 0;
       b.rankOrdering.auc = null;
     });
+    // Rank ordering is measured through the door, so it is still measurable for a policy
+    // that funds nobody. The approval floor is what stops that policy.
     expect(failed).toEqual([
       'net_loss_base',
       'net_margin_base',
       'bad_rate_monotonic',
-      'auc',
       'approval_floor',
     ]);
     expect(gatesWith((b) => (b.overall.usableApprovalRateBps = 2999)).failed).toEqual([
@@ -183,11 +234,12 @@ describe('gates', () => {
 });
 
 describe('gates across seeds', () => {
-  const seeds = (change: (runs: PortfolioMetrics[]) => void) => {
+  const seeds = (change: (runs: PortfolioMetrics[], doors: ThroughTheDoorMetrics[]) => void) => {
     const base = [passingMetrics(), passingMetrics(), passingMetrics()];
     const mild = [passingMetrics(), passingMetrics(), passingMetrics()];
-    change(base);
-    const gates = evaluateGates({ base, mild });
+    const throughTheDoor = [passingDoor(), passingDoor(), passingDoor()];
+    change(base, throughTheDoor);
+    const gates = evaluateGates({ base, mild, throughTheDoor });
     return Object.fromEntries(gates.map((g) => [g.id, g]));
   };
 
@@ -201,16 +253,16 @@ describe('gates across seeds', () => {
   });
 
   it('fails on the mean even when most seeds pass', () => {
-    const byId = seeds((runs) => {
-      runs[0]!.rankOrdering.auc = 0.72;
-      runs[1]!.rankOrdering.auc = 0.71;
-      runs[2]!.rankOrdering.auc = 0.6;
+    const byId = seeds((_runs, doors) => {
+      doors[0]!.honest.auc = 0.72;
+      doors[1]!.honest.auc = 0.71;
+      doors[2]!.honest.auc = 0.6;
     });
     expect(byId.auc).toMatchObject({ value: 0.677, min: 0.6, max: 0.72, pass: false });
   });
 
   it('cannot be measured when any seed cannot be', () => {
-    const byId = seeds((runs) => (runs[1]!.rankOrdering.auc = null));
+    const byId = seeds((_runs, doors) => (doors[1]!.honest.auc = null));
     expect(byId.auc).toMatchObject({ value: null, pass: false });
   });
 

@@ -9,15 +9,17 @@ It draws a synthetic population, runs every applicant through the real `decide()
 by day against simulated bank accounts and a finite capital pool. Nothing touches the
 database, the network, or a clock. The same seeds always give the same report.
 
-**Current state: 8 of 9 gates pass. The AUC gate fails** (0.669 against 0.70) since the
-simulator was brought into line with the product in Phase R3. Read "Where the gates stand"
-below before relying on any number here.
+**Current state: 9 of 9 gates pass.** The AUC gate is now judged on every scored honest
+applicant, through a counterfactual run that funds the declined ones too (0.875 against
+0.70). Measured the old way, on funded plans only, it is still 0.669, and that figure is
+still in the report, ungated. Read "Where the gates stand" and "The AUC gate: through the
+door" below before relying on any number here.
 
 ## Run it
 
 ```sh
-pnpm --filter @cashflow/api eval:portfolio                    # default run: 5 seeds, about 2 minutes
-pnpm --filter @cashflow/api eval:portfolio --seeds 1          # one seed, about 25 seconds
+pnpm --filter @cashflow/api eval:portfolio                    # default run: 5 seeds, about 2.5 minutes
+pnpm --filter @cashflow/api eval:portfolio --seeds 1          # one seed, about 35 seconds
 pnpm --filter @cashflow/api eval:portfolio --n 10000 --seeds 1,2   # tighter estimates
 pnpm --filter @cashflow/api eval:portfolio --n 500 --seeds 7,8 --horizon 6 --out /tmp/evals
 pnpm --filter @cashflow/api eval:portfolio --strict           # exit 1 if any gate fails
@@ -80,8 +82,8 @@ The same applicants are also run under three comparison configurations:
 | `v2_baseline` | current       | baseline  | What the credit policy buys on its own    |
 | `v2_standard` | current       | standard  | Both. This is the one the gates decide on |
 
-A single run of 2,000 applicants has about 60 bad plans, and AUC in particular moves several
-points from seed to seed. So the default run uses five seeds, each a separate population with
+A single run of 2,000 applicants funds about 28 bad plans, and rank ordering among funded
+plans in particular moves several points from seed to seed. So the default run uses five seeds, each a separate population with
 its own pool, and **the gates judge the mean across seeds**. The report shows the mean and the
 lowest and highest seed for every gate. Two gates are counts and are handled differently:
 grade inversions are counted on bad rates pooled across the seeds, and unfunded payouts are
@@ -90,22 +92,30 @@ book of 10,000 applicants.
 
 Five seeds of 2,000 is eleven portfolio runs per seed (three scenarios for the gated
 configuration, five for the comparisons, two sensitivities, and one challenger; the swap sets
-reuse them) and takes about a minute and forty seconds. `--seeds 1` runs a single seed when a
-quick look is enough.
+reuse them), plus a through the door run for each of the three configurations the gates are
+applied to. A through the door run plays only the applicants its configuration did not
+already fund, and takes the rest from the run that did. The whole thing takes about two and a half minutes, roughly a third longer than the eleven
+runs alone.
+`--seeds 1` runs a single seed when a quick look is enough.
 
 ## Where the gates stand
 
-| Gate                     | Before Phase R3 (committed report) |                    Now | Result |
-| ------------------------ | ---------------------------------: | ---------------------: | ------ |
-| `net_loss_base`          |                  22 bps (20 to 24) |      18 bps (11 to 21) | PASS   |
-| `net_margin_base`        |           $522,874 a seed (92 bps) |   $269,553 a seed (79) | PASS   |
-| `net_margin_mild_stress` |                           $431,207 |               $221,098 | PASS   |
-| `bad_rate_monotonic`     |                                  0 |                      0 | PASS   |
-| `auc`                    |             0.706 (0.668 to 0.752) | 0.669 (0.569 to 0.714) | FAIL   |
-| `fraud_approval`         |                               0.8% |                   0.8% | PASS   |
-| `pool_funding`           |                                  0 |                      0 | PASS   |
-| `approval_floor`         |              60.8% (all approvals) |    40.7% (usable only) | PASS   |
-| `refer_rate`             |                               1.7% |                   1.7% | PASS   |
+| Gate                     | Before Phase R3 (committed report) |                                     Now | Result |
+| ------------------------ | ---------------------------------: | --------------------------------------: | ------ |
+| `net_loss_base`          |                  22 bps (20 to 24) |                       18 bps (11 to 21) | PASS   |
+| `net_margin_base`        |           $522,874 a seed (92 bps) |                    $269,553 a seed (79) | PASS   |
+| `net_margin_mild_stress` |                           $431,207 |                                $221,098 | PASS   |
+| `bad_rate_monotonic`     |                                  0 |                                       0 | PASS   |
+| `auc`                    | 0.706 (0.668 to 0.752) funded only | 0.875 (0.863 to 0.898) through the door | PASS   |
+| `fraud_approval`         |                               0.8% |                                    0.8% | PASS   |
+| `pool_funding`           |                                  0 |                                       0 | PASS   |
+| `approval_floor`         |              60.8% (all approvals) |                     40.7% (usable only) | PASS   |
+| `refer_rate`             |                               1.7% |                                    1.7% | PASS   |
+
+The `auc` row compares two different measurements. Until the gate was moved it was judged on
+funded plans only, and on that measure it is 0.669 (0.569 to 0.714) today, under the same
+0.70 floor: a fail. The rest of this section is the history of that figure, which the report
+still carries as "funded only".
 
 Nothing about the credit policy or the population changed between the two columns. What
 changed is what the simulator funds and how it services:
@@ -117,7 +127,8 @@ changed is what the simulator funds and how it services:
 | Whole lease or nothing, no balance check        | 0.676 | 4,071 |       144 |           18 |         79 |
 | Whole lease or nothing, with it (the gated run) | 0.669 | 4,071 |       141 |           18 |         79 |
 
-Two things lower AUC, and both are the effect the warning under "Gates" describes. The
+Two things lower the funded only AUC, and both are range restriction, which "The AUC gate:
+through the door" describes. The
 balance check collects from businesses that had the money a few days late, which removes
 about 30 of the more predictable bad plans. Funding only whole leases removes every counter
 offer, and counter offers are where the low grades are: of 4,071 funded plans 3,805 are
@@ -128,12 +139,12 @@ balance at once do not move the numbers: with those alone the result is the comm
 the basis point.
 
 No threshold was changed, and the population was not touched. Two things could be decided
-from here, and neither is decided in this repository: let the product front part of a rent,
-which brings back the counter offer volume (the `partial_advance` sensitivity: 6,084 plans,
-net loss 21 bps, margin 93 bps, AUC 0.678, which still fails); or accept that AUC on a book
-that is 93% grade A is not the right test of the score and replace the gate with one that is
-measured on all scored applicants. The PD table was not recalibrated: see "Calibrating the PD
-table".
+from there: let the product front part of a rent, which brings back the counter offer volume
+(the `partial_advance` sensitivity: 6,084 plans, net loss 21 bps, margin 93 bps, funded only
+AUC 0.678, which still fails); or accept that AUC on a book that is 93% grade A is not the
+right test of the score and measure it on all scored applicants. The second was chosen. The
+0.70 floor is the same, and so are the credit policy, the population, and every other gate
+and threshold. The PD table was not recalibrated: see "Calibrating the PD table".
 
 ## How it works
 
@@ -146,6 +157,7 @@ table".
 | `src/underwriting/policy.ts`              | Credit policies as data. The evals run `POLICY_V1` and `CURRENT_POLICY` through the same engine.                    |
 | `src/underwriting/exposure.ts`            | The exposure rules. The simulator calls the same functions the services call, on its own in memory state.           |
 | `src/evals/portfolio.ts`                  | The calendar loop: decisions, review, funding rules, returns, payouts and holds, debits, aging, write offs.         |
+| `src/evals/portfolio.ts`                  | Also `runThroughTheDoor`, the counterfactual run that funds every scored applicant, for the AUC gate.               |
 | `src/evals/metrics.ts`                    | Economics, rank ordering, calibration, and pooling of seeds, from the simulation output.                            |
 | `src/evals/gates.ts`                      | Pass or fail thresholds, judged on the mean across seeds.                                                           |
 | `src/evals/assumptions.ts`                | Cost of funds, servicing cost, review catch rate, pool size, growth, horizon, stress presets.                       |
@@ -191,21 +203,102 @@ only approvals that can be used.
 | `net_margin_base`        | Above zero                            | Fees collected less cost of funds, servicing, and net losses.                                                                                                                                                                                                                                                                                                |
 | `net_margin_mild_stress` | Above zero                            | The same, with revenue down 15% for six months across the book.                                                                                                                                                                                                                                                                                              |
 | `bad_rate_monotonic`     | No inversions from A to D             | Pricing and limits step by grade, so worse grades must be riskier. Grades with fewer than 30 plans are skipped, and a better grade may sit up to 100 bps (one percentage point) above the next. Counted on bad rates pooled across seeds.                                                                                                                    |
-| `auc`                    | At or above 0.70                      | The score must separate plans that go bad from plans that do not.                                                                                                                                                                                                                                                                                            |
+| `auc`                    | At or above 0.70                      | The score must separate applicants who would go bad from applicants who would not. Judged on every honest applicant the engine scored, each funded in a counterfactual run. See "The AUC gate: through the door".                                                                                                                                            |
 | `fraud_approval`         | Under 5% of fraud applicants approved | Covers all three fraud archetypes together, and counts the final outcome: a fraud applicant who is referred and then approved by the reviewer counts as approved.                                                                                                                                                                                            |
 | `pool_funding`           | No payout unfunded on its due date    | At the planned growth rate, with the planned pool. Summed across seeds.                                                                                                                                                                                                                                                                                      |
 | `approval_floor`         | At or above 30% of all applicants     | Stops the other gates being passed by declining everyone. Counts approvals the applicant can use: an approval for less than the rent requested opens no plan in the product, so it does not count. 55% of the default population comes from archetypes that are creditworthy by construction, so approving under 30% means turning away about half of those. |
 | `refer_rate`             | At most 5% of applicants referred     | The product promises a decision in the same request. Nineteen applicants in twenty must get one, and a policy must not pass the fraud gate by handing its hard cases to a queue.                                                                                                                                                                             |
 
-**A warning about the AUC gate.** AUC is measured on funded plans, and it falls when
-underwriting or servicing improves. Every predictable bad plan that stops being funded (a
-business in decline, a score under the cutoff, a counter offer that cannot be used), and
-every one that stops going bad because it was collected a few days late, is a low scoring
-bad plan removed from the sample, which leaves bad plans that are harder to tell from good
-ones. Version 2 lowered AUC under the same servicing from 0.743 to 0.706 while it halved the
-loss rate, and passed by 0.006. It now fails at 0.669, for the reasons set out in "Where the
-gates stand". The `cutoff_55` challenger no longer tells the two apart: no plan under score
-55 is funded once counter offers are excluded, so it scores the same 0.669.
+### The AUC gate: through the door
+
+The gate asks one question: does the score rank risk? It used to be answered on funded plans,
+and that measurement is range restricted. The policy has already declined the applicants the
+score ranks lowest, so what is left is a book that is 93% grade A with about 28 bad plans a
+seed. A score cannot show ranking power on a population it has already filtered. The better
+underwriting and servicing got, the lower the figure fell: every predictable bad plan that
+stops being funded (a business in decline, a score under the cutoff, a counter offer that
+cannot be used), and every one that stops going bad because it was collected a few days
+late, is a low scoring bad plan removed from the sample. Version 2 lowered it under the same
+servicing from 0.743 to 0.706 while it halved the loss rate, and Phase R3 took it to 0.669.
+
+So the gate is now judged on the through the door population: every applicant the engine
+gave a score, whether it approved, referred, countered, or declined them. Applicants asked
+for more information have no score and are not in it (748 of 10,000 in the default run).
+
+**How the bad flag is found for an applicant who was declined.** The same applicants are
+run again in a counterfactual, `runThroughTheDoor` in `src/evals/portfolio.ts`:
+
+- Everyone with a score gets a plan at the rent they requested. The product fronts a whole
+  lease or nothing, so nobody is funded for part of it, including applicants the policy
+  approved for less.
+- Servicing is the configuration's own (standard, for the gated one), the horizon and runoff
+  are the same, and bad means what it means everywhere else: an installment 30 days past
+  due, or written off.
+- The pool has no limit and no exposure or concentration rule applies, so every plan starts
+  on its first rent date and no plan affects another.
+- Approved and referred applicants pay the fee they were quoted. A declined applicant pays
+  the fee the pricing built up for them if the engine got that far, held to the fee cap
+  (4%), since the product never charges more. A declined applicant who was knocked out
+  before pricing pays the grade D floor (3%), the highest floor of any funded grade.
+- The engine's decision is recorded as it was. It just no longer chooses who is funded.
+
+The counterfactual is a separate run with its own pool and its own state. It shares the
+applicants with the gated run and feeds the AUC gate and the "Rank ordering through the
+door" section of the report. No other metric, the pool path, or any other gate reads it, and
+the gated run's numbers are the same to the cent with or without it. To save time it does
+not replay a plan the ordinary run already funded at the rent requested without waiting: with
+no pool or exposure limit that plan is the same plan, so its result is taken as it is. Unit
+tests check both claims.
+
+**Honest applicants only.** The gate is judged on applicants who are not one of the fraud
+archetypes. The score is there to rank credit risk. Fraud is stopped, or not, by the
+integrity checks, and `fraud_approval` judges those. Leaving fraud in would let it distort
+the figure in either direction: a staged application is built to score well and then goes
+bad, which pulls AUC down for a reason that has nothing to do with how the score reads a real
+business. The figure for all applicants is reported beside it and is slightly lower (0.867
+against 0.875).
+
+**What it shows today** (five default seeds):
+
+| Measure                                   | Mean of seeds | Lowest to highest seed | Seeds pooled |
+| ----------------------------------------- | ------------: | ---------------------: | -----------: |
+| AUC, honest applicants (the gate)         |         0.875 |         0.863 to 0.898 |        0.875 |
+| KS, honest applicants                     |         0.614 |         0.589 to 0.653 |        0.608 |
+| AUC, all applicants                       |         0.867 |         0.856 to 0.891 |        0.867 |
+| KS, all applicants                        |         0.583 |         0.566 to 0.627 |        0.578 |
+| AUC, funded plans only (ungated, the old) |         0.669 |         0.569 to 0.714 |        0.670 |
+
+The report also gives the counterfactual bad rate by score band and by grade, including the
+bands nobody is funded in, and by what the policy decided. Honest applicants the policy
+approved on usable terms go bad 3.5% of the time, those it approved for less than the rent
+6.4%, and those it declined 48.7%.
+
+**Limits of this gate.** Read these before leaning on it.
+
+- **It is only possible because the borrowers are simulated.** A lender with real applicants
+  never sees how a declined one would have performed. On real data this gate needs reject
+  inference, which is an estimate with its own assumptions, or a test and learn sample:
+  funding a small random share of declines and paying for the losses to learn from them.
+- **It is a much easier test than the old one.** Most of the 0.875 comes from the bottom of
+  the range. Of 1,716 honest bad outcomes, 1,192 score under 40, where more than half of
+  applicants go bad. Telling those apart from a grade A business is not hard. Among honest
+  applicants
+  at or above the cutoff of 50, the same table gives an AUC of about 0.73 (worked out from
+  the five point bands, so approximate). The gate would catch a score that stopped ranking
+  the applicant pool. It would not catch one that ranked the fundable range a little worse.
+- **A declined applicant is funded at terms the policy refused.** Many were declined because
+  the rent requested was more than their cash flow supports. Funding them at that rent
+  anyway is what the question requires, and it is also why they fail so often. The bad rates
+  in the declined bands are what would happen at the requested rent, not at a rent the
+  business could carry.
+- **The fee for a declined applicant is a choice.** It moves the installment by at most a
+  couple of percent of rent, which matters little beside whether the rent is affordable.
+- **It says nothing about the pool or the economics.** The counterfactual book would lose a
+  great deal of money. It exists only to be watched.
+
+The funded only figure is still worth reading for what it is: how well the score orders the
+plans actually on the book. The `cutoff_55` challenger no longer moves it: no plan under
+score 55 is funded once counter offers are excluded, so it scores the same 0.669.
 
 Definitions used by the gates and the report:
 
@@ -343,7 +436,7 @@ Reported in their own table, never gated.
 - `partial_advance`: counter offers are fronted in part, which the product does not do.
   Approval on usable terms 60.8% against 40.7%, 6,084 plans against 4,071, volume $283.7
   million against $170.2 million, net loss 21 bps against 18, net margin $2,649,924 (93 bps)
-  against $1,347,764 (79 bps), AUC 0.678 against 0.669.
+  against $1,347,764 (79 bps), funded only AUC 0.678 against 0.669.
 - `manual_payment`: 30% of installments still unpaid after the retries, at businesses still
   trading, are paid by hand between day 7 and day 30. It changes almost nothing: net loss
   $304,785 against $304,020, both 18 bps, with two more held payouts released. Nearly every
@@ -358,8 +451,9 @@ Reported in their own table, never gated.
   assumptions above. They do not show that real businesses behave this way, and they are not
   a loss forecast. Before any real capital, the hazard rates and the score to default
   relationship need calibrating on real outcomes.
-- **Sampling noise.** One seed has about 28 bad plans under version 2. AUC ran from 0.569 to
-  0.714 across the five default seeds, grades C and D are all but empty, and one seed of the
+- **Sampling noise.** One seed has about 28 bad plans under version 2. Funded only AUC ran
+  from 0.569 to 0.714 across the five default seeds (the gated through the door figure, on
+  about 340 bad outcomes a seed, ran from 0.863 to 0.898), grades C and D are all but empty, and one seed of the
   five shows a grade inversion that the pooled book does not. The gates judge the mean for
   this reason. Use `--n 10000` before reading much into a small change in rank ordering.
 - **The policy was tuned on this simulator.** The cutoff, the scorecard weights, the decline

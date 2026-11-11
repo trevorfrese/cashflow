@@ -6,7 +6,7 @@ Run: 2,000 synthetic applicants per seed, seeds `1`, `2`, `3`, `4`, `5`, arrivin
 
 Gated configuration: credit policy `cashflow-v2` under the `standard` servicing policy. The gates are judged on the mean of the 5 seeds; tables of counts pool the seeds into one book.
 
-Gates passed: 8 of 9.
+Gates passed: 9 of 9.
 
 ## Gates (Balanced risk appetite)
 
@@ -16,7 +16,7 @@ Gates passed: 8 of 9.
 | Net margin above zero (base)                                                            | $269,553 |   $254,356 to $309,095 |      > $0 | PASS   |
 | Net margin above zero (mild stress)                                                     | $221,098 |   $186,794 to $271,154 |      > $0 | PASS   |
 | Bad rate does not fall from grade A to D (cells of 30 or more plans, 100 bps tolerance) |        0 |                 0 to 1 |       = 0 | PASS   |
-| AUC of score against the bad flag at or above 0.70 (base)                               |    0.669 |         0.569 to 0.714 |   >= 0.70 | FAIL   |
+| AUC of score against the bad flag at or above 0.70, all scored honest applicants (base) |    0.875 |         0.863 to 0.898 |   >= 0.70 | PASS   |
 | Under 5% of fraud archetype applicants approved, after review (base)                    |     0.8% |           0.0% to 2.1% |      < 5% | PASS   |
 | Pool always able to fund a payout at the planned growth rate (base)                     |        0 |                      0 |       = 0 | PASS   |
 | Usable approval rate at or above 30% of applicants (base)                               |    40.7% |         39.0% to 42.5% |    >= 30% | PASS   |
@@ -35,25 +35,26 @@ changing only servicing (`v1_baseline` to `v1_standard`), changing only the cred
 - `v1_standard`: cashflow-v1 decisions, standard servicing: what the servicing change buys on its own.
 - `v2_baseline`: cashflow-v2 decisions, baseline servicing: what the credit policy buys on its own.
 
-| Metric (mean, lowest to highest seed) |                              v1_baseline |                              v1_standard |                              v2_baseline |                      v2_standard (gated) |
-| ------------------------------------- | ---------------------------------------: | ---------------------------------------: | ---------------------------------------: | ---------------------------------------: |
-| Approval rate                         |                   67.6% (65.3% to 68.6%) |                   67.6% (65.3% to 68.6%) |                   60.8% (59.0% to 62.8%) |                   60.8% (59.0% to 62.8%) |
-| Refer rate                            |                      0.0% (0.0% to 0.0%) |                      0.0% (0.0% to 0.0%) |                      1.7% (1.4% to 2.0%) |                      1.7% (1.4% to 2.0%) |
-| Decline rate                          |                   24.9% (23.9% to 27.6%) |                   24.9% (23.9% to 27.6%) |                   31.7% (30.0% to 33.9%) |                   31.7% (30.0% to 33.9%) |
-| Needs info rate                       |                      7.5% (7.1% to 8.0%) |                      7.5% (7.1% to 8.0%) |                      7.5% (7.1% to 8.0%) |                      7.5% (7.1% to 8.0%) |
-| Rent volume                           | $43,791,600 ($42,211,800 to $46,362,000) | $42,885,880 ($41,292,850 to $45,616,800) | $34,528,680 ($33,687,600 to $36,487,800) | $34,044,150 ($33,271,900 to $36,124,200) |
-| Bad rate                              |                      4.7% (3.5% to 5.3%) |                      4.8% (3.7% to 5.2%) |                      3.5% (2.5% to 4.0%) |                      3.5% (2.5% to 4.0%) |
-| First payment default rate            |                      0.4% (0.1% to 0.8%) |                      0.4% (0.1% to 0.8%) |                      0.2% (0.0% to 0.5%) |                      0.2% (0.0% to 0.5%) |
-| Fee income, bps of volume             |                         151 (150 to 152) |                         153 (153 to 154) |                         154 (153 to 154) |                         156 (155 to 157) |
-| Net loss, bps of volume               |                         200 (150 to 235) |                            27 (20 to 31) |                         142 (101 to 170) |                            18 (11 to 21) |
-| Net margin, bps of volume             |                       -120 (-159 to -65) |                            71 (66 to 79) |                         -58 (-89 to -13) |                            79 (76 to 86) |
-| Net margin                            |       -$520,283 (-$680,800 to -$299,911) |          $306,855 ($274,520 to $359,339) |        -$199,966 (-$303,231 to -$49,127) |          $269,553 ($254,356 to $309,095) |
-| Net margin, mild stress               |        -$495,167 (-$887,203 to -$38,642) |                                  not run |        -$135,856 (-$264,412 to $144,975) |          $221,098 ($186,794 to $271,154) |
-| Profitable customers                  |                   90.6% (89.4% to 91.8%) |                   90.6% (89.3% to 91.8%) |                   96.5% (96.1% to 97.5%) |                   96.6% (96.0% to 97.5%) |
-| AUC                                   |                   0.671 (0.600 to 0.735) |                   0.673 (0.590 to 0.737) |                   0.672 (0.584 to 0.714) |                   0.669 (0.569 to 0.714) |
-| Fraud applicants approved             |                   45.7% (44.2% to 47.5%) |                   45.7% (44.2% to 47.5%) |                      0.8% (0.0% to 2.1%) |                      0.8% (0.0% to 2.1%) |
-| Peak pool utilization                 |                   49.2% (48.1% to 50.8%) |                   46.8% (45.0% to 49.7%) |                   38.8% (37.8% to 40.2%) |                   37.2% (36.3% to 39.4%) |
-| Unfunded payouts                      |                               0 (0 to 0) |                               0 (0 to 0) |                               0 (0 to 0) |                               0 (0 to 0) |
+| Metric (mean, lowest to highest seed)           |                              v1_baseline |                              v1_standard |                              v2_baseline |                      v2_standard (gated) |
+| ----------------------------------------------- | ---------------------------------------: | ---------------------------------------: | ---------------------------------------: | ---------------------------------------: |
+| Approval rate                                   |                   67.6% (65.3% to 68.6%) |                   67.6% (65.3% to 68.6%) |                   60.8% (59.0% to 62.8%) |                   60.8% (59.0% to 62.8%) |
+| Refer rate                                      |                      0.0% (0.0% to 0.0%) |                      0.0% (0.0% to 0.0%) |                      1.7% (1.4% to 2.0%) |                      1.7% (1.4% to 2.0%) |
+| Decline rate                                    |                   24.9% (23.9% to 27.6%) |                   24.9% (23.9% to 27.6%) |                   31.7% (30.0% to 33.9%) |                   31.7% (30.0% to 33.9%) |
+| Needs info rate                                 |                      7.5% (7.1% to 8.0%) |                      7.5% (7.1% to 8.0%) |                      7.5% (7.1% to 8.0%) |                      7.5% (7.1% to 8.0%) |
+| Rent volume                                     | $43,791,600 ($42,211,800 to $46,362,000) | $42,885,880 ($41,292,850 to $45,616,800) | $34,528,680 ($33,687,600 to $36,487,800) | $34,044,150 ($33,271,900 to $36,124,200) |
+| Bad rate                                        |                      4.7% (3.5% to 5.3%) |                      4.8% (3.7% to 5.2%) |                      3.5% (2.5% to 4.0%) |                      3.5% (2.5% to 4.0%) |
+| First payment default rate                      |                      0.4% (0.1% to 0.8%) |                      0.4% (0.1% to 0.8%) |                      0.2% (0.0% to 0.5%) |                      0.2% (0.0% to 0.5%) |
+| Fee income, bps of volume                       |                         151 (150 to 152) |                         153 (153 to 154) |                         154 (153 to 154) |                         156 (155 to 157) |
+| Net loss, bps of volume                         |                         200 (150 to 235) |                            27 (20 to 31) |                         142 (101 to 170) |                            18 (11 to 21) |
+| Net margin, bps of volume                       |                       -120 (-159 to -65) |                            71 (66 to 79) |                         -58 (-89 to -13) |                            79 (76 to 86) |
+| Net margin                                      |       -$520,283 (-$680,800 to -$299,911) |          $306,855 ($274,520 to $359,339) |        -$199,966 (-$303,231 to -$49,127) |          $269,553 ($254,356 to $309,095) |
+| Net margin, mild stress                         |        -$495,167 (-$887,203 to -$38,642) |                                  not run |        -$135,856 (-$264,412 to $144,975) |          $221,098 ($186,794 to $271,154) |
+| Profitable customers                            |                   90.6% (89.4% to 91.8%) |                   90.6% (89.3% to 91.8%) |                   96.5% (96.1% to 97.5%) |                   96.6% (96.0% to 97.5%) |
+| AUC through the door, honest applicants (gated) |                   0.845 (0.835 to 0.871) |                                  not run |                   0.861 (0.848 to 0.887) |                   0.875 (0.863 to 0.898) |
+| AUC, funded plans only (not gated)              |                   0.671 (0.600 to 0.735) |                   0.673 (0.590 to 0.737) |                   0.672 (0.584 to 0.714) |                   0.669 (0.569 to 0.714) |
+| Fraud applicants approved                       |                   45.7% (44.2% to 47.5%) |                   45.7% (44.2% to 47.5%) |                      0.8% (0.0% to 2.1%) |                      0.8% (0.0% to 2.1%) |
+| Peak pool utilization                           |                   49.2% (48.1% to 50.8%) |                   46.8% (45.0% to 49.7%) |                   38.8% (37.8% to 40.2%) |                   37.2% (36.3% to 39.4%) |
+| Unfunded payouts                                |                               0 (0 to 0) |                               0 (0 to 0) |                               0 (0 to 0) |                               0 (0 to 0) |
 
 The gates, applied to each configuration that was also run under mild stress. Only the
 last column decides whether the policy ships.
@@ -64,7 +65,7 @@ last column decides whether the policy ships.
 | net_margin_base        |      > $0 | -$520,283 FAIL | -$199,966 FAIL |       $269,553 PASS |
 | net_margin_mild_stress |      > $0 | -$495,167 FAIL | -$135,856 FAIL |       $221,098 PASS |
 | bad_rate_monotonic     |       = 0 |         0 PASS |         0 PASS |              0 PASS |
-| auc                    |   >= 0.70 |     0.671 FAIL |     0.672 FAIL |          0.669 FAIL |
+| auc                    |   >= 0.70 |     0.845 PASS |     0.861 PASS |          0.875 PASS |
 | fraud_approval         |      < 5% |     45.7% FAIL |      0.8% PASS |           0.8% PASS |
 | pool_funding           |       = 0 |         0 PASS |         0 PASS |              0 PASS |
 | approval_floor         |    >= 30% |     44.7% PASS |     40.7% PASS |          40.7% PASS |
@@ -135,6 +136,85 @@ that lost money and swaps in few or none.
 | 65-74  |         98 |    98 |   $4,160,450 |    10.2% |           37 |    $41,313 |         99 |        91% |
 | 75-84  |        512 |   512 |  $21,910,050 |     7.4% |           35 |   $158,074 |         72 |        93% |
 | 85-100 |      3,453 | 3,453 | $143,937,850 |     2.7% |           14 | $1,148,498 |         80 |        97% |
+
+## Rank ordering through the door (base case)
+
+The AUC gate asks whether the score ranks risk. It is judged on every applicant the engine
+scored, not only on the plans the policy funded. To get a bad flag for an applicant the
+policy declined, the same applicants are run a second time with every scored applicant
+funded: 9,252 of 10,000 here (the other 748 were asked for more information and have no
+score). Each gets a plan at the rent requested, since the product fronts a whole lease or
+nothing, under the `standard` servicing policy, from a pool with no limit and with no
+exposure or concentration rule, and is flagged bad by the same definition as everywhere
+else in this report. Approved and referred applicants pay the fee they were quoted. A
+declined applicant pays the fee the pricing built up for them, held to the fee cap, or
+the grade D floor if they were knocked out before pricing. This second run is separate
+from the gated run: it shares its applicants and nothing else, and no other number in
+this report reads it.
+
+The gate is judged on honest applicants only. The score is there to rank credit risk.
+Stopping the fraud archetypes is the job of the integrity checks, which the fraud gate
+judges, and a fraud applicant who goes bad says nothing about how well the score reads a
+real business. The figure for all applicants is beside it.
+
+The funded only AUC is what the gate judged before, and it is still reported here, ungated.
+It is range restricted: the policy has already declined the applicants the score ranks
+lowest, so the funded plans sit in a narrow band of high scores with a few dozen bad plans
+per seed among them. A score cannot show ranking power on a population it has already
+filtered, and the figure moves several points from seed to seed.
+
+| Seeds         | Honest AUC (gated) | Honest KS | Honest good / bad | All AUC | All KS | All good / bad | Funded only AUC | Funded only KS | Funded good / bad |
+| ------------- | -----------------: | --------: | ----------------: | ------: | -----: | -------------: | --------------: | -------------: | ----------------: |
+| Seed 1        |              0.898 |     0.653 |       1,488 / 334 |   0.891 |  0.627 |    1,495 / 360 |           0.696 |          0.385 |          828 / 21 |
+| Seed 2        |              0.866 |     0.589 |       1,468 / 331 |   0.861 |  0.569 |    1,476 / 365 |           0.702 |          0.437 |          789 / 31 |
+| Seed 3        |              0.876 |     0.619 |       1,468 / 337 |   0.863 |  0.574 |    1,474 / 371 |           0.662 |          0.282 |          767 / 27 |
+| Seed 4        |              0.873 |     0.617 |       1,481 / 325 |   0.862 |  0.580 |    1,493 / 360 |           0.714 |          0.368 |          795 / 33 |
+| Seed 5        |              0.863 |     0.594 |       1,432 / 389 |   0.856 |  0.566 |    1,440 / 418 |           0.569 |          0.179 |          751 / 29 |
+| Mean of seeds |              0.875 |     0.614 |                   |   0.867 |  0.583 |                |           0.669 |          0.330 |                   |
+| Seeds pooled  |              0.875 |     0.608 |     7,337 / 1,716 |   0.867 |  0.578 |  7,378 / 1,874 |           0.670 |          0.295 |       3,930 / 141 |
+
+Counterfactual bad rate by score band, seeds pooled. "Approved on usable terms" is how
+many of the band the policy itself funds, so the rows where it falls to zero are the
+bands the cutoff and the knockouts keep out.
+
+| Score  | Scored applicants | Approved on usable terms | Bad | Bad rate | Honest applicants | Honest bad | Honest bad rate |
+| ------ | ----------------: | -----------------------: | --: | -------: | ----------------: | ---------: | --------------: |
+| 0-29   |               426 |                   0 (0%) | 373 |    87.6% |               413 |        362 |           87.7% |
+| 30-39  |             1,694 |                   0 (0%) | 871 |    51.4% |             1,642 |        830 |           50.5% |
+| 40-44  |               141 |                   0 (0%) |  42 |    29.8% |               135 |         37 |           27.4% |
+| 45-49  |               165 |                   0 (0%) |  56 |    33.9% |               157 |         51 |           32.5% |
+| 50-54  |               208 |                   0 (0%) |  55 |    26.4% |               200 |         48 |           24.0% |
+| 55-59  |               227 |                   4 (2%) |  43 |    18.9% |               221 |         39 |           17.6% |
+| 60-64  |               260 |                   4 (2%) |  42 |    16.1% |               256 |         40 |           15.6% |
+| 65-69  |               368 |                  21 (6%) |  59 |    16.0% |               346 |         46 |           13.3% |
+| 70-74  |               469 |                 77 (16%) |  74 |    15.8% |               443 |         52 |           11.7% |
+| 75-79  |               577 |                160 (28%) |  72 |    12.5% |               543 |         44 |            8.1% |
+| 80-84  |               716 |                352 (49%) |  63 |     8.8% |               705 |         52 |            7.4% |
+| 85-89  |               936 |                634 (68%) |  49 |     5.2% |               929 |         42 |            4.5% |
+| 90-94  |             1,256 |              1,100 (88%) |  44 |     3.5% |             1,254 |         42 |            3.4% |
+| 95-100 |             1,809 |              1,719 (95%) |  31 |     1.7% |             1,809 |         31 |            1.7% |
+
+By grade:
+
+| Grade | Scored applicants | Approved on usable terms |   Bad | Bad rate | Honest applicants | Honest bad | Honest bad rate |
+| ----- | ----------------: | -----------------------: | ----: | -------: | ----------------: | ---------: | --------------: |
+| A     |             4,717 |              3,805 (81%) |   187 |     4.0% |             4,697 |        167 |            3.6% |
+| B     |             1,213 |                249 (21%) |   171 |    14.1% |             1,144 |        114 |           10.0% |
+| C     |               688 |                  17 (2%) |   119 |    17.3% |               665 |        107 |           16.1% |
+| D     |               373 |                   0 (0%) |   111 |    29.8% |               357 |         99 |           27.7% |
+| F     |             2,261 |                   0 (0%) | 1,286 |    56.9% |             2,190 |      1,229 |           56.1% |
+
+By what the policy decided, which is what the policy is keeping out:
+
+| Policy decision                                          | Scored applicants | Approved on usable terms |   Bad | Bad rate | Honest applicants | Honest bad | Honest bad rate |
+| -------------------------------------------------------- | ----------------: | -----------------------: | ----: | -------: | ----------------: | ---------: | --------------: |
+| Approved on usable terms                                 |             4,071 |             4,071 (100%) |   141 |     3.5% |             4,071 |        141 |            3.5% |
+| Approved for less than the rent (no plan in the product) |             2,013 |                   0 (0%) |   128 |     6.4% |             2,011 |        128 |            6.4% |
+| Declined                                                 |             3,168 |                   0 (0%) | 1,605 |    50.7% |             2,971 |      1,447 |           48.7% |
+
+A counterfactual like this is only possible because the borrowers are simulated. A lender
+with real applicants never sees how a declined one would have performed, and has to
+estimate it by reject inference or buy it with a test and learn sample.
 
 ## Calibration: expected against realized (base case)
 
@@ -228,7 +308,7 @@ Mild: revenue down 15% for 180 days across the whole book, starting in month 7. 
 | Net margin                 |   $1,347,764 |   $1,105,489 |      $640,290 |
 | Net margin, bps of volume  |           79 |           82 |            67 |
 | Profitable customers       |        96.6% |        96.9% |         94.6% |
-| AUC                        |        0.670 |        0.689 |         0.785 |
+| AUC, funded plans only     |        0.670 |        0.689 |         0.785 |
 | Minimum pool cash          |   $4,662,104 |   $5,225,037 |    $5,936,869 |
 | Unfunded payouts           |            0 |            0 |             0 |
 
@@ -291,11 +371,11 @@ applicants in the base case, seeds pooled. These numbers do not decide a gate.
 - `partial_advance`: Counter offers are fronted in part: when the limit is below the rent, CashFlow fronts the limit and the business pays the rest itself. The product does not do this. It refuses a lease above the limit, which is what the gated run models.
 - `manual_payment`: Of installments still unpaid 7 days past due at a business that is still trading, 30% are paid by hand between day 7 and day 30. An assumption with no data behind it. The gated run assumes none are.
 
-| Run                 | Approved | Approved on usable terms | Plans |       Volume | Bad rate | Net loss (bps) | Net margin (bps) |      AUC (mean, range) |
-| ------------------- | -------: | -----------------------: | ----: | -----------: | -------: | -------------: | ---------------: | ---------------------: |
-| v2_standard (gated) |    60.8% |                    40.7% | 4,071 | $170,220,750 |     3.5% |  $304,020 (18) |  $1,347,764 (79) | 0.669 (0.569 to 0.714) |
-| partial_advance     |    60.8% |                    60.8% | 6,084 | $283,661,950 |     4.4% |  $604,080 (21) |  $2,649,924 (93) | 0.678 (0.643 to 0.709) |
-| manual_payment      |    60.8% |                    40.7% | 4,071 | $170,238,850 |     3.5% |  $304,785 (18) |  $1,347,069 (79) | 0.669 (0.569 to 0.714) |
+| Run                 | Approved | Approved on usable terms | Plans |       Volume | Bad rate | Net loss (bps) | Net margin (bps) | Funded only AUC (mean, range) |
+| ------------------- | -------: | -----------------------: | ----: | -----------: | -------: | -------------: | ---------------: | ----------------------------: |
+| v2_standard (gated) |    60.8% |                    40.7% | 4,071 | $170,220,750 |     3.5% |  $304,020 (18) |  $1,347,764 (79) |        0.669 (0.569 to 0.714) |
+| partial_advance     |    60.8% |                    60.8% | 6,084 | $283,661,950 |     4.4% |  $604,080 (21) |  $2,649,924 (93) |        0.678 (0.643 to 0.709) |
+| manual_payment      |    60.8% |                    40.7% | 4,071 | $170,238,850 |     3.5% |  $304,785 (18) |  $1,347,069 (79) |        0.669 (0.569 to 0.714) |
 
 ## Challengers (not gated)
 
@@ -305,10 +385,10 @@ gated run.
 
 - `cutoff_55`: Same servicing. Minimum score 55 instead of 50, which removes grade D and with it the score band referral.
 
-| Run                 | Approval | Refer |       Volume | Bad rate | Net loss bps | Margin bps |      AUC (mean, range) | Fraud approved |
-| ------------------- | -------: | ----: | -----------: | -------: | -----------: | ---------: | ---------------------: | -------------: |
-| v2_standard (gated) |    60.8% |  1.7% | $170,220,750 |     3.5% |           18 |         79 | 0.669 (0.569 to 0.714) |           0.8% |
-| cutoff_55           |    59.4% |  0.2% | $170,220,750 |     3.5% |           18 |         79 | 0.669 (0.569 to 0.714) |           0.4% |
+| Run                 | Approval | Refer |       Volume | Bad rate | Net loss bps | Margin bps | Funded only AUC (mean, range) | Fraud approved |
+| ------------------- | -------: | ----: | -----------: | -------: | -----------: | ---------: | ----------------------------: | -------------: |
+| v2_standard (gated) |    60.8% |  1.7% | $170,220,750 |     3.5% |           18 |         79 |        0.669 (0.569 to 0.714) |           0.8% |
+| cutoff_55           |    59.4% |  0.2% | $170,220,750 |     3.5% |           18 |         79 |        0.669 (0.569 to 0.714) |           0.4% |
 
 | Comparison               | Swap in | Swap in bad rate | Swap in net margin | Swap out | Swap out bad rate | Swap out net margin |
 | ------------------------ | ------: | ---------------: | -----------------: | -------: | ----------------: | ------------------: |
@@ -316,19 +396,20 @@ gated run.
 
 ## Assumptions
 
-| Assumption                             | Value                                                                                                       |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Cost of funds                          | 12% APR on principal outstanding each day                                                                   |
-| Servicing cost                         | $12.00 per plan-month                                                                                       |
-| Recovery on written off principal      | 10%                                                                                                         |
-| Returned debits                        | a debit the account cannot cover is booked as collected and reversed 2 days later (standard servicing only) |
-| Counter offers                         | the product fronts a whole lease rent or nothing, so an approval below the rent requested opens no plan     |
-| Manual payment after failed collection | none (see the sensitivity)                                                                                  |
-| Manual review                          | catches and declines 70% of referred fraud applicants; approves every other referral at the engine's terms  |
-| Funding wait                           | a plan the pool cannot take waits up to 3 rent dates                                                        |
-| Loss measurement                       | unpaid 90 days past due at the end of observation                                                           |
-| Bad definition                         | any installment 30 days past due, or written off                                                            |
-| Monotonic gate tolerance               | 100 bps, grades under 30 plans skipped                                                                      |
+| Assumption                             | Value                                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Cost of funds                          | 12% APR on principal outstanding each day                                                                          |
+| Servicing cost                         | $12.00 per plan-month                                                                                              |
+| Recovery on written off principal      | 10%                                                                                                                |
+| Returned debits                        | a debit the account cannot cover is booked as collected and reversed 2 days later (standard servicing only)        |
+| Counter offers                         | the product fronts a whole lease rent or nothing, so an approval below the rent requested opens no plan            |
+| Manual payment after failed collection | none (see the sensitivity)                                                                                         |
+| Manual review                          | catches and declines 70% of referred fraud applicants; approves every other referral at the engine's terms         |
+| Funding wait                           | a plan the pool cannot take waits up to 3 rent dates                                                               |
+| Loss measurement                       | unpaid 90 days past due at the end of observation                                                                  |
+| Bad definition                         | any installment 30 days past due, or written off                                                                   |
+| AUC gate population                    | every scored honest applicant, funded in a counterfactual run at the rent requested with no pool or exposure limit |
+| Monotonic gate tolerance               | 100 bps, grades under 30 plans skipped                                                                             |
 
 ## What this can and cannot tell you
 

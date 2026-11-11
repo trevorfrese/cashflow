@@ -10,8 +10,12 @@ import {
   gradeInversions,
   rankOrdering,
   scoreBand,
+  scoreSeparation,
   segmentMetrics,
   swapSet,
+  THROUGH_THE_DOOR_BANDS,
+  throughTheDoorBand,
+  throughTheDoorMetrics,
 } from './metrics.ts';
 import { emptyBucketRoll, type CustomerResult, type PortfolioResult } from './portfolio.ts';
 
@@ -199,6 +203,135 @@ describe('rank ordering', () => {
   it('is undefined without both goods and bads, and ignores unfunded applicants', () => {
     expect(rankOrdering([plan(90, false)]).auc).toBeNull();
     expect(rankOrdering([plan(90, false), declined]).bads).toBe(0);
+  });
+});
+
+describe('score separation on a hand built set', () => {
+  it('counts the pairs a good wins, with ties as half', () => {
+    // Goods 80, 70, 60, 50. Bads 70, 40. Eight pairs.
+    // Against the bad at 70: 80 wins, 70 ties, 60 and 50 lose -> 1.5.
+    // Against the bad at 40: all four win -> 4.
+    const r = scoreSeparation([80, 70, 60, 50], [70, 40]);
+    expect(r.auc).toBe(5.5 / 8);
+    expect(r.goods).toBe(4);
+    expect(r.bads).toBe(2);
+    // Cumulative share at or below each score, bads then goods:
+    // 40: 0.5, 0. 50: 0.5, 0.25. 60: 0.5, 0.5. 70: 1, 0.75. 80: 1, 1. Largest gap 0.5.
+    expect(r.ks).toBe(0.5);
+  });
+
+  it('is 1 when every good outscores every bad and 0 when every bad outscores every good', () => {
+    expect(scoreSeparation([90, 80], [70, 10])).toMatchObject({ auc: 1, ks: 1 });
+    expect(scoreSeparation([20, 10], [70, 60])).toMatchObject({ auc: 0, ks: 1 });
+  });
+
+  it('does not depend on the order the scores are given in', () => {
+    expect(scoreSeparation([50, 80, 60, 70], [40, 70])).toEqual(
+      scoreSeparation([80, 70, 60, 50], [70, 40]),
+    );
+  });
+
+  it('is null without both goods and bads', () => {
+    expect(scoreSeparation([], [50])).toEqual({ auc: null, ks: null, goods: 0, bads: 1 });
+    expect(scoreSeparation([50], [])).toEqual({ auc: null, ks: null, goods: 1, bads: 0 });
+  });
+});
+
+describe('through the door metrics', () => {
+  const funded = (overrides: Partial<CustomerResult>) =>
+    makeCustomer({ payoutCount: 1, payoutCents: 100_000, ...overrides });
+  const customers = [
+    // Approved by the policy: three good, one bad.
+    funded({ applicantId: 'a1', score: 90, grade: 'A' }),
+    funded({ applicantId: 'a2', score: 80, grade: 'A' }),
+    funded({ applicantId: 'a3', score: 72, grade: 'B' }),
+    funded({ applicantId: 'a4', score: 72, grade: 'B', bad: true }),
+    // Approved for less than the rent: no plan in the product, funded here.
+    funded({ applicantId: 'c1', score: 58, grade: 'C', counterOffer: true, bad: true }),
+    // Declined by the policy: one good, two bad, and a fraud applicant with a high score.
+    funded({ applicantId: 'd1', score: 47, grade: 'F', outcome: 'DECLINED' }),
+    funded({ applicantId: 'd2', score: 42, grade: 'F', outcome: 'DECLINED', bad: true }),
+    funded({ applicantId: 'd3', score: 20, grade: 'F', outcome: 'DECLINED', bad: true }),
+    funded({
+      applicantId: 'f1',
+      score: 85,
+      grade: 'A',
+      outcome: 'DECLINED',
+      fraud: 'round_trip',
+      segment: 'round_trip',
+      bad: true,
+    }),
+    // No score: asked for more information, never funded.
+    makeCustomer({ applicantId: 'n1', outcome: 'NEEDS_INFO', score: null, grade: null }),
+  ];
+  const t = throughTheDoorMetrics(customers);
+
+  it('covers every scored applicant, declined or not, and leaves out the unscored', () => {
+    expect(t).toMatchObject({ applicants: 10, scored: 9, unscored: 1 });
+    expect(t.all).toMatchObject({ goods: 4, bads: 5 });
+    expect(t.honest).toMatchObject({ goods: 4, bads: 4 });
+  });
+
+  it('ranks honest applicants apart from the fraud archetypes', () => {
+    // Honest goods 90, 80, 72, 47. Honest bads 72, 58, 42, 20.
+    // Wins: 90 and 80 beat all four (8), 72 beats three and ties one (3.5), 47 beats two (2).
+    expect(t.honest.auc).toBe(13.5 / 16);
+    // The fraud applicant scored 85 and went bad: 90 beats it, the other three goods lose.
+    expect(t.all.auc).toBe(14.5 / 20);
+    expect(t.all.auc!).toBeLessThan(t.honest.auc!);
+  });
+
+  it('reports the bad rate by score band and grade, including the declined bands', () => {
+    expect(t.byScoreBand['0-29']).toMatchObject({ plans: 1, bad: 1, badRateBps: 10_000 });
+    expect(t.byScoreBand['40-44']).toMatchObject({ plans: 1, bad: 1, approvedUsable: 0 });
+    expect(t.byScoreBand['45-49']).toMatchObject({ plans: 1, bad: 0, approvedUsable: 0 });
+    expect(t.byScoreBand['70-74']).toMatchObject({
+      plans: 2,
+      bad: 1,
+      badRateBps: 5000,
+      approvedUsable: 2,
+    });
+    // The fraud applicant is in the band but not in its honest figures.
+    expect(t.byScoreBand['85-89']).toMatchObject({
+      plans: 1,
+      bad: 1,
+      badRateBps: 10_000,
+      honestPlans: 0,
+      honestBad: 0,
+      honestBadRateBps: 0,
+    });
+    expect(Object.keys(t.byScoreBand)).toEqual([...THROUGH_THE_DOOR_BANDS]);
+    expect(t.byGrade.F).toMatchObject({ plans: 3, bad: 2, badRateBps: 6667 });
+    expect(t.byGrade.A).toMatchObject({ plans: 3, bad: 1, honestPlans: 2, honestBad: 0 });
+  });
+
+  it('sets the declined beside the approved', () => {
+    expect(t.byPolicyOutcome.approvedUsable).toMatchObject({ plans: 4, bad: 1, badRateBps: 2500 });
+    expect(t.byPolicyOutcome.approvedCounterOffer).toMatchObject({ plans: 1, bad: 1 });
+    expect(t.byPolicyOutcome.declined).toMatchObject({
+      plans: 4,
+      bad: 3,
+      badRateBps: 7500,
+      honestPlans: 3,
+      honestBad: 2,
+      honestBadRateBps: 6667,
+    });
+  });
+
+  it('bands scores five wide from 40 up and coarser below', () => {
+    expect([0, 29, 30, 39, 40, 44, 45, 50, 94, 95, 100].map(throughTheDoorBand)).toEqual([
+      '0-29',
+      '0-29',
+      '30-39',
+      '30-39',
+      '40-44',
+      '40-44',
+      '45-49',
+      '50-54',
+      '90-94',
+      '95-100',
+      '95-100',
+    ]);
   });
 });
 

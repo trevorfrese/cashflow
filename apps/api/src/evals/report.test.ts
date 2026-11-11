@@ -25,6 +25,39 @@ describe('evaluation and report', () => {
     for (const g of evaluation.gates) expect(typeof g.pass).toBe('boolean');
   });
 
+  it('judges the AUC gate through the door and keeps the funded only figure beside it', () => {
+    const door = evaluation.throughTheDoor;
+    expect(door.bySeed).toHaveLength(2);
+    for (const t of door.bySeed) {
+      expect(t.applicants).toBe(120);
+      expect(t.scored + t.unscored).toBe(120);
+      // Declined applicants are in the measurement.
+      expect(t.byPolicyOutcome.declined.plans).toBeGreaterThan(0);
+    }
+    expect(door.pooled.scored).toBe(door.bySeed[0]!.scored + door.bySeed[1]!.scored);
+    const auc = evaluation.gates.find((g) => g.id === 'auc')!;
+    const perSeed = door.bySeed.map((t) => t.honest.auc!);
+    expect(auc.value).toBe(Math.round(((perSeed[0]! + perSeed[1]!) / 2) * 1000) / 1000);
+    expect(auc.min).toBe(Math.round(Math.min(...perSeed) * 1000) / 1000);
+    expect(auc.threshold).toBe(0.7);
+    // More applicants are scored than the policy funds.
+    expect(door.pooled.scored).toBeGreaterThan(evaluation.base.overall.plans);
+    expect(door.pooled.honest.goods + door.pooled.honest.bads).toBeGreaterThan(
+      evaluation.base.rankOrdering.goods + evaluation.base.rankOrdering.bads,
+    );
+  });
+
+  it('the through the door run changes nothing in the gated run', () => {
+    // The same evaluation with no comparison runs has the same gated metrics to the cent.
+    const alone = evaluate({ ...options, comparisons: [] });
+    expect(alone.base).toEqual(evaluation.base);
+    expect(alone.baseBySeed).toEqual(evaluation.baseBySeed);
+    expect(alone.mild).toEqual(evaluation.mild);
+    expect(alone.throughTheDoor).toEqual(evaluation.throughTheDoor);
+    // The gated pool is the planned pool, not the unconstrained one.
+    expect(evaluation.base.pool.startCents).toBe(evaluation.run.poolSizeCents);
+  });
+
   it('runs the comparison configurations on the same applicants', () => {
     expect(evaluation.comparisons.map((c) => [c.name, c.policyVersion, c.servicingPolicy])).toEqual(
       [
@@ -35,6 +68,8 @@ describe('evaluation and report', () => {
     );
     const [v1Baseline, v1Standard, v2Baseline] = evaluation.comparisons;
     expect(v1Baseline!.gates).toHaveLength(9);
+    expect(v1Baseline!.throughTheDoor!.bySeed).toHaveLength(2);
+    expect(v1Standard!.throughTheDoor).toBeNull();
     expect(v1Standard!.gates).toBeNull();
     expect(v2Baseline!.gates).toHaveLength(9);
     // Servicing does not change who the launch policy approves.
@@ -61,6 +96,7 @@ describe('evaluation and report', () => {
       '## Swap sets against the earlier configurations',
       '## Headline (gated configuration, base case, seeds pooled)',
       '## By grade (base case)',
+      '## Rank ordering through the door (base case)',
       '## Calibration: expected against realized (base case)',
       '## By archetype (base case)',
       '## By archetype, before and after',
@@ -73,6 +109,10 @@ describe('evaluation and report', () => {
     }
     expect(md).toContain('v2_standard (gated)');
     expect(md).toContain('At most 5% of applicants referred to a reviewer');
+    expect(md).toContain('all scored honest applicants');
+    expect(md).toContain('Funded only AUC');
+    expect(md).toContain('range restricted');
+    expect(md).toContain('reject inference');
     const json = JSON.parse(renderJson(evaluation));
     const baseline = JSON.parse(renderBaseline(evaluation));
     expect(json.scenarios.base.overall.applicants).toBe(240);
@@ -86,6 +126,16 @@ describe('evaluation and report', () => {
     expect(baseline.configurations.v2_standard.gated).toBe(true);
     expect(baseline.configurations.v2_standard.gates).toHaveLength(9);
     expect(baseline.configurations.v1_baseline.gates).toHaveLength(9);
+    expect(baseline.configurations.v2_standard.throughTheDoor.bySeed).toHaveLength(2);
+    expect(baseline.configurations.v2_standard.throughTheDoor.honest.auc).toBe(
+      Math.round(evaluation.throughTheDoor.pooled.honest.auc! * 1000) / 1000,
+    );
+    // The funded only figure keeps its place in the headline, ungated.
+    const fundedOnly = evaluation.base.rankOrdering.auc;
+    expect(baseline.configurations.v2_standard.headline.base.auc).toBe(
+      fundedOnly === null ? null : Math.round(fundedOnly * 1000) / 1000,
+    );
+    expect(json.throughTheDoor.bySeed).toHaveLength(2);
     expect(baseline.configurations.v2_standard.headline.base.netLossBps).toBe(
       evaluation.base.overall.netLossBps,
     );

@@ -2,8 +2,17 @@ import { formatCents } from '@cashflow/shared';
 
 import { ASSUMPTIONS, STRESS } from './assumptions.ts';
 import { GATE_THRESHOLDS, type GateResult } from './gates.ts';
-import type { PortfolioMetrics, SegmentMetrics, SwapSet } from './metrics.ts';
-import type { Evaluation } from './run.ts';
+import {
+  POLICY_OUTCOME_GROUPS,
+  type PolicyOutcomeGroup,
+  type PortfolioMetrics,
+  type RankOrdering,
+  type SegmentMetrics,
+  type SwapSet,
+  type ThroughTheDoorCell,
+  type ThroughTheDoorMetrics,
+} from './metrics.ts';
+import type { Evaluation, ThroughTheDoorOutcome } from './run.ts';
 
 /**
  * Turns an evaluation into the Markdown report, the full JSON, and the small baseline file
@@ -176,7 +185,9 @@ function stressTable(e: Evaluation): string {
       row('Net margin', (m) => dollars(m.overall.netMarginCents)),
       row('Net margin, bps of volume', (m) => String(m.overall.netMarginBps)),
       row('Profitable customers', (m) => pct(m.overall.profitableShareBps)),
-      row('AUC', (m) => (m.rankOrdering.auc === null ? 'n/a' : m.rankOrdering.auc.toFixed(3))),
+      row('AUC, funded plans only', (m) =>
+        m.rankOrdering.auc === null ? 'n/a' : m.rankOrdering.auc.toFixed(3),
+      ),
       row('Minimum pool cash', (m) => dollars(m.pool.minCents)),
       row('Unfunded payouts', (m) => count(m.pool.unfundedPayouts)),
     ],
@@ -216,7 +227,11 @@ function meanRange(
   pick: (m: PortfolioMetrics) => number | null,
   fmt: (v: number) => string,
 ): string {
-  const values = runs.map(pick).filter((v): v is number => v !== null);
+  return meanRangeOf(runs.map(pick), fmt);
+}
+
+function meanRangeOf(all: readonly (number | null)[], fmt: (v: number) => string): string {
+  const values = all.filter((v): v is number => v !== null);
   if (values.length === 0) return 'n/a';
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
   if (values.length === 1) return fmt(mean);
@@ -227,6 +242,7 @@ interface Column {
   name: string;
   base: readonly PortfolioMetrics[];
   mild: readonly PortfolioMetrics[] | null;
+  throughTheDoor: ThroughTheDoorOutcome | null;
   gates: readonly GateResult[] | null;
 }
 
@@ -236,9 +252,16 @@ function columns(e: Evaluation): Column[] {
       name: c.name,
       base: c.baseBySeed,
       mild: c.mildBySeed,
+      throughTheDoor: c.throughTheDoor,
       gates: c.gates,
     })),
-    { name: 'v2_standard (gated)', base: e.baseBySeed, mild: e.mildBySeed, gates: e.gates },
+    {
+      name: 'v2_standard (gated)',
+      base: e.baseBySeed,
+      mild: e.mildBySeed,
+      throughTheDoor: e.throughTheDoor,
+      gates: e.gates,
+    },
   ];
 }
 
@@ -272,8 +295,19 @@ function comparisonTable(e: Evaluation): string {
         ),
       ],
       row('Profitable customers', (m) => m.overall.profitableShareBps, bpsPct),
+      [
+        'AUC through the door, honest applicants (gated)',
+        ...cols.map((c) =>
+          c.throughTheDoor
+            ? meanRangeOf(
+                c.throughTheDoor.bySeed.map((t) => t.honest.auc),
+                (v) => v.toFixed(3),
+              )
+            : 'not run',
+        ),
+      ],
       row(
-        'AUC',
+        'AUC, funded plans only (not gated)',
         (m) => m.rankOrdering.auc,
         (v) => v.toFixed(3),
       ),
@@ -469,7 +503,7 @@ function sensitivitySection(e: Evaluation): string[] {
         'Bad rate',
         'Net loss (bps)',
         'Net margin (bps)',
-        'AUC (mean, range)',
+        'Funded only AUC (mean, range)',
       ],
       [
         row('v2_standard (gated)', e.base, e.baseBySeed),
@@ -516,7 +550,7 @@ function challengerSection(e: Evaluation): string[] {
         'Bad rate',
         'Net loss bps',
         'Margin bps',
-        'AUC (mean, range)',
+        'Funded only AUC (mean, range)',
         'Fraud approved',
       ],
       [
@@ -531,6 +565,164 @@ function challengerSection(e: Evaluation): string[] {
       e.challengers.map((c) => swapRow(`v2_standard to ${c.name}`, c.swapSet)),
       SWAP_ALIGN,
     ),
+    '',
+  ];
+}
+
+const fixed3 = (v: number | null) => (v === null ? 'n/a' : v.toFixed(3));
+const mean = (values: readonly (number | null)[]): number | null => {
+  const measured = values.filter((v): v is number => v !== null);
+  return measured.length === values.length && measured.length > 0
+    ? measured.reduce((a, b) => a + b, 0) / measured.length
+    : null;
+};
+
+const POLICY_OUTCOME_LABELS: Record<PolicyOutcomeGroup, string> = {
+  approvedUsable: 'Approved on usable terms',
+  approvedCounterOffer: 'Approved for less than the rent (no plan in the product)',
+  declined: 'Declined',
+};
+
+function rankOrderingTable(e: Evaluation): string {
+  const row = (
+    name: string,
+    honest: RankOrdering,
+    all: RankOrdering,
+    funded: RankOrdering,
+  ): string[] => [
+    name,
+    fixed3(honest.auc),
+    fixed3(honest.ks),
+    `${count(honest.goods)} / ${count(honest.bads)}`,
+    fixed3(all.auc),
+    fixed3(all.ks),
+    `${count(all.goods)} / ${count(all.bads)}`,
+    fixed3(funded.auc),
+    fixed3(funded.ks),
+    `${count(funded.goods)} / ${count(funded.bads)}`,
+  ];
+  const door = e.throughTheDoor;
+  const rows = e.run.seeds.map((seed, i) =>
+    row(`Seed ${seed}`, door.bySeed[i]!.honest, door.bySeed[i]!.all, e.baseBySeed[i]!.rankOrdering),
+  );
+  if (e.run.seeds.length > 1) {
+    const funded = e.baseBySeed.map((m) => m.rankOrdering);
+    rows.push([
+      'Mean of seeds',
+      fixed3(mean(door.bySeed.map((t) => t.honest.auc))),
+      fixed3(mean(door.bySeed.map((t) => t.honest.ks))),
+      '',
+      fixed3(mean(door.bySeed.map((t) => t.all.auc))),
+      fixed3(mean(door.bySeed.map((t) => t.all.ks))),
+      '',
+      fixed3(mean(funded.map((r) => r.auc))),
+      fixed3(mean(funded.map((r) => r.ks))),
+      '',
+    ]);
+    rows.push(row('Seeds pooled', door.pooled.honest, door.pooled.all, e.base.rankOrdering));
+  }
+  return markdownTable(
+    [
+      'Seeds',
+      'Honest AUC (gated)',
+      'Honest KS',
+      'Honest good / bad',
+      'All AUC',
+      'All KS',
+      'All good / bad',
+      'Funded only AUC',
+      'Funded only KS',
+      'Funded good / bad',
+    ],
+    rows,
+    ['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
+  );
+}
+
+function throughTheDoorCellTable(
+  cells: Record<string, ThroughTheDoorCell>,
+  first: string,
+  label: (key: string) => string = (key) => key,
+): string {
+  return markdownTable(
+    [
+      first,
+      'Scored applicants',
+      'Approved on usable terms',
+      'Bad',
+      'Bad rate',
+      'Honest applicants',
+      'Honest bad',
+      'Honest bad rate',
+    ],
+    Object.entries(cells)
+      .filter(([, c]) => c.plans > 0)
+      .map(([key, c]) => [
+        label(key),
+        count(c.plans),
+        `${count(c.approvedUsable)} (${pct(c.plans === 0 ? 0 : Math.round((c.approvedUsable * 10_000) / c.plans), 0)})`,
+        count(c.bad),
+        pct(c.badRateBps),
+        count(c.honestPlans),
+        count(c.honestBad),
+        c.honestPlans > 0 ? pct(c.honestBadRateBps) : 'n/a',
+      ]),
+    ['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
+  );
+}
+
+function throughTheDoorSection(e: Evaluation): string[] {
+  const t: ThroughTheDoorMetrics = e.throughTheDoor.pooled;
+  return [
+    '## Rank ordering through the door (base case)',
+    '',
+    'The AUC gate asks whether the score ranks risk. It is judged on every applicant the engine',
+    'scored, not only on the plans the policy funded. To get a bad flag for an applicant the',
+    'policy declined, the same applicants are run a second time with every scored applicant',
+    `funded: ${count(t.scored)} of ${count(t.applicants)} here (the other ${count(t.unscored)} were asked for more information and have no`,
+    'score). Each gets a plan at the rent requested, since the product fronts a whole lease or',
+    `nothing, under the \`${e.run.servicingPolicy}\` servicing policy, from a pool with no limit and with no`,
+    'exposure or concentration rule, and is flagged bad by the same definition as everywhere',
+    'else in this report. Approved and referred applicants pay the fee they were quoted. A',
+    'declined applicant pays the fee the pricing built up for them, held to the fee cap, or',
+    'the grade D floor if they were knocked out before pricing. This second run is separate',
+    'from the gated run: it shares its applicants and nothing else, and no other number in',
+    'this report reads it.',
+    '',
+    'The gate is judged on honest applicants only. The score is there to rank credit risk.',
+    'Stopping the fraud archetypes is the job of the integrity checks, which the fraud gate',
+    'judges, and a fraud applicant who goes bad says nothing about how well the score reads a',
+    'real business. The figure for all applicants is beside it.',
+    '',
+    'The funded only AUC is what the gate judged before, and it is still reported here, ungated.',
+    'It is range restricted: the policy has already declined the applicants the score ranks',
+    'lowest, so the funded plans sit in a narrow band of high scores with a few dozen bad plans',
+    'per seed among them. A score cannot show ranking power on a population it has already',
+    'filtered, and the figure moves several points from seed to seed.',
+    '',
+    rankOrderingTable(e),
+    '',
+    'Counterfactual bad rate by score band, seeds pooled. "Approved on usable terms" is how',
+    'many of the band the policy itself funds, so the rows where it falls to zero are the',
+    'bands the cutoff and the knockouts keep out.',
+    '',
+    throughTheDoorCellTable(t.byScoreBand, 'Score'),
+    '',
+    'By grade:',
+    '',
+    throughTheDoorCellTable(t.byGrade, 'Grade'),
+    '',
+    'By what the policy decided, which is what the policy is keeping out:',
+    '',
+    throughTheDoorCellTable(
+      Object.fromEntries(POLICY_OUTCOME_GROUPS.map((g) => [g, t.byPolicyOutcome[g]])),
+      'Policy decision',
+      (key) => POLICY_OUTCOME_LABELS[key as PolicyOutcomeGroup],
+    ),
+    '',
+    'A counterfactual like this is only possible because the borrowers are simulated. A lender',
+    'with real applicants never sees how a declined one would have performed, and has to',
+    'estimate it by reject inference or buy it with a test and learn sample.',
     '',
   ];
 }
@@ -596,6 +788,7 @@ export function renderMarkdown(e: Evaluation): string {
     '',
     segmentTable(e.base.byScoreBand, 'Score', true),
     '',
+    ...throughTheDoorSection(e),
     '## Calibration: expected against realized (base case)',
     '',
     'Expected bad rate is the PD the fee was priced on, from the table calibrated on separate',
@@ -693,6 +886,10 @@ export function renderMarkdown(e: Evaluation): string {
         [
           'Bad definition',
           `any installment ${ASSUMPTIONS.badDaysPastDue} days past due, or written off`,
+        ],
+        [
+          'AUC gate population',
+          'every scored honest applicant, funded in a counterfactual run at the rent requested with no pool or exposure limit',
         ],
         [
           'Monotonic gate tolerance',
@@ -797,6 +994,38 @@ function headline(m: PortfolioMetrics) {
   };
 }
 
+const round3 = (v: number | null) => (v === null ? null : Math.round(v * 1000) / 1000);
+const rankSummary = (r: RankOrdering) => ({
+  auc: round3(r.auc),
+  ks: round3(r.ks),
+  goods: r.goods,
+  bads: r.bads,
+});
+
+/** Through the door rank ordering, per seed and pooled, with the pooled bad rates. */
+function throughTheDoorSummary(t: ThroughTheDoorOutcome, seeds: readonly string[]) {
+  const rates = (cells: Record<string, ThroughTheDoorCell>, honest: boolean) =>
+    Object.fromEntries(
+      Object.entries(cells)
+        .filter(([, c]) => (honest ? c.honestPlans : c.plans) > 0)
+        .map(([k, c]) => [k, honest ? c.honestBadRateBps : c.badRateBps]),
+    );
+  return {
+    scored: t.pooled.scored,
+    honest: rankSummary(t.pooled.honest),
+    all: rankSummary(t.pooled.all),
+    bySeed: seeds.map((seed, i) => ({
+      seed,
+      honest: rankSummary(t.bySeed[i]!.honest),
+      all: rankSummary(t.bySeed[i]!.all),
+    })),
+    honestBadRateBpsByScoreBand: rates(t.pooled.byScoreBand, true),
+    honestBadRateBpsByGrade: rates(t.pooled.byGrade, true),
+    honestBadRateBpsByPolicyOutcome: rates(t.pooled.byPolicyOutcome, true),
+    badRateBpsByPolicyOutcome: rates(t.pooled.byPolicyOutcome, false),
+  };
+}
+
 const gateSummary = (gates: readonly GateResult[]) =>
   gates.map((g) => ({
     id: g.id,
@@ -817,6 +1046,7 @@ export function renderJson(e: Evaluation): string {
     gateThresholds: GATE_THRESHOLDS,
     gates: e.gates,
     scenarios: { base: e.base, mild: e.mild, severe: e.severe },
+    throughTheDoor: e.throughTheDoor,
     bySeed: e.run.seeds.map((seed, i) => ({
       seed,
       base: headline(e.baseBySeed[i]!),
@@ -832,6 +1062,7 @@ export function renderJson(e: Evaluation): string {
       swapSet: c.swapSet,
       base: c.base,
       mild: c.mild,
+      throughTheDoor: c.throughTheDoor,
     })),
     challengers: e.challengers.map((c) => ({
       name: c.name,
@@ -859,6 +1090,9 @@ export function renderBaseline(e: Evaluation): string {
       servicingPolicy: c.servicingPolicy,
       gated: false,
       headline: { base: headline(c.base), ...(c.mild ? { mild: headline(c.mild) } : {}) },
+      ...(c.throughTheDoor
+        ? { throughTheDoor: throughTheDoorSummary(c.throughTheDoor, e.run.seeds) }
+        : {}),
       ...(c.gates ? { gates: gateSummary(c.gates) } : {}),
     };
   }
@@ -867,6 +1101,7 @@ export function renderBaseline(e: Evaluation): string {
     servicingPolicy: e.run.servicingPolicy,
     gated: true,
     headline: { base: headline(e.base), mild: headline(e.mild), severe: headline(e.severe) },
+    throughTheDoor: throughTheDoorSummary(e.throughTheDoor, e.run.seeds),
     gates: gateSummary(e.gates),
   };
   // The same decisions and servicing as the gated configuration, with one assumption of the

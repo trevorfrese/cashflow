@@ -11,11 +11,18 @@ import {
   computeMetrics,
   poolResults,
   swapSet,
+  throughTheDoorMetrics,
   type PortfolioMetrics,
   type SwapSet,
+  type ThroughTheDoorMetrics,
 } from './metrics.ts';
 import { drawPopulation, type Applicant } from './population.ts';
-import { runPortfolio, type PortfolioConfig, type PortfolioResult } from './portfolio.ts';
+import {
+  runPortfolio,
+  throughTheDoorCustomers,
+  type PortfolioConfig,
+  type PortfolioResult,
+} from './portfolio.ts';
 
 /**
  * One full evaluation.
@@ -32,6 +39,11 @@ import { runPortfolio, type PortfolioConfig, type PortfolioResult } from './port
  *   v2_baseline   the current policy with today's servicing: what underwriting alone buys
  *
  * Challengers change one thing about the gated configuration and report a swap set.
+ *
+ * Every configuration that is judged against the gates is also run once "through the door":
+ * the same applicants, decisions, and servicing, with every scored applicant funded so that
+ * the score can be judged on the applicants the policy declined as well. That run feeds the
+ * AUC gate and the through the door tables and nothing else.
  */
 
 export interface PolicyConfig {
@@ -136,6 +148,12 @@ export interface EvaluationOptions {
   sensitivities?: readonly Challenger[];
 }
 
+/** The counterfactual run of one configuration, seeds pooled and one entry per seed. */
+export interface ThroughTheDoorOutcome {
+  pooled: ThroughTheDoorMetrics;
+  bySeed: ThroughTheDoorMetrics[];
+}
+
 export interface ConfigOutcome {
   name: string;
   description: string;
@@ -147,6 +165,8 @@ export interface ConfigOutcome {
   /** One entry per seed, in seed order. */
   baseBySeed: PortfolioMetrics[];
   mildBySeed: PortfolioMetrics[] | null;
+  /** Run only when the gates are judged, which is when mild stress was run. */
+  throughTheDoor: ThroughTheDoorOutcome | null;
   /** Gate results, when mild stress was run. For comparison only: these do not decide shipping. */
   gates: GateResult[] | null;
   /** Against the gated configuration: who each approves that the other does not. */
@@ -180,6 +200,11 @@ export interface Evaluation {
   baseBySeed: PortfolioMetrics[];
   mildBySeed: PortfolioMetrics[];
   severeBySeed: PortfolioMetrics[];
+  /**
+   * The gated configuration in the base case with every scored applicant funded. Read by the
+   * AUC gate. Not part of `base` and not a portfolio result.
+   */
+  throughTheDoor: ThroughTheDoorOutcome;
   gates: GateResult[];
   comparisons: ConfigOutcome[];
   challengers: ChallengerOutcome[];
@@ -237,17 +262,56 @@ export function evaluate(options: EvaluationOptions): Evaluation {
     bySeed: results.map((r) => computeMetrics(r)),
   });
 
+  /**
+   * The counterfactual run of a configuration in the base case, given that configuration's
+   * ordinary base results, one per seed. Plans the ordinary run already played are not
+   * played again. A declined applicant the engine never priced pays the grade D floor, the
+   * highest floor of any grade the policy funds.
+   */
+  const runThroughDoor = (
+    policy: CreditPolicy,
+    servicing: ServicingPolicy,
+    label: string,
+    funded: readonly PortfolioResult[],
+  ): ThroughTheDoorOutcome => {
+    const bySeed = populations.map((population, i) =>
+      throughTheDoorCustomers(
+        population,
+        {
+          ...portfolioConfig(policy, servicing, options.horizonMonths),
+          label,
+          stress: null,
+          fallbackFeeBps: policy.pricing.D.feeBps,
+        },
+        funded[i]!,
+      ),
+    );
+    return {
+      pooled: throughTheDoorMetrics(bySeed.flat()),
+      bySeed: bySeed.map((customers) => throughTheDoorMetrics(customers)),
+    };
+  };
+
   const baseResults = runAll(gated.policy, gated.servicing, 'base');
   const pooledBaseResult = poolResults(baseResults);
   const base = metricsOf(baseResults);
   const mild = metricsOf(runAll(gated.policy, gated.servicing, 'mild', STRESS.mild));
   const severe = metricsOf(runAll(gated.policy, gated.servicing, 'severe', STRESS.severe));
+  const throughTheDoor = runThroughDoor(
+    gated.policy,
+    gated.servicing,
+    'through_the_door',
+    baseResults,
+  );
 
   const comparisonOutcomes = comparisons.map((c): ConfigOutcome => {
     const results = runAll(c.policy, c.servicing, c.name);
     const cBase = metricsOf(results);
     const cMild = c.withMild
       ? metricsOf(runAll(c.policy, c.servicing, `${c.name}/mild`, STRESS.mild))
+      : null;
+    const cDoor = cMild
+      ? runThroughDoor(c.policy, c.servicing, `${c.name}/through_the_door`, results)
       : null;
     return {
       name: c.name,
@@ -258,7 +322,11 @@ export function evaluate(options: EvaluationOptions): Evaluation {
       mild: cMild?.pooled ?? null,
       baseBySeed: cBase.bySeed,
       mildBySeed: cMild?.bySeed ?? null,
-      gates: cMild ? evaluateGates({ base: cBase.bySeed, mild: cMild.bySeed }) : null,
+      throughTheDoor: cDoor,
+      gates:
+        cMild && cDoor
+          ? evaluateGates({ base: cBase.bySeed, mild: cMild.bySeed, throughTheDoor: cDoor.bySeed })
+          : null,
       // The comparison is the champion here: swap ins are what the gated policy adds.
       swapSet: swapSet(poolResults(results), pooledBaseResult),
     };
@@ -302,7 +370,12 @@ export function evaluate(options: EvaluationOptions): Evaluation {
     baseBySeed: base.bySeed,
     mildBySeed: mild.bySeed,
     severeBySeed: severe.bySeed,
-    gates: evaluateGates({ base: base.bySeed, mild: mild.bySeed }),
+    throughTheDoor,
+    gates: evaluateGates({
+      base: base.bySeed,
+      mild: mild.bySeed,
+      throughTheDoor: throughTheDoor.bySeed,
+    }),
     comparisons: comparisonOutcomes,
     challengers: challengerOutcomes,
     sensitivities: sensitivityOutcomes,

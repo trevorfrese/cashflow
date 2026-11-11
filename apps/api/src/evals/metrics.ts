@@ -314,14 +314,13 @@ export function scoreBand(score: number): (typeof SCORE_BANDS)[number] {
 }
 
 /**
- * AUC and KS of score against the bad flag, over plans that had at least one payout. A higher
- * score should mean a lower chance of going bad, so AUC is the probability that a randomly
- * chosen good plan has a higher score than a randomly chosen bad one, ties counting half.
+ * AUC and KS of a score against a bad flag, from the scores of the goods and the scores of
+ * the bads. A higher score should mean a lower chance of going bad, so AUC is the
+ * probability that a randomly chosen good has a higher score than a randomly chosen bad,
+ * ties counting half. KS is the largest gap between the two cumulative score distributions.
+ * Both are null unless there is at least one good and one bad.
  */
-export function rankOrdering(customers: readonly CustomerResult[]): RankOrdering {
-  const scored = customers.filter((c) => c.payoutCount > 0 && c.score !== null);
-  const goods = scored.filter((c) => !c.bad).map((c) => c.score!);
-  const bads = scored.filter((c) => c.bad).map((c) => c.score!);
+export function scoreSeparation(goods: readonly number[], bads: readonly number[]): RankOrdering {
   if (goods.length === 0 || bads.length === 0) {
     return { auc: null, ks: null, goods: goods.length, bads: bads.length };
   }
@@ -348,6 +347,136 @@ export function rankOrdering(customers: readonly CustomerResult[]): RankOrdering
     ks,
     goods: goods.length,
     bads: bads.length,
+  };
+}
+
+/**
+ * AUC and KS of score against the bad flag, over plans that had at least one payout. On a
+ * normal run those are the plans the policy funded, so the figure is range restricted: the
+ * score has already removed most of the applicants it would rank lowest. On a through the
+ * door run they are every scored applicant.
+ */
+export function rankOrdering(customers: readonly CustomerResult[]): RankOrdering {
+  const scored = customers.filter((c) => c.payoutCount > 0 && c.score !== null);
+  return scoreSeparation(
+    scored.filter((c) => !c.bad).map((c) => c.score!),
+    scored.filter((c) => c.bad).map((c) => c.score!),
+  );
+}
+
+/** Score bands for the through the door tables: five wide from 45 up, coarser below. */
+export const THROUGH_THE_DOOR_BANDS = [
+  '0-29',
+  '30-39',
+  '40-44',
+  '45-49',
+  '50-54',
+  '55-59',
+  '60-64',
+  '65-69',
+  '70-74',
+  '75-79',
+  '80-84',
+  '85-89',
+  '90-94',
+  '95-100',
+] as const;
+
+export function throughTheDoorBand(score: number): string {
+  if (score < 30) return '0-29';
+  if (score < 40) return '30-39';
+  if (score < 45) return '40-44';
+  return calibrationBand(score);
+}
+
+/** Counterfactual bad rate of one group of scored applicants, with and without fraud. */
+export interface ThroughTheDoorCell {
+  /** Scored applicants in the group, all of whom the counterfactual run funded. */
+  plans: number;
+  bad: number;
+  badRateBps: number;
+  /** The same, leaving out the fraud archetypes. */
+  honestPlans: number;
+  honestBad: number;
+  honestBadRateBps: number;
+  /** How many of `plans` the policy itself approved on terms that open a plan. */
+  approvedUsable: number;
+}
+
+export type PolicyOutcomeGroup = 'approvedUsable' | 'approvedCounterOffer' | 'declined';
+export const POLICY_OUTCOME_GROUPS: readonly PolicyOutcomeGroup[] = [
+  'approvedUsable',
+  'approvedCounterOffer',
+  'declined',
+];
+
+/**
+ * How the score ranks risk across everyone it scored, from a through the door run (see
+ * `runThroughTheDoor`). Nothing here is a portfolio result: the plans were opened only to be
+ * watched.
+ */
+export interface ThroughTheDoorMetrics {
+  applicants: number;
+  /** Applicants with a score, each given a counterfactual plan. */
+  scored: number;
+  /** Applicants with no score (needs info): not in any figure below. */
+  unscored: number;
+  /** Honest applicants only. The AUC gate judges this one. */
+  honest: RankOrdering;
+  /** Honest and fraud archetype applicants together. */
+  all: RankOrdering;
+  byScoreBand: Record<string, ThroughTheDoorCell>;
+  byGrade: Record<string, ThroughTheDoorCell>;
+  /**
+   * By what the policy decided: approved on terms that open a plan, approved for less than
+   * the rent (which opens no plan in the product), and declined.
+   */
+  byPolicyOutcome: Record<PolicyOutcomeGroup, ThroughTheDoorCell>;
+}
+
+function policyOutcomeGroup(c: CustomerResult): PolicyOutcomeGroup {
+  if (c.outcome !== 'APPROVED') return 'declined';
+  return c.counterOffer ? 'approvedCounterOffer' : 'approvedUsable';
+}
+
+function throughTheDoorCell(customers: readonly CustomerResult[]): ThroughTheDoorCell {
+  const honest = customers.filter((c) => c.fraud === null);
+  const bad = customers.filter((c) => c.bad).length;
+  const honestBad = honest.filter((c) => c.bad).length;
+  return {
+    plans: customers.length,
+    bad,
+    badRateBps: bps(bad, customers.length),
+    honestPlans: honest.length,
+    honestBad,
+    honestBadRateBps: bps(honestBad, honest.length),
+    approvedUsable: customers.filter((c) => policyOutcomeGroup(c) === 'approvedUsable').length,
+  };
+}
+
+/**
+ * Rank ordering and bad rates over the customers of a through the door run, from one seed
+ * or from several seeds put end to end.
+ */
+export function throughTheDoorMetrics(customers: readonly CustomerResult[]): ThroughTheDoorMetrics {
+  const scored = customers.filter((c) => c.payoutCount > 0 && c.score !== null);
+  const cells = (key: (c: CustomerResult) => string | null, order: readonly string[]) => {
+    const out: Record<string, ThroughTheDoorCell> = {};
+    for (const [k, list] of groupBy(scored, key, order)) out[k] = throughTheDoorCell(list);
+    return out;
+  };
+  return {
+    applicants: customers.length,
+    scored: scored.length,
+    unscored: customers.length - scored.length,
+    honest: rankOrdering(scored.filter((c) => c.fraud === null)),
+    all: rankOrdering(scored),
+    byScoreBand: cells((c) => throughTheDoorBand(c.score!), THROUGH_THE_DOOR_BANDS),
+    byGrade: cells((c) => c.grade, GRADES),
+    byPolicyOutcome: cells(policyOutcomeGroup, POLICY_OUTCOME_GROUPS) as Record<
+      PolicyOutcomeGroup,
+      ThroughTheDoorCell
+    >,
   };
 }
 

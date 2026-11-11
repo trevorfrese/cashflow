@@ -11,7 +11,15 @@ import { STRESS } from './assumptions.ts';
 import { makeApplicant } from './fixtures.ts';
 import { computeMetrics } from './metrics.ts';
 import { drawPopulation } from './population.ts';
-import { runPortfolio, underwrite, type PortfolioResult } from './portfolio.ts';
+import {
+  runPortfolio,
+  runThroughTheDoor,
+  throughTheDoorCustomers,
+  throughTheDoorFeeBps,
+  UNCONSTRAINED_POOL_CENTS,
+  underwrite,
+  type PortfolioResult,
+} from './portfolio.ts';
 
 const HOLD: ServicingPolicy = {
   ...BASELINE_SERVICING_POLICY,
@@ -482,5 +490,192 @@ describe('portfolio simulator: fixed seed end to end', () => {
     const severe = computeMetrics(runPortfolio(population, { stress: STRESS.severe }));
     expect(severe.overall.badRateBps).toBeGreaterThanOrEqual(metrics.overall.badRateBps);
     expect(severe.overall.approved).toBeLessThanOrEqual(metrics.overall.approved);
+  });
+});
+
+describe('portfolio simulator: through the door', () => {
+  const population = drawPopulation({ n: 300, seed: 'e2e' });
+  const gatedConfig = {
+    servicing: STANDARD_SERVICING_POLICY,
+    returnDelayDays: 2,
+  };
+  const gated = runPortfolio(population, gatedConfig);
+  const gatedMetrics = computeMetrics(gated);
+  const door = runThroughTheDoor(population, { ...gatedConfig, fallbackFeeBps: 300 });
+  const gatedById = new Map(gated.customers.map((c) => [c.applicantId, c]));
+
+  it('funds every scored applicant at the rent requested, and nobody without a score', () => {
+    expect(door.customers).toHaveLength(300);
+    const scored = door.customers.filter((c) => c.score !== null);
+    const unscored = door.customers.filter((c) => c.score === null);
+    expect(unscored.length).toBeGreaterThan(0);
+    for (const c of scored) {
+      expect(c.payoutCount).toBeGreaterThan(0);
+      expect(c.planRentCents).toBe(c.requestedRentCents);
+      expect(c.payoutCents).toBe(c.payoutCount * c.requestedRentCents);
+      expect(c.feeBps).not.toBeNull();
+    }
+    for (const c of unscored) {
+      expect(c.outcome).toBe('NEEDS_INFO');
+      expect(c.payoutCount).toBe(0);
+    }
+  });
+
+  it('covers the applicants the policy declined, and some of them go bad', () => {
+    const declined = door.customers.filter((c) => c.outcome === 'DECLINED' && c.score !== null);
+    expect(declined.length).toBeGreaterThan(50);
+    for (const c of declined) {
+      expect(gatedById.get(c.applicantId)!.payoutCount).toBe(0);
+      expect(c.payoutCount).toBeGreaterThan(0);
+    }
+    const declinedBad = declined.filter((c) => c.bad).length;
+    expect(declinedBad).toBeGreaterThan(0);
+    expect(declinedBad).toBeLessThan(declined.length);
+    // An approval for less than the rent opens no plan in the product. It does here.
+    const countered = door.customers.filter((c) => c.outcome === 'APPROVED' && c.counterOffer);
+    for (const c of countered) {
+      expect(gatedById.get(c.applicantId)!.unusableCounterOffer).toBe(true);
+      expect(c.payoutCount).toBeGreaterThan(0);
+    }
+  });
+
+  it('records the same decisions as the gated run', () => {
+    for (const c of door.customers) {
+      const g = gatedById.get(c.applicantId)!;
+      expect([c.outcome, c.engineOutcome, c.referred, c.score, c.grade, c.counterOffer]).toEqual([
+        g.outcome,
+        g.engineOutcome,
+        g.referred,
+        g.score,
+        g.grade,
+        g.counterOffer,
+      ]);
+    }
+  });
+
+  it('plays a plan the gated run funded without delay exactly as the gated run did', () => {
+    expect(gated.unfundedPayouts).toBe(0);
+    const funded = gated.customers.filter((c) => c.payoutCount > 0 && c.fundingWaitMonths === 0);
+    expect(funded.length).toBeGreaterThan(50);
+    for (const g of funded) {
+      expect(door.customers.find((c) => c.applicantId === g.applicantId)).toEqual(g);
+    }
+  });
+
+  it('is never short of capital and applies no exposure rule', () => {
+    expect(door.poolStartCents).toBe(UNCONSTRAINED_POOL_CENTS);
+    expect(door.unfundedPayouts).toBe(0);
+    expect(door.plansDelayed).toBe(0);
+    expect(door.plansNeverFunded).toBe(0);
+    expect(door.customers.every((c) => c.fundingWaitMonths === 0 && !c.neverFunded)).toBe(true);
+    // Even when the caller passes a small pool and exposure rules, they are lifted.
+    const forced = runThroughTheDoor(population, {
+      ...gatedConfig,
+      fallbackFeeBps: 300,
+      poolSizeCents: 1,
+      exposure: POLICY_V2.exposure,
+      partialAdvance: true,
+    });
+    expect(forced).toEqual(door);
+  });
+
+  it('is deterministic', () => {
+    expect(runThroughTheDoor(population, { ...gatedConfig, fallbackFeeBps: 300 })).toEqual(door);
+  });
+
+  it('gives the same customers when it reuses the plans the gated run already played', () => {
+    const shared = throughTheDoorCustomers(
+      population,
+      { ...gatedConfig, fallbackFeeBps: 300 },
+      gated,
+    );
+    expect(shared).toEqual(door.customers);
+    // The reused results are the gated run's own objects, left as they were.
+    const reused = shared.filter((c) => c === gatedById.get(c.applicantId));
+    expect(reused.length).toBeGreaterThan(50);
+    expect(reused.length).toBeLessThan(300);
+    expect(runPortfolio(population, gatedConfig)).toEqual(gated);
+  });
+
+  it('reuses nothing from a run whose plans waited for the pool', () => {
+    // A pool this small leaves payouts unfunded and plans waiting: none of it is the plan
+    // an unconstrained pool would have given, so everyone is played again.
+    const starved = runPortfolio(population, { ...gatedConfig, poolSizeCents: 30_000_000 });
+    expect(starved.unfundedPayouts + starved.plansDelayed).toBeGreaterThan(0);
+    expect(
+      throughTheDoorCustomers(population, { ...gatedConfig, fallbackFeeBps: 300 }, starved),
+    ).toEqual(door.customers);
+    // The same under the launch policy and baseline servicing, as the comparisons run it.
+    const v1 = {
+      decide: (input: Parameters<typeof decide>[0]) => decide(input, POLICY_V1),
+      servicing: BASELINE_SERVICING_POLICY,
+      returnDelayDays: 0,
+      fallbackFeeBps: 300,
+    };
+    expect(
+      throughTheDoorCustomers(population, v1, runPortfolio(population, { ...v1, exposure: null })),
+    ).toEqual(runThroughTheDoor(population, v1).customers);
+  });
+
+  it('leaves the gated run as it was', () => {
+    // The gated run, repeated after the through the door run, is identical to the cent.
+    const again = runPortfolio(population, gatedConfig);
+    expect(again).toEqual(gated);
+    expect(computeMetrics(again)).toEqual(gatedMetrics);
+    // And the gated run funds only what the policy approved.
+    expect(gatedMetrics.overall.plans).toBeLessThan(
+      door.customers.filter((c) => c.payoutCount > 0).length,
+    );
+  });
+
+  it('conserves cash', () => {
+    expectCashConserved(door);
+  });
+
+  it('charges the quoted fee, then the priced fee held to the cap, then the fallback', () => {
+    const base = decide({
+      statedMonthlyRevenueCents: 4_000_000,
+      timeInBusinessMonths: 48,
+      requestedMonthlyRentCents: 400_000,
+      bankData: null,
+    });
+    const priced = (feeBps: number, maxFeeBps: number) =>
+      ({ feeBps, maxFeeBps }) as NonNullable<typeof base.snapshot.pricing>;
+    const decision = (feeBps: number | null, pricing: typeof base.snapshot.pricing) => ({
+      ...base,
+      feeBps,
+      snapshot: { ...base.snapshot, pricing },
+    });
+    expect(throughTheDoorFeeBps(decision(175, priced(175, 400)), 300)).toBe(175);
+    expect(throughTheDoorFeeBps(decision(null, priced(260, 400)), 300)).toBe(260);
+    expect(throughTheDoorFeeBps(decision(null, priced(900, 400)), 300)).toBe(400);
+    expect(throughTheDoorFeeBps(decision(null, null), 300)).toBe(300);
+  });
+
+  it('gives a declined applicant a plan at the fallback fee, and an unscored one nothing', () => {
+    const declineAll = {
+      decide: (input: Parameters<typeof decide>[0]) => {
+        const d = decide(input, POLICY_V1);
+        return d.score === null
+          ? d
+          : { ...d, outcome: 'DECLINED' as const, approvedMonthlyLimitCents: null, feeBps: null };
+      },
+    };
+    const applicants = [makeApplicant(), makeApplicant({ id: 'a00001', historyDays: 0 })];
+    expect(runPortfolio(applicants, declineAll).customers.map((c) => c.payoutCount)).toEqual([
+      0, 0,
+    ]);
+    const result = runThroughTheDoor(applicants, { ...declineAll, fallbackFeeBps: 300 });
+    const [declined, unscored] = result.customers;
+    expect(declined).toMatchObject({
+      outcome: 'DECLINED',
+      feeBps: 300,
+      planRentCents: 400_000,
+      payoutCount: 12,
+      payoutCents: 12 * 400_000,
+      feesCollectedCents: (12 * 400_000 * 300) / 10_000,
+      bad: false,
+    });
+    expect(unscored).toMatchObject({ outcome: 'NEEDS_INFO', score: null, payoutCount: 0 });
   });
 });

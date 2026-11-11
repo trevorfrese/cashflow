@@ -115,6 +115,131 @@
           }
         }
       },
+      "throughTheDoor": {
+        "scored": 9252,
+        "honest": {
+          "auc": 0.845,
+          "ks": 0.572,
+          "goods": 7480,
+          "bads": 1573
+        },
+        "all": {
+          "auc": 0.837,
+          "ks": 0.536,
+          "goods": 7525,
+          "bads": 1727
+        },
+        "bySeed": [
+          {
+            "seed": "1",
+            "honest": {
+              "auc": 0.871,
+              "ks": 0.624,
+              "goods": 1517,
+              "bads": 305
+            },
+            "all": {
+              "auc": 0.863,
+              "ks": 0.579,
+              "goods": 1522,
+              "bads": 333
+            }
+          },
+          {
+            "seed": "2",
+            "honest": {
+              "auc": 0.835,
+              "ks": 0.554,
+              "goods": 1494,
+              "bads": 305
+            },
+            "all": {
+              "auc": 0.828,
+              "ks": 0.526,
+              "goods": 1503,
+              "bads": 338
+            }
+          },
+          {
+            "seed": "3",
+            "honest": {
+              "auc": 0.842,
+              "ks": 0.571,
+              "goods": 1506,
+              "bads": 299
+            },
+            "all": {
+              "auc": 0.829,
+              "ks": 0.543,
+              "goods": 1514,
+              "bads": 331
+            }
+          },
+          {
+            "seed": "4",
+            "honest": {
+              "auc": 0.843,
+              "ks": 0.573,
+              "goods": 1502,
+              "bads": 304
+            },
+            "all": {
+              "auc": 0.832,
+              "ks": 0.542,
+              "goods": 1516,
+              "bads": 337
+            }
+          },
+          {
+            "seed": "5",
+            "honest": {
+              "auc": 0.836,
+              "ks": 0.566,
+              "goods": 1461,
+              "bads": 360
+            },
+            "all": {
+              "auc": 0.83,
+              "ks": 0.535,
+              "goods": 1470,
+              "bads": 388
+            }
+          }
+        ],
+        "honestBadRateBpsByScoreBand": {
+          "0-29": 7917,
+          "30-39": 6490,
+          "40-44": 4969,
+          "45-49": 3743,
+          "50-54": 2396,
+          "55-59": 2283,
+          "60-64": 1453,
+          "65-69": 1100,
+          "70-74": 794,
+          "75-79": 796,
+          "80-84": 598,
+          "85-89": 554,
+          "90-94": 353,
+          "95-100": 225
+        },
+        "honestBadRateBpsByGrade": {
+          "A": 397,
+          "B": 782,
+          "C": 1681,
+          "D": 3430,
+          "F": 5924
+        },
+        "honestBadRateBpsByPolicyOutcome": {
+          "approvedUsable": 416,
+          "approvedCounterOffer": 1102,
+          "declined": 4749
+        },
+        "badRateBpsByPolicyOutcome": {
+          "approvedUsable": 470,
+          "approvedCounterOffer": 1341,
+          "declined": 4859
+        }
+      },
       "gates": [
         {
           "id": "net_loss_base",
@@ -158,13 +283,13 @@
         },
         {
           "id": "auc",
-          "value": 0.671,
-          "min": 0.6,
-          "max": 0.735,
+          "value": 0.845,
+          "min": 0.835,
+          "max": 0.871,
           "comparator": ">=",
           "threshold": 0.7,
           "unit": "AUC",
-          "pass": false
+          "pass": true
         },
         {
           "id": "fraud_approval",
@@ -369,6 +494,131 @@
           }
         }
       },
+      "throughTheDoor": {
+        "scored": 9252,
+        "honest": {
+          "auc": 0.861,
+          "ks": 0.577,
+          "goods": 7477,
+          "bads": 1576
+        },
+        "all": {
+          "auc": 0.852,
+          "ks": 0.546,
+          "goods": 7521,
+          "bads": 1731
+        },
+        "bySeed": [
+          {
+            "seed": "1",
+            "honest": {
+              "auc": 0.887,
+              "ks": 0.624,
+              "goods": 1517,
+              "bads": 305
+            },
+            "all": {
+              "auc": 0.88,
+              "ks": 0.599,
+              "goods": 1523,
+              "bads": 332
+            }
+          },
+          {
+            "seed": "2",
+            "honest": {
+              "auc": 0.848,
+              "ks": 0.554,
+              "goods": 1494,
+              "bads": 305
+            },
+            "all": {
+              "auc": 0.844,
+              "ks": 0.533,
+              "goods": 1503,
+              "bads": 338
+            }
+          },
+          {
+            "seed": "3",
+            "honest": {
+              "auc": 0.859,
+              "ks": 0.586,
+              "goods": 1503,
+              "bads": 302
+            },
+            "all": {
+              "auc": 0.846,
+              "ks": 0.541,
+              "goods": 1510,
+              "bads": 335
+            }
+          },
+          {
+            "seed": "4",
+            "honest": {
+              "auc": 0.864,
+              "ks": 0.594,
+              "goods": 1501,
+              "bads": 305
+            },
+            "all": {
+              "auc": 0.852,
+              "ks": 0.556,
+              "goods": 1514,
+              "bads": 339
+            }
+          },
+          {
+            "seed": "5",
+            "honest": {
+              "auc": 0.848,
+              "ks": 0.557,
+              "goods": 1462,
+              "bads": 359
+            },
+            "all": {
+              "auc": 0.84,
+              "ks": 0.527,
+              "goods": 1471,
+              "bads": 387
+            }
+          }
+        ],
+        "honestBadRateBpsByScoreBand": {
+          "0-29": 8523,
+          "30-39": 4294,
+          "40-44": 2889,
+          "45-49": 3057,
+          "50-54": 2400,
+          "55-59": 1719,
+          "60-64": 1484,
+          "65-69": 1387,
+          "70-74": 1174,
+          "75-79": 773,
+          "80-84": 723,
+          "85-89": 452,
+          "90-94": 335,
+          "95-100": 171
+        },
+        "honestBadRateBpsByGrade": {
+          "A": 353,
+          "B": 997,
+          "C": 1564,
+          "D": 2689,
+          "F": 5005
+        },
+        "honestBadRateBpsByPolicyOutcome": {
+          "approvedUsable": 349,
+          "approvedCounterOffer": 632,
+          "declined": 4399
+        },
+        "badRateBpsByPolicyOutcome": {
+          "approvedUsable": 349,
+          "approvedCounterOffer": 631,
+          "declined": 4615
+        }
+      },
       "gates": [
         {
           "id": "net_loss_base",
@@ -412,13 +662,13 @@
         },
         {
           "id": "auc",
-          "value": 0.672,
-          "min": 0.584,
-          "max": 0.714,
+          "value": 0.861,
+          "min": 0.848,
+          "max": 0.887,
           "comparator": ">=",
           "threshold": 0.7,
           "unit": "AUC",
-          "pass": false
+          "pass": true
         },
         {
           "id": "fraud_approval",
@@ -617,6 +867,131 @@
           }
         }
       },
+      "throughTheDoor": {
+        "scored": 9252,
+        "honest": {
+          "auc": 0.875,
+          "ks": 0.608,
+          "goods": 7337,
+          "bads": 1716
+        },
+        "all": {
+          "auc": 0.867,
+          "ks": 0.578,
+          "goods": 7378,
+          "bads": 1874
+        },
+        "bySeed": [
+          {
+            "seed": "1",
+            "honest": {
+              "auc": 0.898,
+              "ks": 0.653,
+              "goods": 1488,
+              "bads": 334
+            },
+            "all": {
+              "auc": 0.891,
+              "ks": 0.627,
+              "goods": 1495,
+              "bads": 360
+            }
+          },
+          {
+            "seed": "2",
+            "honest": {
+              "auc": 0.866,
+              "ks": 0.589,
+              "goods": 1468,
+              "bads": 331
+            },
+            "all": {
+              "auc": 0.861,
+              "ks": 0.569,
+              "goods": 1476,
+              "bads": 365
+            }
+          },
+          {
+            "seed": "3",
+            "honest": {
+              "auc": 0.876,
+              "ks": 0.619,
+              "goods": 1468,
+              "bads": 337
+            },
+            "all": {
+              "auc": 0.863,
+              "ks": 0.574,
+              "goods": 1474,
+              "bads": 371
+            }
+          },
+          {
+            "seed": "4",
+            "honest": {
+              "auc": 0.873,
+              "ks": 0.617,
+              "goods": 1481,
+              "bads": 325
+            },
+            "all": {
+              "auc": 0.862,
+              "ks": 0.58,
+              "goods": 1493,
+              "bads": 360
+            }
+          },
+          {
+            "seed": "5",
+            "honest": {
+              "auc": 0.863,
+              "ks": 0.594,
+              "goods": 1432,
+              "bads": 389
+            },
+            "all": {
+              "auc": 0.856,
+              "ks": 0.566,
+              "goods": 1440,
+              "bads": 418
+            }
+          }
+        ],
+        "honestBadRateBpsByScoreBand": {
+          "0-29": 8765,
+          "30-39": 5055,
+          "40-44": 2741,
+          "45-49": 3248,
+          "50-54": 2400,
+          "55-59": 1765,
+          "60-64": 1563,
+          "65-69": 1329,
+          "70-74": 1174,
+          "75-79": 810,
+          "80-84": 738,
+          "85-89": 452,
+          "90-94": 335,
+          "95-100": 171
+        },
+        "honestBadRateBpsByGrade": {
+          "A": 356,
+          "B": 997,
+          "C": 1609,
+          "D": 2773,
+          "F": 5612
+        },
+        "honestBadRateBpsByPolicyOutcome": {
+          "approvedUsable": 346,
+          "approvedCounterOffer": 636,
+          "declined": 4870
+        },
+        "badRateBpsByPolicyOutcome": {
+          "approvedUsable": 346,
+          "approvedCounterOffer": 636,
+          "declined": 5066
+        }
+      },
       "gates": [
         {
           "id": "net_loss_base",
@@ -660,13 +1035,13 @@
         },
         {
           "id": "auc",
-          "value": 0.669,
-          "min": 0.569,
-          "max": 0.714,
+          "value": 0.875,
+          "min": 0.863,
+          "max": 0.898,
           "comparator": ">=",
           "threshold": 0.7,
           "unit": "AUC",
-          "pass": false
+          "pass": true
         },
         {
           "id": "fraud_approval",

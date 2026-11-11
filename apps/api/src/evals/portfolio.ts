@@ -108,6 +108,17 @@ export interface PortfolioConfig {
    * assumption). See `manualPaymentShareBps` in `assumptions.ts`.
    */
   manualPayment: { shareBps: number; firstDay: number; lastDay: number } | null;
+  /**
+   * Counterfactual "through the door" run, or null for a normal run (every gated and
+   * comparison run). When set, the decision still comes from `decide` and is recorded as
+   * usual, but it no longer chooses who gets a plan: every applicant the engine scored is
+   * given one at the rent requested, whether approved, referred, countered, or declined.
+   * The only purpose is to see who would have gone bad, so that the score can be judged on
+   * the people it turned away as well as the people it let in. Use `runThroughTheDoor`,
+   * which also lifts the pool and exposure limits. `fallbackFeeBps` is the fee for a
+   * declined applicant the engine never priced.
+   */
+  throughTheDoor: { fallbackFeeBps: number } | null;
 }
 
 export function defaultPortfolioConfig(n: number): PortfolioConfig {
@@ -128,7 +139,27 @@ export function defaultPortfolioConfig(n: number): PortfolioConfig {
     partialAdvance: false,
     returnDelayDays: 0,
     manualPayment: null,
+    throughTheDoor: null,
   };
+}
+
+/**
+ * Pool for the through the door run: $1 trillion, so no payout ever waits for cash. Far
+ * inside the safe integer range even with every receivable added to it.
+ */
+export const UNCONSTRAINED_POOL_CENTS = 100_000_000_000_000;
+
+/**
+ * The fee a through the door plan is charged. An approved or referred applicant pays the fee
+ * the engine quoted. A declined applicant the engine got as far as pricing pays the fee the
+ * pricing built up, held to the fee cap, since the product never charges more than the cap.
+ * A declined applicant who was knocked out before pricing pays `fallbackFeeBps`.
+ */
+export function throughTheDoorFeeBps(decision: EngineResult, fallbackFeeBps: number): number {
+  if (decision.feeBps !== null) return decision.feeBps;
+  const priced = decision.snapshot.pricing;
+  if (priced) return Math.min(priced.feeBps, priced.maxFeeBps);
+  return fallbackFeeBps;
 }
 
 /** What happened to one applicant. Money fields are zero unless a plan was opened. */
@@ -556,6 +587,31 @@ export function runPortfolio(
     return m.firstDay + ((h >>> 14) % (m.lastDay - m.firstDay + 1));
   };
 
+  /** A plan that starts on the first rent date after `appliedOn`. */
+  const openPlan = (
+    applicant: Applicant,
+    result: CustomerResult,
+    sim: BusinessSimulation,
+    feeBps: number,
+    appliedOn: IsoDate,
+  ) => {
+    active.push({
+      applicant,
+      result,
+      sim,
+      feeBps,
+      nextDueDate: nextRentDueDate(1, addDays(appliedOn, 1)),
+      periodsLeft: config.horizonMonths,
+      duePayouts: [],
+      chargedOff: false,
+      unpaid: [],
+      outstandingCents: 0,
+      endDate: null,
+      started: false,
+      committed: false,
+    });
+  };
+
   if (applicants.length === 0) {
     return {
       label: config.label,
@@ -877,6 +933,18 @@ export function runPortfolio(
           hash32(`review/${applicant.seedHex}`) % 10_000 < config.reviewFraudCatchRateBps;
         result.outcome = caught ? 'DECLINED' : 'APPROVED';
       }
+      if (config.throughTheDoor) {
+        // Counterfactual: the decision above is kept as the record of what the policy said,
+        // and everyone with a score gets a plan at the rent they asked for.
+        if (decision.score === null || !sim) continue;
+        const feeBps = throughTheDoorFeeBps(decision, config.throughTheDoor.fallbackFeeBps);
+        result.feeBps = feeBps;
+        result.planRentCents = applicant.requestedRentCents;
+        result.installmentsPerMonth = decision.recommendedInstallmentsPerMonth ?? 2;
+        if (result.planRentCents <= 0) continue;
+        openPlan(applicant, result, sim, feeBps, date);
+        continue;
+      }
       if (result.outcome !== 'APPROVED' || !sim) continue;
       if (result.counterOffer && !config.partialAdvance) {
         // The product fronts a whole lease rent or nothing. A limit below the rent cannot be
@@ -890,21 +958,7 @@ export function runPortfolio(
       );
       result.installmentsPerMonth = decision.recommendedInstallmentsPerMonth ?? 2;
       if (result.planRentCents <= 0) continue;
-      active.push({
-        applicant,
-        result,
-        sim,
-        feeBps: decision.feeBps ?? 0,
-        nextDueDate: nextRentDueDate(1, addDays(date, 1)),
-        periodsLeft: config.horizonMonths,
-        duePayouts: [],
-        chargedOff: false,
-        unpaid: [],
-        outstandingCents: 0,
-        endDate: null,
-        started: false,
-        committed: false,
-      });
+      openPlan(applicant, result, sim, decision.feeBps ?? 0, date);
     }
 
     month.endPoolCents = poolCents;
@@ -932,4 +986,78 @@ export function runPortfolio(
     bucketRoll,
     bucketEntryRoll,
   };
+}
+
+/**
+ * The counterfactual through the door run: `runPortfolio` with every scored applicant
+ * funded at the rent requested, from a pool that never runs short and with no exposure or
+ * concentration rule in the way. Servicing, the bad definition, the horizon, and the
+ * applicants are whatever the caller passes, so they match the run being judged. It is a
+ * separate run with its own state: nothing in it can reach the gated run's pool or metrics.
+ *
+ * Only a simulation can do this. A real lender never sees how a declined applicant would
+ * have performed.
+ */
+export function runThroughTheDoor(
+  population: readonly Applicant[],
+  overrides: Partial<PortfolioConfig> & { fallbackFeeBps: number },
+): PortfolioResult {
+  const { fallbackFeeBps, ...rest } = overrides;
+  return runPortfolio(population, {
+    ...rest,
+    throughTheDoor: { fallbackFeeBps },
+    exposure: null,
+    poolSizeCents: UNCONSTRAINED_POOL_CENTS,
+    partialAdvance: false,
+  });
+}
+
+/**
+ * The customers of `runThroughTheDoor(population, overrides)`, without playing again what
+ * `funded` has already played. `funded` must be the ordinary run of the same applicants
+ * under the same configuration (decisions, servicing, horizon, stress), which is the run
+ * whose score is being judged.
+ *
+ * With no pool or exposure limit, a through the door plan depends on nothing but its own
+ * business: no plan can delay or crowd out another. So an applicant the ordinary run funded
+ * at the rent requested, on the first rent date, from a pool that never ran short, had
+ * exactly the plan the through the door run would give them, and an applicant with no score
+ * has no plan in either. Those results are taken as they are, and only the rest (the
+ * declined, the counter offers, and any plan that had to wait) are simulated, each from
+ * the same history the ordinary run decided on. A unit test checks the result against the
+ * full run.
+ */
+export function throughTheDoorCustomers(
+  population: readonly Applicant[],
+  overrides: Partial<PortfolioConfig> & { fallbackFeeBps: number },
+  funded: PortfolioResult,
+): CustomerResult[] {
+  const reused = new Map<string, CustomerResult>();
+  // A payout that waited for pool cash moved its installments. Reuse nothing from such a run.
+  if (funded.unfundedPayouts === 0) {
+    for (const c of funded.customers) {
+      const samePlan =
+        c.payoutCount > 0 &&
+        c.fundingWaitMonths === 0 &&
+        c.planRentCents === c.requestedRentCents &&
+        c.manualPayments === 0;
+      if (c.score === null || samePlan) reused.set(c.applicantId, c);
+    }
+  }
+  const rest = population.filter((a) => !reused.has(a.id));
+  const played = new Map(
+    runThroughTheDoor(rest, overrides).customers.map((c) => [c.applicantId, c]),
+  );
+  // In the order `runPortfolio` reports them: by application date, then id.
+  return [...population]
+    .sort((a, b) =>
+      a.applicationDate === b.applicationDate
+        ? a.id < b.id
+          ? -1
+          : 1
+        : a.applicationDate < b.applicationDate
+          ? -1
+          : 1,
+    )
+    .map((a) => reused.get(a.id) ?? played.get(a.id)!);
 }

@@ -25,6 +25,7 @@ export async function healthRoutes(app: FastifyInstance) {
           commerce: p.commerce.name,
           payments: p.payments.name,
           capital: p.capital.name,
+          identity: p.identity.name,
         },
       };
     },

@@ -50,6 +50,7 @@ Every money movement posts a balanced ledger transaction in the same database tr
 | `BankLinkProvider`     | `BANK_LINK_PROVIDER`    | `mock`, synthetic histories       |
 | `PaymentsProvider`     | `PAYMENTS_PROVIDER`     | `mock`, fails if token has `fail` |
 | `CapitalProvider`      | `CAPITAL_PROVIDER`      | `mock`, a pool in the ledger      |
+| `IdentityProvider`     | `IDENTITY_PROVIDER`     | `mock`, hits on name keywords     |
 
 Each lives in `apps/api/src/providers/<name>/` with `types.ts`, the mock, and an `index.ts` factory. Plaid and Stripe shaped skeletons show where a real adapter goes; they refuse to run without configuration.
 

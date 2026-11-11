@@ -7,7 +7,7 @@ import { StyleSheet, View } from 'react-native';
 import { Button, ChoiceChips, Notice, Screen, Text, TextField } from '@/components';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
-import { dollarsToCents, normalizeMonthInput } from '@/lib/forms';
+import { dollarsToCents, normalizeMonthInput, percentToBps } from '@/lib/forms';
 import { useCreateBusiness } from '@/lib/queries';
 import { colors, fonts, spacing } from '@/theme';
 
@@ -35,6 +35,10 @@ export default function NewBusiness() {
     postalCode: '',
     foundedOn: '',
     revenue: '',
+    taxIdLast4: '',
+    ownerName: '',
+    ownerTitle: 'Owner',
+    ownership: '100',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = (key: keyof typeof form) => (value: string) =>
@@ -43,6 +47,7 @@ export default function NewBusiness() {
   const submit = async () => {
     const revenueCents = dollarsToCents(form.revenue);
     const foundedOn = normalizeMonthInput(form.foundedOn);
+    const ownershipBps = percentToBps(form.ownership);
     const candidate = {
       legalName: form.legalName.trim(),
       dba: form.dba.trim() || undefined,
@@ -56,12 +61,21 @@ export default function NewBusiness() {
       },
       foundedOn,
       statedMonthlyRevenueCents: revenueCents,
+      taxIdLast4: form.taxIdLast4.trim(),
+      owners: [
+        {
+          fullName: form.ownerName.trim(),
+          title: form.ownerTitle.trim(),
+          ownershipBps,
+        },
+      ],
     };
     const parsed = CreateBusinessRequest.safeParse(candidate);
     const next: Record<string, string> = {};
     if (revenueCents === null) next.revenue = 'Enter a dollar amount.';
     if (!foundedOn) next.foundedOn = 'Use the format YYYY-MM.';
     if (!form.industry) next.industry = 'Pick the closest industry.';
+    if (ownershipBps === null) next.ownershipBps = 'Enter a percentage from 1 to 100.';
     if (!parsed.success) {
       for (const issue of parsed.error.issues) {
         const key = issue.path[issue.path.length - 1];
@@ -189,6 +203,52 @@ export default function NewBusiness() {
         placeholder="48,000"
         helper="A typical month of sales. We verify this against your bank account."
       />
+      <TextField
+        label="Tax ID, last 4 digits"
+        value={form.taxIdLast4}
+        onChangeText={set('taxIdLast4')}
+        error={errors.taxIdLast4}
+        keyboardType="number-pad"
+        maxLength={4}
+        placeholder="1234"
+        helper="The last four digits of the business EIN. We never ask for the full number."
+      />
+      <View style={styles.group}>
+        <Text style={styles.label}>Owner</Text>
+        <Text variant="caption" tone="muted">
+          One person who owns or runs the business. We use this to verify the business.
+        </Text>
+      </View>
+      <TextField
+        label="Full legal name"
+        value={form.ownerName}
+        onChangeText={set('ownerName')}
+        error={errors.fullName}
+        textContentType="name"
+        placeholder="Dana Rivera"
+      />
+      <View style={styles.row}>
+        <View style={{ flex: 2, minWidth: 0 }}>
+          <TextField
+            label="Title"
+            value={form.ownerTitle}
+            onChangeText={set('ownerTitle')}
+            error={errors.title}
+            placeholder="Owner"
+          />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <TextField
+            label="Ownership %"
+            value={form.ownership}
+            onChangeText={set('ownership')}
+            error={errors.ownershipBps}
+            keyboardType="number-pad"
+            maxLength={3}
+            placeholder="100"
+          />
+        </View>
+      </View>
     </Screen>
   );
 }

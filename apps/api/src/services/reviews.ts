@@ -1,16 +1,20 @@
 import type {
+  AdminIdentity,
   DecisionOutcome,
   DecisionReason,
   RecordReviewRequest,
   ReviewQueueItem,
 } from '@cashflow/shared';
 
+import { todayIso } from '../dates.ts';
 import type { Db } from '../db.ts';
 import { notFound, unprocessable } from '../errors.ts';
 import type { Prisma, UnderwritingDecision } from '../generated/prisma/client.ts';
 import type { DecisionSnapshot } from '../underwriting/engine.ts';
 import { CURRENT_POLICY } from '../underwriting/policy.ts';
 import { recordAudit } from './audit.ts';
+import { openHitsForBusiness } from './identity.ts';
+import { applyApprovedRentIncreases } from './lease-changes.ts';
 import {
   currentDecision,
   INCLUDE_CURRENT_DECISION,
@@ -72,6 +76,8 @@ export function engineRecommendation(decision: UnderwritingDecision): {
 
 export interface RecordReviewArgs extends RecordReviewRequest {
   applicationId: string;
+  /** Who is reviewing, from the authenticated request. Never from the body. */
+  identity: AdminIdentity;
 }
 
 export async function recordReview(db: Db, args: RecordReviewArgs) {
@@ -91,6 +97,58 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
 
     const recommended = engineRecommendation(reviewed);
     const outcome = OUTCOME[args.decision];
+    const reviewer = args.identity.actor;
+    const actor = { type: args.identity.role, id: reviewer };
+
+    // Identity and screening gate an approval, whoever makes it. An open hit has to be
+    // cleared in the screening queue first, where the clearance is recorded on its own. A
+    // business that is not verified can be approved only by a reviewer who states that they
+    // verified it, which is then written to the business.
+    let identityVerifiedByReviewer = false;
+    if (args.decision === 'APPROVE') {
+      const hits = await openHitsForBusiness(tx, application.businessId);
+      if (hits.length > 0) {
+        throw unprocessable(
+          'SCREENING_HIT_OPEN',
+          'This business has an open screening hit. Clear it in the screening queue before approving',
+          { screeningIds: hits.map((h) => h.id) },
+        );
+      }
+      const business = await tx.business.findUniqueOrThrow({
+        where: { id: application.businessId },
+      });
+      if (business.verificationStatus !== 'VERIFIED') {
+        if (!args.reasonCodes.includes('IDENTITY_VERIFIED')) {
+          throw unprocessable(
+            'IDENTITY_NOT_VERIFIED',
+            `This business is ${business.verificationStatus.toLowerCase()} with the identity provider. Approving it needs the IDENTITY_VERIFIED reason code, which records that you verified it another way`,
+            { verificationReasons: business.verificationReasons },
+          );
+        }
+        identityVerifiedByReviewer = true;
+        await tx.business.update({
+          where: { id: business.id },
+          data: {
+            verificationStatus: 'VERIFIED',
+            verificationCheckedAt: new Date(),
+            verificationReasons: ['MANUAL_REVIEW'],
+          },
+        });
+        await recordAudit(tx, {
+          actor,
+          eventType: 'IDENTITY_CHECKED',
+          subjectType: 'business',
+          subjectId: business.id,
+          payload: {
+            status: 'VERIFIED',
+            previousStatus: business.verificationStatus,
+            previousReasons: business.verificationReasons,
+            reasons: ['MANUAL_REVIEW'],
+            applicationId: application.id,
+          },
+        });
+      }
+    }
     let limitCents: number | null = null;
     let feeBps: number | null = null;
 
@@ -145,7 +203,7 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
     const review = await tx.applicationReview.create({
       data: {
         applicationId: application.id,
-        reviewer: args.reviewer,
+        reviewer,
         decision: args.decision,
         reasonCodes: args.reasonCodes,
         notes: args.notes ?? null,
@@ -199,7 +257,9 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
           ...((reviewed.snapshot as Record<string, unknown> | null) ?? {}),
           review: {
             reviewId: review.id,
-            reviewer: args.reviewer,
+            reviewer,
+            reviewerRole: args.identity.role,
+            identityVerifiedByReviewer,
             decision: args.decision,
             reasonCodes: args.reasonCodes,
             isOverride,
@@ -223,7 +283,6 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
       });
     }
 
-    const actor = { type: 'reviewer' as const, id: args.reviewer };
     await recordAudit(tx, {
       actor,
       eventType: 'REVIEW_RECORDED',
@@ -277,6 +336,15 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
           feeBps,
           source: 'review',
         },
+      });
+      await applyApprovedRentIncreases(tx, {
+        businessId: application.businessId,
+        applicationId: application.id,
+        decisionId: decision.id,
+        approvedMonthlyLimitCents: limitCents!,
+        feeBps: feeBps!,
+        actor,
+        asOf: todayIso(),
       });
     }
     return { review, application: { ...updated, decision } };

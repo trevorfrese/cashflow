@@ -26,6 +26,7 @@ import {
   registerUser,
   resetDb,
   type TestHarness,
+  adminClient,
 } from '../test/helpers.ts';
 import { collectInstallment } from './collections.ts';
 import { countOnTimePeriods } from './portfolio-state.ts';
@@ -209,7 +210,7 @@ const payoutOf = (planId: string, scheduledForMonth: string) =>
   });
 
 async function audit(planId: string) {
-  const res = await client(h.app).get<
+  const res = await adminClient(h.app).get<
     Array<{ eventType: string; at: string; payload: Record<string, unknown> }>
   >(`/v1/admin/audit-events?subjectType=rent_plan&subjectId=${planId}`);
   expect(res.status).toBe(200);
@@ -704,9 +705,9 @@ describe('payment returns', () => {
       status: 'HELD',
       heldReason: 'ADVANCE_FROZEN',
     });
-    const release = await client(h.app).post<{ advanceFrozen: boolean }>(
+    const release = await adminClient(h.app).post<{ advanceFrozen: boolean }>(
       `/v1/admin/rent-plans/${p.planId}/release-freeze`,
-      { reviewer: 'pat', reason: 'Customer confirmed the debit was theirs' },
+      { reason: 'Customer confirmed the debit was theirs' },
     );
     expect(release.status).toBe(200);
     expect(release.body.advanceFrozen).toBe(false);
@@ -717,9 +718,9 @@ describe('payment returns', () => {
     });
     expect(await auditTypes(p.planId)).toContain('PLAN_ADVANCE_RELEASED');
     // Releasing a plan that is not frozen is refused.
-    const again = await client(h.app).post<{ error: { code: string } }>(
+    const again = await adminClient(h.app).post<{ error: { code: string } }>(
       `/v1/admin/rent-plans/${p.planId}/release-freeze`,
-      { reviewer: 'pat', reason: 'again' },
+      { reason: 'again' },
     );
     expect(again.status).toBe(422);
     expect(again.body.error.code).toBe('PLAN_NOT_FROZEN');
@@ -1014,7 +1015,7 @@ describe('aging, provisioning, charge-off, and recovery', () => {
     expect(await countOnTimePeriods(h.db, p.businessId)).toBe(0);
 
     // The operator's summary agrees with the ledger.
-    const summary = await client(h.app).get<{
+    const summary = await adminClient(h.app).get<{
       buckets: Array<{ status: string; plans: number; principalCents: number }>;
       allowanceCents: number;
       receivableCents: number;
@@ -1054,7 +1055,7 @@ describe('aging, provisioning, charge-off, and recovery', () => {
     await setAccountToken(p.bankLinkId, 'mock_acct_fail');
     await run(p.d1);
     await run(addDays(p.d1, 10));
-    const summary = await client(h.app).get<{
+    const summary = await adminClient(h.app).get<{
       servicingPolicy: string;
       buckets: Array<{
         status: string;

@@ -16,14 +16,19 @@ datasource db {
 // ---------- Auth ----------
 
 model User {
-  id            String         @id @default(cuid())
-  email         String         @unique
-  passwordHash  String
-  fullName      String
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  businesses    Business[]
-  refreshTokens RefreshToken[]
+  id                String         @id @default(cuid())
+  email             String         @unique
+  passwordHash      String
+  fullName          String
+  /// Failed sign ins since the last success or lockout. See `src/auth/lockout.ts`.
+  failedLoginCount  Int            @default(0)
+  lastFailedLoginAt DateTime?
+  /// Sign in is refused until this time after too many failures in a row.
+  lockedUntil       DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  businesses        Business[]
+  refreshTokens     RefreshToken[]
 }
 
 model RefreshToken {
@@ -56,10 +61,34 @@ enum Industry {
   OTHER
 }
 
+/// Where identity verification of a business or an owner stands. UNVERIFIED is a row that
+/// has not been through the identity provider yet (it predates the check, or is missing a
+/// tax id or owners).
+enum VerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  REVIEW
+  FAILED
+}
+
+/// Result of screening a name against sanctions and watchlists.
+enum ScreeningOutcome {
+  CLEAR
+  POSSIBLE_MATCH
+  MATCH
+}
+
+enum ScreeningPartyType {
+  BUSINESS
+  OWNER
+  /// The landlord on a lease, as the payee of a payout.
+  LANDLORD
+}
+
 model Business {
-  id                        String         @id @default(cuid())
+  id                        String             @id @default(cuid())
   ownerUserId               String
-  owner                     User           @relation(fields: [ownerUserId], references: [id])
+  owner                     User               @relation(fields: [ownerUserId], references: [id])
   legalName                 String
   dba                       String?
   industry                  Industry
@@ -70,10 +99,22 @@ model Business {
   postalCode                String
   foundedOn                 String // YYYY-MM-DD
   statedMonthlyRevenueCents Int
-  status                    BusinessStatus @default(ONBOARDING)
-  createdAt                 DateTime       @default(now())
-  updatedAt                 DateTime       @updatedAt
+  status                    BusinessStatus     @default(ONBOARDING)
+  /// Last four digits of the tax id. The full number is never stored. Null on rows that
+  /// predate identity verification.
+  taxIdLast4                String?
+  verificationStatus        VerificationStatus @default(UNVERIFIED)
+  verificationCheckedAt     DateTime?
+  verificationProvider      String?
+  /// Opaque reference to the check at the identity provider.
+  verificationRef           String?
+  /// Provider reason codes behind a REVIEW or FAILED status. Internal.
+  verificationReasons       String[]           @default([])
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
 
+  owners        BeneficialOwner[]
+  screenings    ScreeningResult[]
   bankLinks     BankLink[]
   commerceLinks CommerceLink[]
   applications  UnderwritingApplication[]
@@ -81,6 +122,57 @@ model Business {
   rentPlans     RentPlan[]
 
   @@index([ownerUserId])
+}
+
+/// A person who owns or controls the business. Name, title and ownership only: no date of
+/// birth and no government id number is ever stored. `verificationRef` points at the
+/// record the identity provider holds.
+model BeneficialOwner {
+  id                 String             @id @default(cuid())
+  businessId         String
+  business           Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fullName           String
+  title              String
+  /// Ownership in basis points: 2500 is 25%.
+  ownershipBps       Int
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  verificationRef    String?
+  verifiedAt         DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([businessId])
+}
+
+/// One screening of one party against sanctions and watchlists. A history: every screening
+/// adds a row and sets `supersededAt` on the one before it for the same party. The current
+/// result for a party is the row with `supersededAt` null. A hit (POSSIBLE_MATCH or MATCH)
+/// is open until a reviewer clears it.
+model ScreeningResult {
+  id            String             @id @default(cuid())
+  businessId    String
+  business      Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  partyType     ScreeningPartyType
+  /// Business id, beneficial owner id, or lease id, by party type.
+  partyRef      String
+  nameScreened  String
+  country       String?
+  result        ScreeningOutcome
+  provider      String
+  /// The provider's reference for the match, or for the search when it was clear.
+  providerRef   String?
+  /// Set when the name screened is the proposed landlord on a pending lease change.
+  leaseChangeId String?
+  screenedAt    DateTime           @default(now())
+  supersededAt  DateTime?
+  /// Manual clearance of a hit: who, when, and why.
+  clearedBy     String?
+  clearedAt     DateTime?
+  clearedReason String?
+
+  @@index([partyType, partyRef, supersededAt])
+  @@index([businessId])
+  @@index([result, clearedAt])
 }
 
 // ---------- Bank link ----------
@@ -248,7 +340,7 @@ model ApplicationReview {
   id                        String                  @id @default(cuid())
   applicationId             String
   application               UnderwritingApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  /// Who reviewed. Free text until admin authentication exists.
+  /// Who reviewed: the name in the X-Admin-Actor header of the authenticated request.
   reviewer                  String
   decision                  ReviewDecision
   reasonCodes               String[]
@@ -288,6 +380,72 @@ model AuditEvent {
   @@index([eventType, at])
 }
 
+// ---------- Monitoring ----------
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  HIGH
+  CRITICAL
+}
+
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+/// Something a person should look at, raised by a monitoring rule. A partial unique index
+/// (see the migration) allows one alert per `dedupeKey` that is not RESOLVED, so a condition
+/// that persists does not open a second alert.
+model Alert {
+  id             String        @id @default(cuid())
+  /// The rule that raised it, for example "fraud.payout_change_before_payout".
+  type           String
+  /// FRAUD, PAYMENTS, PORTFOLIO, BOOKS, COMPLIANCE.
+  category       String
+  severity       AlertSeverity
+  /// For example "rent_plan", "lease", "business", "application", "portfolio", "ledger", "job".
+  subjectType    String
+  subjectId      String
+  title          String
+  detail         Json
+  status         AlertStatus   @default(OPEN)
+  /// CONFIRMED, FALSE_POSITIVE, NO_ACTION, DUPLICATE, or CONDITION_CLEARED when the monitor
+  /// resolved it because the condition went away.
+  disposition    String?
+  dedupeKey      String
+  createdAt      DateTime      @default(now())
+  /// Last monitor run that still found the condition.
+  lastSeenAt     DateTime      @default(now())
+  acknowledgedBy String?
+  acknowledgedAt DateTime?
+  resolvedBy     String?
+  resolvedAt     DateTime?
+  notes          String?
+
+  @@index([status, severity])
+  @@index([type])
+  @@index([subjectType, subjectId])
+  @@index([dedupeKey])
+}
+
+/// A persisted switch a monitoring rule can trip. One row per breaker; today the only one is
+/// "new_approvals": while tripped, an application the engine would approve is referred to a
+/// reviewer instead. Reset only by an admin.
+model CircuitBreaker {
+  id             String    @id
+  tripped        Boolean   @default(false)
+  reason         String?
+  trippedAt      DateTime?
+  trippedByRule  String?
+  trippedAlertId String?
+  resetAt        DateTime?
+  resetBy        String?
+  resetReason    String?
+  updatedAt      DateTime  @updatedAt
+}
+
 // ---------- Lease ----------
 
 enum LeaseStatus {
@@ -321,8 +479,47 @@ model Lease {
   updatedAt                  DateTime    @updatedAt
 
   rentPlans RentPlan[]
+  changes   LeaseChange[]
 
   @@index([businessId])
+}
+
+enum LeaseChangeStatus {
+  PENDING
+  APPLIED
+  CANCELLED
+  REJECTED
+}
+
+/// A requested change to who a lease pays (landlord identity or payout account) on a lease
+/// with a running plan. It waits out a cooling-off period, during which payouts on the lease
+/// are held, and then applies; the owner can cancel it and a reviewer can approve it early
+/// or reject it. A partial unique index (see the migration) allows one PENDING per lease.
+model LeaseChange {
+  id                String            @id @default(cuid())
+  leaseId           String
+  lease             Lease             @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  businessId        String
+  requestedByUserId String
+  status            LeaseChangeStatus @default(PENDING)
+  /// The lease columns to set when the change applies.
+  changes           Json
+  /// What those columns held when the change was requested. The payout token is left out.
+  previous          Json
+  /// Names of the fields being changed, for display.
+  fields            String[]
+  requestedAt       DateTime          @default(now())
+  /// YYYY-MM-DD the cooling-off period ends and the change applies on its own.
+  effectiveOn       String
+  appliedAt         DateTime?
+  /// A reviewer approved it early or rejected it: who, when, and why.
+  decidedBy         String?
+  decidedAt         DateTime?
+  decisionReason    String?
+  cancelledAt       DateTime?
+
+  @@index([leaseId, status])
+  @@index([status, effectiveOn])
 }
 
 // ---------- Rent plan ----------
@@ -390,6 +587,10 @@ model RentPlan {
   /// still collected. Cleared only by a reviewer.
   advanceFrozenAt      DateTime?
   advanceFrozenReason  String?
+  /// The lease's rent went up past what the decision or the exposure rules allow. Payouts
+  /// are held (whole rent or nothing) until a new decision covers this amount.
+  pendingRentCents     Int?
+  pendingRentSince     DateTime?
   /// The delinquency bucket as of the last aging run or payment. Stored because a change of
   /// bucket is an event (it is audited, and provisioning and the ops summary group by it).
   /// Days past due is not stored: it is derived from the oldest unpaid installment on read.
@@ -424,8 +625,11 @@ model LandlordPayout {
   heldReason    String?
   heldAt        DateTime?
   cancelledAt   DateTime?
-  /// Bank return code when a paid payout came back, for example R03.
+  /// Bank return code when a paid payout came back, for example R03. Cleared when a
+  /// reviewer re-sends the payout to corrected landlord details.
   returnCode    String?
+  /// Times a returned payout was sent again. Each send has its own ledger posting key.
+  resendCount   Int          @default(0)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 

@@ -67,6 +67,8 @@ Docs to read before changing behavior: `ARCHITECTURE.md` (providers, ledger, pay
   - `BankLinkProvider` (`BANK_LINK_PROVIDER`)
   - `PaymentsProvider` (`PAYMENTS_PROVIDER`)
   - `CapitalProvider` (`CAPITAL_PROVIDER`)
+  - `CommerceDataProvider` (`COMMERCE_PROVIDER`)
+  - `IdentityProvider` (`IDENTITY_PROVIDER`)
 - All money movements (landlord payouts, installment collections, fees, pool replenishment) post a `LedgerTransaction` with balanced `LedgerEntry` rows. The ledger service rejects unbalanced transactions. Balances are derived from entries, never stored.
 - Status changes and their ledger postings happen in the same database transaction.
 - Scheduled jobs are idempotent and record a `JobRun`.

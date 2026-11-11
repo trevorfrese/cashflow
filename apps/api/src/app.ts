@@ -1,4 +1,5 @@
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -69,6 +70,20 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
         : opts.config.CORS_ORIGIN.split(',').map((s) => s.trim()),
   });
 
+  // A default for every route, with tighter limits on the auth routes (see routes/auth.ts).
+  // Counted per client address, in memory: one process. Several instances behind a load
+  // balancer each count on their own, and would want a shared store.
+  if (opts.config.RATE_LIMIT_ENABLED) {
+    await app.register(rateLimit, {
+      global: true,
+      max: opts.config.RATE_LIMIT_MAX,
+      timeWindow: opts.config.RATE_LIMIT_WINDOW_SECONDS * 1000,
+      allowList: (request) => request.url === '/health',
+      errorResponseBuilder: (_request, context) =>
+        new AppError(429, 'RATE_LIMITED', `Too many requests. Try again in ${context.after}`),
+    });
+  }
+
   await app.register(swagger, {
     openapi: {
       info: {
@@ -77,7 +92,11 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
         version: '0.1.0',
       },
       components: {
-        securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
+        securitySchemes: {
+          bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+          // Operator routes: ADMIN_API_TOKEN or REVIEWER_API_TOKEN, plus X-Admin-Actor.
+          operatorToken: { type: 'http', scheme: 'bearer' },
+        },
       },
     },
     transform: jsonSchemaTransform,

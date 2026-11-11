@@ -15,8 +15,8 @@ flowchart LR
     R[Routes<br/>Zod validated]
     S[Services<br/>rent plan, payouts, collections, underwriting]
     L[Ledger<br/>double entry]
-    J[Jobs<br/>reconcile, age, pay landlords, collect, provision]
-    P[Providers<br/>underwriting, bank link, payments, capital]
+    J[Jobs<br/>rescreen, reconcile, age, pay landlords, collect, provision, monitor]
+    P[Providers<br/>underwriting, bank link, payments, capital, identity]
   end
   DB[(Postgres<br/>Prisma)]
   SH[packages/shared<br/>schemas, enums, money math, brand]
@@ -62,12 +62,13 @@ Every external dependency that touches money or risk sits behind an interface in
 and the sandbox implementation is always the default. Nothing in this repository can move
 real funds without someone deliberately configuring it to.
 
-| Provider               | Interface                                                 | Default                                                                  | Real world                                                                          |
-| ---------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `UnderwritingProvider` | `decide(input) -> decision`                               | `cashflow`: the in-house cash flow engine, deterministic and explainable | The same engine on real bank data, optionally blended with a bureau or vendor score |
-| `BankLinkProvider`     | link token, exchange public token, balances, transactions | `mock`: deterministic synthetic histories by token keyword               | Plaid, MX, Finicity. A `plaid.ts` skeleton shows the shape                          |
-| `PaymentsProvider`     | `charge`, `payout`, idempotent by key; `listReturns`      | `mock`: succeeds unless the token says `fail` or `return_r01` and so on  | Stripe, Modern Treasury, Increase. A `stripe.ts` skeleton shows the shape           |
-| `CapitalProvider`      | `availableCents`, `reserve`, `fund`                       | `mock`: a pool that lives in the ledger                                  | A credit facility, a warehouse line, or a fund                                      |
+| Provider               | Interface                                                 | Default                                                                    | Real world                                                                                         |
+| ---------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `UnderwritingProvider` | `decide(input) -> decision`                               | `cashflow`: the in-house cash flow engine, deterministic and explainable   | The same engine on real bank data, optionally blended with a bureau or vendor score                |
+| `BankLinkProvider`     | link token, exchange public token, balances, transactions | `mock`: deterministic synthetic histories by token keyword                 | Plaid, MX, Finicity. A `plaid.ts` skeleton shows the shape                                         |
+| `PaymentsProvider`     | `charge`, `payout`, idempotent by key; `listReturns`      | `mock`: succeeds unless the token says `fail` or `return_r01` and so on    | Stripe, Modern Treasury, Increase. A `stripe.ts` skeleton shows the shape                          |
+| `CapitalProvider`      | `availableCents`, `reserve`, `fund`                       | `mock`: a pool that lives in the ledger                                    | A credit facility, a warehouse line, or a fund                                                     |
+| `IdentityProvider`     | `verifyBusiness`, `verifyOwners`, `screenParty`           | `mock`: verifies and clears everything except names with a sandbox keyword | A business and owner verification vendor and a sanctions screening vendor. No skeleton is included |
 
 ### How a real capital source plugs in
 
@@ -140,11 +141,13 @@ Rules the postings follow:
 - **One posting per business event**, enforced by idempotency keys: `payout:<id>`,
   `repayment:<id>` (an installment whose payment was returned is collected again, which is a
   second repayment and a second posting), `repayment:<id>:return`, `payout:<id>:return`,
-  `provision:<YYYY-MM>`, `charge_off:<planId>:<date>`.
+  `provision:<YYYY-MM>`, `charge_off:<planId>:<date>`, and `payout:<id>:resend:<n>` with its
+  own `:return` for a returned payout that a reviewer sent again.
 
 Balances are derived by summing entries, never stored. `GET /v1/admin/ledger/trial-balance`
-proves debits equal credits at any moment, and the integration tests assert it after every
-lifecycle step. `GET /v1/admin/delinquency` reports receivables, the allowance, charge-offs
+proves debits equal credits at any moment, the integration tests assert it after every
+lifecycle step, and the `monitor` job checks it, and each receivable account against the
+installments behind it, on every run. `GET /v1/admin/delinquency` reports receivables, the allowance, charge-offs
 and recoveries to date, and plans and principal by delinquency bucket.
 
 ## The life of a rent payment
@@ -221,8 +224,10 @@ A payout that falls due is paid, held, or cancelled by `processPayout`:
 - It is **held** (`HELD`, with a reason the owner sees through `GET /v1/rent-plans/:id`)
   while the business is more than 3 days past due on rent already fronted, on any of its
   plans (`PAST_DUE`); while the plan is frozen by a periodic review, an unauthorized return,
-  or a returned payout (`ADVANCE_FROZEN`); or while the owner has paused the plan
-  (`PLAN_PAUSED`).
+  a returned payout, or a screening hit (`ADVANCE_FROZEN`); while a change to the landlord's
+  details is inside its cooling-off period (`LEASE_CHANGE_PENDING`); while a rent increase
+  waits for a new decision (`RENT_INCREASE_PENDING`); or while the owner has paused the plan
+  (`PLAN_PAUSED`). The payout carries a `heldMessage` in plain words for the owner.
 - A held payout is **released** and paid as soon as nothing holds it, if that is within 5
   days of its scheduled date. Its installments move out by the number of days it was late.
 - After 5 days it is **cancelled** and its installments are voided. A month the tenant has
@@ -234,7 +239,8 @@ A payout that falls due is paid, held, or cancelled by `processPayout`:
 Pausing a plan stops new rent periods. It does not stop collection: installments on rent
 already paid to the landlord are debited on schedule whether the plan is active, paused, or
 closed. A freeze is lifted only by a reviewer, with
-`POST /v1/admin/rent-plans/:id/release-freeze`.
+`POST /v1/admin/rent-plans/:id/release-freeze`, or, for a screening freeze, by clearing the
+hit.
 
 ### Collections and returns
 
@@ -280,32 +286,232 @@ payment, the principal is booked to `recovery_income` and the plan stays closed.
 
 ### Jobs
 
-Seven jobs in `apps/api/src/jobs/` run in this order, on a cron inside the API process
+Ten jobs in `apps/api/src/jobs/` run in this order, on a cron inside the API process
 (`JOBS_ENABLED=true`) or by hand with `pnpm --filter @cashflow/api job:run --as-of
 YYYY-MM-DD`. Each is idempotent for a given date:
 
-1. **reunderwrite** re-scores each active plan once a month and freezes one that has
-   deteriorated. First, so a plan it freezes gets no new period and no payout the same day.
-2. **reconcile-payments** polls for returned payments and undoes each one. Before anything
+1. **rescreen** screens every active business, its owners, and its landlords against
+   sanctions and watchlists once their last screening is 30 days old. A hit freezes the plan
+   before anything is generated or paid for it that day.
+2. **lease-changes** applies landlord and payout changes whose cooling-off period has ended,
+   so a payout they were holding goes out the same day to the new details.
+3. **reunderwrite** re-scores each active plan once a month and freezes one that has
+   deteriorated. Before payouts, so a plan it freezes gets no new period and no payout the
+   same day.
+4. **reconcile-payments** polls for returned payments and undoes each one. Before anything
    reads who is paid up.
-3. **age-receivables** recomputes every plan's delinquency bucket, marks installments
+5. **age-receivables** recomputes every plan's delinquency bucket, marks installments
    `LATE` once past grace whether or not a debit was attempted, writes an audit event on
    every change of bucket, and charges off plans at 90 days.
-4. **generate-periods** creates next month's landlord payout and its installments for every
+6. **generate-periods** creates next month's landlord payout and its installments for every
    active plan that is not frozen, 30 days before the due date, using
    `buildInstallmentSchedule` from `packages/shared`.
-5. **process-payouts** pays, holds, releases, or cancels every payout that is due: reserve
+7. **process-payouts** pays, holds, releases, or cancels every payout that is due: reserve
    capital, call the payments provider, post the ledger, mark `PAID`. A capital shortfall or
    a provider failure marks the payout `FAILED` with the reason and it is tried again on the
    next run.
-6. **collect-installments** makes the debits the policy schedules for today on every
+8. **collect-installments** makes the debits the policy schedules for today on every
    installment whose payout has been paid, posts the ledger, and settles operating cash with
    the pool.
-7. **provision** sets the allowance to the policy's reserve on outstanding principal by
+9. **provision** sets the allowance to the policy's reserve on outstanding principal by
    bucket and posts the change. It posts on the first run of each calendar month only.
+10. **monitor** runs every monitoring rule on the state the others left and opens, refreshes,
+    and resolves alerts. See "Monitoring".
 
 Each run records a `JobRun` row with a summary so a dashboard or an on-call engineer can see
 what happened on any given day.
+
+## Identity and screening
+
+`IdentityProvider` (`IDENTITY_PROVIDER`, default `mock`) answers three questions: is this
+business a registered entity matching the legal name, address, tax id and formation date it
+gave; are its beneficial owners identifiable people; and does a name appear on a sanctions
+list or a watchlist. `services/identity.ts` decides when to ask and what to do with the
+answer.
+
+What is stored is deliberately little. A business keeps the **last four digits** of its tax
+id, never the full number. An owner is a name, a title, an ownership share in basis points,
+and an opaque reference to the provider's record. No date of birth and no government id
+number is collected or stored anywhere. A business needs at least one owner, and the shares
+may not add up to more than 100%.
+
+| When                                                | What runs                                                              |
+| --------------------------------------------------- | ---------------------------------------------------------------------- |
+| A business is created, or an identity field changes | Verify the business and its owners, screen the business and each owner |
+| An application is submitted                         | The same again, then the stored result goes to the engine              |
+| A lease is created, or its landlord changes         | Screen the landlord (name and payout account holder) as the payee      |
+| Every 30 days (`rescreen` job)                      | Screen every active business, its owners, and its landlords again      |
+
+Verification is `VERIFIED`, `REVIEW`, or `FAILED` (`UNVERIFIED` before the first check). The
+business carries the worst status across itself and its owners. Screening is a history in
+`ScreeningResult`: each screening adds a row and supersedes the party's previous one, and a
+hit (`POSSIBLE_MATCH` or `MATCH`) is open until a reviewer clears it, with who and why. A hit
+whose provider reference was already cleared for the business is stored as cleared, so a
+false positive does not come back every month.
+
+What the results do:
+
+- **Applications.** The engine gets the stored status and the worst open hit as an integrity
+  input, the same way it gets the other facts the service looks up, and stays pure. Anything
+  short of `VERIFIED` with clear screening is never approved automatically: `REVIEW` or a
+  possible match is referred with a specific trigger, `FAILED` is declined with a reason the
+  applicant can act on, and a match is held in review and cannot be approved while it is open.
+- **Running plans.** A hit on the business, an owner, or the landlord of a plan freezes that
+  plan with the existing freeze (`advanceFrozenAt`, reason `SCREENING_REVIEW`), so the payout
+  job holds what falls due. Clearing the hit (`POST /v1/admin/screening/:id/clear`) releases
+  every plan it froze that has no other open hit. A reviewer can clear a possible match; a
+  match needs an admin. The general freeze release is refused while a hit is open.
+- **New plans.** `createRentPlan` refuses while a hit is open on the business, an owner, or
+  that lease's landlord.
+
+The owner is never told what was found. `Business.verification` has three states: `VERIFIED`,
+`NEEDS_INFO` (a tax id or an owner is missing), and `UNDER_REVIEW`, which covers a check in
+review, a failed check, and any screening hit alike, with a message to contact support. A
+payout held by a freeze says the account is under review.
+
+A business that existed before verification has no tax id and no owners. It migrates as
+`UNVERIFIED`, reads as `NEEDS_INFO` to its owner, and its next application is referred rather
+than approved.
+
+## Lease change control
+
+Landlord payouts read the lease when they run, so whoever can edit a lease can choose where
+next month's rent goes. An account takeover would use exactly that. `PATCH /v1/leases/:id`
+therefore treats three kinds of field differently (`services/lease-changes.ts`):
+
+**Landlord identity and payout account** (`landlordName`, `landlordEmail`, `landlordPayout`).
+On a lease with a plan that is not closed, the change does not apply. It becomes a
+`LeaseChange` with a cooling-off period of 5 days (`CONTROLS_POLICY`):
+
+- payouts on the lease are held with reason `LEASE_CHANGE_PENDING` until it is settled;
+- the proposed landlord is screened;
+- a `LEASE_CHANGE_REQUESTED` audit event is written and an alert opens at once;
+- the owner sees `Lease.pendingChange` with the date, and can cancel it
+  (`POST /v1/leases/:id/pending-change/cancel`);
+- the `lease-changes` job applies it when the period ends, a reviewer can approve it earlier
+  or reject it (`POST /v1/admin/lease-changes/:id/decide`), and it does not apply while the
+  proposed landlord has an open screening hit;
+- one change can be pending per lease, and a payout account that is the business's own bank
+  account is refused outright.
+
+Five days is also the payout release window, so a payout that falls due on the day of an
+honest change is held and then paid to the new account on the day the change applies. It is
+never cancelled by the wait. On a lease with no running plan there is no payout to redirect,
+and the change applies at once, with the landlord screened and the edit audited.
+
+**Rent.** A decrease, or an increase that the current approval and the exposure rules still
+cover (`checkNewPlan`, with the plan's own rent left out of the business's exposure), moves
+the plan to the new rent, reprices the fee, and regenerates every period that has not been
+paid to the landlord. A period already paid keeps its amount. An increase they do not cover
+is recorded on the plan (`pendingRentCents`) and its payouts are held with reason
+`RENT_INCREASE_PENDING`: CashFlow fronts a whole month's rent or nothing, so it does not pay
+the old amount against a higher rent. The owner sees `Lease.pendingRentIncrease`. A new
+application for the business that is approved for at least the new rent applies it (the plan
+moves to that application and its fee); putting the rent back clears it. A held payout is
+cancelled after its release window like any other.
+
+**Everything else** (property address, dates, due day) applies at once, as before.
+
+**Re-sending a returned payout.** A landlord payout that came back from the bank is `FAILED`
+with the return code and is never retried by the job. Once the landlord's details have been
+corrected through a lease change that applied after the return, a reviewer can send it again
+(`POST /v1/admin/payouts/:id/resend`). It posts a second ledger transaction under its own key
+(`payout:<id>:resend:<n>`), makes the installments the return voided owed again from today,
+and leaves the plan frozen for a reviewer to release separately.
+
+## Monitoring
+
+`apps/api/src/monitoring/` turns the state of the system into alerts for a person.
+
+- **Rules** (`rules/*.ts`) are pure functions from `MonitoringInputs` to the alerts that
+  should be open right now. They never touch the database.
+- **The data layer** (`data.ts`) is the only place monitoring reads the database, and it
+  makes no judgments.
+- **The policy** (`policy.ts`) holds every threshold in one object, each with its reasoning.
+  Caps come from the credit policy, so monitoring and underwriting cannot drift apart.
+- **The engine** (`engine.ts`) runs the rules and decides, purely, what to write given the
+  alerts that exist. **The service** (`service.ts`) writes it.
+
+The `monitor` job runs last in every job run. An `Alert` has a type (the rule), a category, a
+severity (`INFO`, `WARNING`, `HIGH`, `CRITICAL`), a subject, a status (`OPEN`,
+`ACKNOWLEDGED`, `RESOLVED`), a disposition, and a dedupe key. How alerts open and close:
+
+- **One alert per condition.** A partial unique index allows one alert per dedupe key that is
+  not resolved. A condition that persists refreshes its alert (and raises its severity if the
+  condition got worse) instead of opening another.
+- **Auto-resolve.** Rules whose alert is fully described by current state resolve it when the
+  condition is gone, with disposition `CONDITION_CLEARED`. Rules about something that cannot
+  undo itself do not: the trial balance, a landlord account that is a borrower's, a deleted
+  record, and every alert raised from an event.
+- **Events open once.** Servicing already detects unauthorized returns, returned payouts,
+  charge-offs, disabled bank links and cancelled payouts, and writes an audit event in the
+  same transaction. Monitoring does not detect them again. It turns each event that needs a
+  person into one alert keyed by the event, never reopened after it is resolved.
+- **A person's resolution sticks.** An alert a person resolved does not reopen for the same
+  condition for 30 days. One the monitor resolved can reopen straight away.
+- **A broken rule is isolated.** A rule that throws is logged and reported in the job run,
+  the others still run, and its open alerts are left alone.
+
+| Category   | Rules                                                                                                                                                                                                                                                                                                                                                     |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fraud      | Landlord change pending, or applied shortly before a payout. Landlord payout account is a borrower's bank account. One landlord account paid by several unrelated users. One bank account linked by several businesses. Application velocity and reapplying after a decline. Open screening hits. Unauthorized returns and account lockouts (from events) |
+| Payments   | Unauthorized, administrative and overall return rates over 60 days against the network thresholds, each with a minimum sample. Repeated failures on one bank account. Collection attempts exhausted. Returned and cancelled payouts, disabled bank links (from events)                                                                                    |
+| Portfolio  | First payment default rate by origination month. Share of principal delinquent or in default. Month over month roll. Industry and single name concentration against the credit policy caps. Pool utilization. Realized against expected loss by cohort. Charge-offs (from events)                                                                         |
+| Books      | Trial balance. Operating cash left after a full run. Each receivable account against unpaid principal on paid payouts. Allowance and pool never negative. Jobs that failed or stopped. Append-only triggers present (`pg_trigger`)                                                                                                                        |
+| Compliance | Applications undecided at 20 and 30 days. Screening results older than the rescreen interval. An application deleted inside the 12 month retention period. Businesses with a plan that are not verified. Adverse action notice missing (inactive until a later phase stores the notice)                                                                   |
+
+Every rule's threshold, severity and reasoning is in `monitoring/policy.ts` and the rule's own
+description, which the summary endpoint returns.
+
+### The circuit breaker
+
+Five portfolio rules trip a persisted circuit breaker at their critical level: first payment
+defaults, delinquent share, roll, loss against expectation, and commitments above pool
+capital. It is one mechanism: **while it is tripped, an application the engine would approve
+is referred to a reviewer instead** (trigger `CIRCUIT_BREAKER`). Declines and requests for
+information are unchanged, and a reviewer can still approve.
+
+Referring was chosen over pausing new plans because those breaches say recent automatic
+decisions may be wrong, and the remedy for that is a person on each new approval, which the
+review queue already provides. It does not strand an owner halfway through onboarding with an
+error, and it leaves good applicants a way through. Its limit: an approval made before the
+trip stays valid, and that owner can still open a plan, subject to the exposure and pool
+rules `createRentPlan` applies on the day.
+
+The breaker trips when a breaker alert opens or rises to critical, not on every run while it
+stays open, so an admin's reset (`POST /v1/admin/circuit-breaker/reset`, with a reason) is not
+undone by the next run. Trip and reset are both audited.
+
+One thing monitoring cannot see is itself. If the scheduler stops, the `monitor` job stops
+with it and nothing alerts. A production deployment needs a heartbeat checked from outside.
+
+## Access control
+
+The operator routes under `/v1/admin` exist only when `ENABLE_ADMIN=true`, and the API refuses
+to start in that mode without `ADMIN_API_TOKEN`. Every request needs:
+
+- `Authorization: Bearer <token>`: `ADMIN_API_TOKEN` or `REVIEWER_API_TOKEN`, at least 32
+  characters each and different from one another, compared in constant time.
+- `X-Admin-Actor: <name or email>`: the person acting.
+
+| Role       | Can                                                                                                                                                                                               |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reviewer` | Work the review queue, alerts, lease changes, and screening hits. Release a freeze. Re-send a returned payout. Read the ledger, capital, delinquency, audit trail, breaker and monitoring summary |
+| `admin`    | Everything a reviewer can, plus fund the pool, run jobs, reset the circuit breaker, and clear a screening match                                                                                   |
+
+The identity written to the audit log is the token's role and the name in the header. No
+request body can set it; the review and freeze endpoints that used to take a `reviewer` field
+no longer do. Every state change through these routes writes an audit event.
+
+This is deliberately small. A token proves a role and is shared by a team; the header is
+asserted by the caller, not proven. That is enough to keep the routes closed and the audit
+trail honest about role. Per person credentials are what a production deployment needs.
+
+Rate limiting (`@fastify/rate-limit`) applies a default per client address to every route and
+a tighter limit to register, login and refresh. Separately, five wrong passwords in a row
+lock an account for 15 minutes and write a `LOGIN_LOCKED` audit event. Rate limiting counts
+requests per address; lockout counts failures per account, which is what stops guessing that
+comes from many addresses. Both are configurable, and rate limiting is off under test.
 
 ## Installment math
 
@@ -336,6 +542,12 @@ both in `expo-secure-store` and refreshes transparently on a 401.
   manual payment, payouts held, released, and cancelled, paused plans, returned payments and
   payouts, aging to charge-off at day 90, provisioning, and recovery. Every step runs the
   jobs twice to prove the second run changes nothing, and checks the trial balance.
+  Identity, lease change control, access control, and monitoring have their own suites: a
+  unit test per monitoring rule (fires, does not fire, minimum sample, dedupes), and
+  integration tests for screening outcomes, a hit freezing and a clearance releasing a plan,
+  a landlord change held through its cooling-off, rent changes, re-sending a returned payout,
+  the circuit breaker, monitor idempotency, and the books rules against a ledger made
+  inconsistent on purpose.
 - `apps/mobile`: unit tests for input parsing and the onboarding stage machine.
 
 CI runs lint, typecheck, and all tests on every push with a Postgres service container.

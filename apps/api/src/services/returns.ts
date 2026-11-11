@@ -14,6 +14,7 @@ import {
 } from '../servicing/policy.ts';
 import { recordAudit, type AuditActor } from './audit.ts';
 import { refreshDelinquency, UNPAID } from './delinquency.ts';
+import { payoutKey } from './payouts.ts';
 
 /**
  * Payment returns.
@@ -220,12 +221,14 @@ async function reversePayout(
     const plan = payout.rentPlan;
     const at = effectiveAt(asOf);
 
-    await reverseTransaction(tx, `payout:${payout.id}`, {
+    // The posting of the send that came back: the first, or the latest re-send.
+    const key = payoutKey(payout);
+    await reverseTransaction(tx, key, {
       description: `Return ${ret.returnCode}: landlord payout ${payout.periodMonth}`,
       effectiveDate: ret.returnedOn,
       referenceType: 'landlord_payout_return',
       referenceId: payout.id,
-      idempotencyKey: `payout:${payout.id}:return`,
+      idempotencyKey: `${key}:return`,
     });
     await tx.landlordPayout.update({
       where: { id: payout.id },

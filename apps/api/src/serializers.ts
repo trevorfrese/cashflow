@@ -8,6 +8,8 @@ import type {
   RentPlan as RentPlanDto,
   Repayment as RepaymentDto,
   ApplicationReview as ReviewDto,
+  LeaseChangeField,
+  PayoutHoldReason,
   UnderwritingApplication as ApplicationDto,
   UnderwritingDecision as DecisionDto,
   User as UserDto,
@@ -23,12 +25,16 @@ import type {
   RentPlan,
   Repayment,
   ApplicationReview,
+  BeneficialOwner,
+  LeaseChange,
   UnderwritingApplication,
   UnderwritingDecision,
   User,
 } from './generated/prisma/client.ts';
 import type { PlanStanding } from './services/delinquency.ts';
-import { releaseBy } from './services/payouts.ts';
+import { ownerVerificationView } from './services/identity.ts';
+import { pendingChangeMessage, pendingRentMessage } from './services/lease-changes.ts';
+import { HOLD_MESSAGES, releaseBy } from './services/payouts.ts';
 import { ACTIVE_SERVICING_POLICY } from './servicing/policy.ts';
 
 const iso = (d: Date) => d.toISOString();
@@ -41,7 +47,11 @@ export const toUser = (u: User): UserDto => ({
   createdAt: iso(u.createdAt),
 });
 
-export const toBusiness = (b: Business): BusinessDto => ({
+/** `openHits` is the number of open screening hits on the business and its owners. */
+export const toBusiness = (
+  b: Business & { owners: BeneficialOwner[] },
+  openHits = 0,
+): BusinessDto => ({
   id: b.id,
   ownerUserId: b.ownerUserId,
   legalName: b.legalName,
@@ -57,6 +67,14 @@ export const toBusiness = (b: Business): BusinessDto => ({
   foundedOn: b.foundedOn,
   statedMonthlyRevenueCents: b.statedMonthlyRevenueCents,
   status: b.status,
+  taxIdLast4: b.taxIdLast4,
+  owners: b.owners.map((o) => ({
+    id: o.id,
+    fullName: o.fullName,
+    title: o.title,
+    ownershipBps: o.ownershipBps,
+  })),
+  verification: ownerVerificationView(b, openHits),
   createdAt: iso(b.createdAt),
   updatedAt: iso(b.updatedAt),
 });
@@ -123,7 +141,13 @@ export const toApplication = (
   updatedAt: iso(a.updatedAt),
 });
 
-export const toLease = (l: Lease): LeaseDto => ({
+/** What the lease serializer needs beside the row: a pending change and a pending rent rise. */
+export interface LeaseExtras {
+  pendingChange?: LeaseChange | null;
+  pendingRentPlan?: Pick<RentPlan, 'id' | 'monthlyRentCents' | 'pendingRentCents'> | null;
+}
+
+export const toLease = (l: Lease, extras: LeaseExtras = {}): LeaseDto => ({
   id: l.id,
   businessId: l.businessId,
   landlordName: l.landlordName,
@@ -145,6 +169,28 @@ export const toLease = (l: Lease): LeaseDto => ({
     routingNumber: l.landlordRoutingNumber,
     accountNumberLast4: l.landlordAccountNumberLast4,
   },
+  pendingChange: extras.pendingChange
+    ? {
+        id: extras.pendingChange.id,
+        status: extras.pendingChange.status,
+        fields: extras.pendingChange.fields as LeaseChangeField[],
+        requestedAt: iso(extras.pendingChange.requestedAt),
+        effectiveOn: extras.pendingChange.effectiveOn,
+        message: pendingChangeMessage(extras.pendingChange.effectiveOn),
+      }
+    : null,
+  pendingRentIncrease:
+    extras.pendingRentPlan && extras.pendingRentPlan.pendingRentCents !== null
+      ? {
+          rentPlanId: extras.pendingRentPlan.id,
+          currentRentCents: extras.pendingRentPlan.monthlyRentCents,
+          requestedRentCents: extras.pendingRentPlan.pendingRentCents,
+          message: pendingRentMessage(
+            extras.pendingRentPlan.monthlyRentCents,
+            extras.pendingRentPlan.pendingRentCents,
+          ),
+        }
+      : null,
   createdAt: iso(l.createdAt),
   updatedAt: iso(l.updatedAt),
 });
@@ -186,6 +232,10 @@ export const toPayout = (p: LandlordPayout): PayoutDto => ({
   providerRef: p.providerRef,
   failureReason: p.failureReason,
   heldReason: p.heldReason as PayoutDto['heldReason'],
+  heldMessage:
+    (p.status === 'HELD' || p.status === 'CANCELLED') && p.heldReason
+      ? (HOLD_MESSAGES[p.heldReason as PayoutHoldReason] ?? null)
+      : null,
   heldAt: isoOrNull(p.heldAt),
   releaseBy: p.status === 'HELD' ? releaseBy(p.scheduledFor) : null,
   cancelledAt: isoOrNull(p.cancelledAt),

@@ -6,7 +6,7 @@ import {
   type IsoDate,
 } from '@cashflow/shared';
 
-import type { CashFlowSummary } from '@cashflow/shared';
+import type { AdminIdentity, CashFlowSummary } from '@cashflow/shared';
 
 import { effectiveAt } from '../dates.ts';
 import type { Db, Tx } from '../db.ts';
@@ -19,6 +19,7 @@ import { CURRENT_POLICY } from '../underwriting/policy.ts';
 import { planFeeBps } from '../underwriting/pricing.ts';
 import { recordAudit } from './audit.ts';
 import { currentDecision } from './decisions.ts';
+import { openHitsForPlan } from './identity.ts';
 import { gatherExposureContext } from './portfolio-state.ts';
 
 type PlanRow = {
@@ -162,6 +163,25 @@ export async function createRentPlan(
       });
     }
 
+    // An open screening hit on the business, an owner, or this landlord: nothing new is
+    // fronted until a reviewer has cleared it. The owner is told only that we are reviewing.
+    const hits = await openHitsForPlan(tx, { businessId: lease.businessId, leaseId: lease.id });
+    if (hits.length > 0) {
+      throw unprocessable(
+        'ACCOUNT_UNDER_REVIEW',
+        'Your account is under review, so a new rent plan cannot start yet. Contact support and we will help',
+      );
+    }
+    const pendingChange = await tx.leaseChange.findFirst({
+      where: { leaseId: lease.id, status: 'PENDING' },
+    });
+    if (pendingChange) {
+      throw unprocessable(
+        'LEASE_CHANGE_PENDING',
+        `A change to the landlord details on this lease takes effect on ${pendingChange.effectiveOn}. The plan can start after that`,
+      );
+    }
+
     const active = await tx.rentPlan.findFirst({ where: { leaseId: lease.id, status: 'ACTIVE' } });
     if (active) throw conflict('PLAN_EXISTS', 'This lease already has an active rent plan');
 
@@ -254,7 +274,7 @@ export async function createRentPlan(
  */
 export async function releaseAdvanceFreeze(
   db: Db,
-  args: { planId: string; reviewer: string; reason: string },
+  args: { planId: string; identity: AdminIdentity; reason: string },
 ) {
   return db.$transaction(async (tx) => {
     const plan = await tx.rentPlan.findUnique({ where: { id: args.planId } });
@@ -263,12 +283,22 @@ export async function releaseAdvanceFreeze(
     if (plan.advanceFrozenAt === null) {
       throw unprocessable('PLAN_NOT_FROZEN', 'This plan is not frozen');
     }
+    // A screening hit is lifted by clearing the hit, which records why it is not the party.
+    // Releasing the freeze around it would leave the hit open and the plan paying.
+    const hits = await openHitsForPlan(tx, plan);
+    if (hits.length > 0) {
+      throw unprocessable(
+        'SCREENING_HIT_OPEN',
+        'A screening hit on this plan is still open. Clear it in the screening queue first',
+        { screeningIds: hits.map((h) => h.id) },
+      );
+    }
     const updated = await tx.rentPlan.update({
       where: { id: plan.id },
       data: { advanceFrozenAt: null, advanceFrozenReason: null },
     });
     await recordAudit(tx, {
-      actor: { type: 'reviewer', id: args.reviewer },
+      actor: { type: args.identity.role, id: args.identity.actor },
       eventType: 'PLAN_ADVANCE_RELEASED',
       subjectType: 'rent_plan',
       subjectId: plan.id,

@@ -11,6 +11,7 @@ import {
   registerUser,
   resetDb,
   type TestHarness,
+  adminClient,
 } from '../test/helpers.ts';
 
 let h: TestHarness;
@@ -28,7 +29,7 @@ beforeEach(async () => {
 const RENT = 620_000;
 
 async function fundPool(amountCents: number) {
-  const res = await client(h.app).post('/v1/admin/capital/fund', {
+  const res = await adminClient(h.app).post('/v1/admin/capital/fund', {
     amountCents,
     description: 'test funding',
   });
@@ -36,13 +37,15 @@ async function fundPool(amountCents: number) {
 }
 
 async function runJobs(asOf: string) {
-  const res = await client(h.app).post<Record<string, unknown>>('/v1/admin/jobs/run', { asOf });
+  const res = await adminClient(h.app).post<Record<string, unknown>>('/v1/admin/jobs/run', {
+    asOf,
+  });
   expect(res.status).toBe(200);
   return res.body;
 }
 
 async function trialBalance() {
-  const res = await client(h.app).get<{ balanced: boolean; totalDebitsCents: number }>(
+  const res = await adminClient(h.app).get<{ balanced: boolean; totalDebitsCents: number }>(
     '/v1/admin/ledger/trial-balance',
   );
   expect(res.status).toBe(200);

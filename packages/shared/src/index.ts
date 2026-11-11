@@ -12,3 +12,5 @@ export * from './schemas/underwriting';
 export * from './schemas/lease';
 export * from './schemas/rent-plan';
 export * from './schemas/ledger';
+export * from './schemas/identity';
+export * from './schemas/monitoring';

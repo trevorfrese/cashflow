@@ -46,6 +46,44 @@ export const AUDIT_EVENTS = [
   /** A payment arrived on a written off installment. */
   'RECOVERY_RECEIVED',
   'BUSINESS_STATUS_CHANGED',
+  // Identity, screening, lease change control, monitoring, access (Phase R4).
+  /** Business and owners went through the identity provider. Payload: status, reasons. */
+  'IDENTITY_CHECKED',
+  /** A party was screened against sanctions and watchlists. Payload: partyType, result. */
+  'PARTY_SCREENED',
+  /** A screening came back POSSIBLE_MATCH or MATCH. High severity. */
+  'SCREENING_HIT',
+  /** A reviewer cleared a screening hit. Payload: who and why. */
+  'SCREENING_CLEARED',
+  /** A landlord or payout change was requested on a lease with a running plan. */
+  'LEASE_CHANGE_REQUESTED',
+  /** The owner cancelled a pending change. */
+  'LEASE_CHANGE_CANCELLED',
+  /** A pending change took effect: the cooling-off ended, or a reviewer approved it. */
+  'LEASE_CHANGE_APPLIED',
+  /** A reviewer rejected a pending change. */
+  'LEASE_CHANGE_REJECTED',
+  /** Lease details changed with no running plan, or details that are not controlled. */
+  'LEASE_UPDATED',
+  /** The rent on a lease changed and the plan follows it from the next period. */
+  'RENT_CHANGED',
+  /** A rent increase needs a new decision before the plan fronts the higher rent. */
+  'RENT_INCREASE_PENDING',
+  /** A reviewer sent a returned landlord payout again, to corrected details. */
+  'PAYOUT_RESENT',
+  'ALERT_OPENED',
+  'ALERT_ACKNOWLEDGED',
+  'ALERT_RESOLVED',
+  /** The circuit breaker on automatic approvals was tripped by a monitoring rule. */
+  'CIRCUIT_BREAKER_TRIPPED',
+  /** An admin reset the circuit breaker. */
+  'CIRCUIT_BREAKER_RESET',
+  /** Capital was added to the pool through the operator route. */
+  'POOL_FUNDED',
+  /** An admin ran the jobs by hand. */
+  'JOBS_RUN_REQUESTED',
+  /** Too many failed sign ins in a row: the account is locked for a while. */
+  'LOGIN_LOCKED',
 ] as const;
 export type AuditEventType = (typeof AUDIT_EVENTS)[number];
 
@@ -53,7 +91,8 @@ export type AuditActor =
   | { type: 'system'; id?: string }
   | { type: 'job'; id: string }
   | { type: 'user'; id: string }
-  | { type: 'reviewer'; id: string };
+  | { type: 'reviewer'; id: string }
+  | { type: 'admin'; id: string };
 
 /**
  * How loudly an event should be heard. Stored in the payload as `severity`, and only when it
@@ -61,10 +100,23 @@ export type AuditActor =
  */
 export type AuditSeverity = 'info' | 'warning' | 'high';
 
+export const AUDIT_SUBJECT_TYPES = [
+  'application',
+  'rent_plan',
+  'business',
+  'lease',
+  'screening',
+  'alert',
+  'circuit_breaker',
+  'user',
+  'system',
+] as const;
+export type AuditSubjectType = (typeof AUDIT_SUBJECT_TYPES)[number];
+
 export interface AuditInput {
   actor: AuditActor;
   eventType: AuditEventType;
-  subjectType: 'application' | 'rent_plan' | 'business';
+  subjectType: AuditSubjectType;
   subjectId: string;
   payload?: Record<string, unknown>;
   severity?: AuditSeverity;

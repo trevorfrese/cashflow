@@ -49,9 +49,19 @@ describe('the action table', () => {
     expect(Object.keys(INTEGRITY_RULES).sort()).toEqual([...INTEGRITY_CODES].sort());
   });
 
-  it('declines automatically only on the two patterns with no innocent reading', () => {
+  it('declines automatically only on the two patterns with no innocent reading, and on a failed identity check', () => {
     const knockouts = INTEGRITY_CODES.filter((c) => INTEGRITY_RULES[c].action === 'KNOCKOUT');
-    expect(knockouts.sort()).toEqual(['LANDLORD_IS_APPLICANT_ACCOUNT', 'ROUND_TRIP_DEPOSITS']);
+    expect(knockouts.sort()).toEqual([
+      'IDENTITY_VERIFICATION_FAILED',
+      'LANDLORD_IS_APPLICANT_ACCOUNT',
+      'ROUND_TRIP_DEPOSITS',
+    ]);
+  });
+
+  it('never declines on a screening hit: a match is held in review, not announced', () => {
+    expect(INTEGRITY_RULES.SCREENING_MATCH.action).toBe('REFER');
+    expect(INTEGRITY_RULES.SCREENING_POSSIBLE_MATCH.action).toBe('REFER');
+    expect(INTEGRITY_RULES.IDENTITY_NOT_VERIFIED.action).toBe('REFER');
   });
 });
 

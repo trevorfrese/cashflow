@@ -11,6 +11,17 @@
  * Northside Barbers: declined (too new, rent too high relative to revenue).
  * Lakeview Yoga: needs more info (no bank account connected yet).
  *
+ * A second owner, sam@cashflow.local (same password), gives the operations console
+ * something to show. Nothing here is an inserted alert row: each alert is opened by the
+ * monitor job from what the business did.
+ *
+ * Alder & Ash Florist: a running plan whose landlord payout details were changed on the
+ *   latest rent date. The change is inside its cooling-off period and the payout is held.
+ * Meridian Supply: applied two days ago. An owner's name is a possible watchlist match, so
+ *   the application is in review until the hit is cleared.
+ * Tidewater Sign Works: applied 34 days ago with a tax id the identity provider could not
+ *   match. Referred, and never reviewed: past the 30 day decision deadline.
+ *
  * The three plans are built by replaying the jobs one day at a time from the oldest plan's
  * start to today, so the ledger holds real payout, collection, provision, charge-off, and
  * recovery postings, each dated on the day it belongs to.
@@ -20,7 +31,7 @@ import pino from 'pino';
 
 import { hashPassword } from '../src/auth/password.ts';
 import { loadConfig } from '../src/config.ts';
-import { todayIso } from '../src/dates.ts';
+import { effectiveAt, todayIso } from '../src/dates.ts';
 import { createDb } from '../src/db.ts';
 import type { Industry } from '../src/generated/prisma/enums.ts';
 import { runAllJobs } from '../src/jobs/index.ts';
@@ -34,6 +45,7 @@ import {
 import { createProviders } from '../src/providers/index.ts';
 import { collectInstallment } from '../src/services/collections.ts';
 import { delinquencySummary } from '../src/services/provisioning.ts';
+import { updateLease } from '../src/services/lease-changes.ts';
 import { createRentPlan } from '../src/services/rent-plan.ts';
 import { underwriteApplication } from '../src/services/underwriting.ts';
 import { ACTIVE_SERVICING_POLICY } from '../src/servicing/policy.ts';
@@ -45,6 +57,7 @@ const providers = createProviders(config);
 const ctx = { config, db, providers, log };
 
 const DEMO_EMAIL = 'demo@cashflow.local';
+const OPS_EMAIL = 'sam@cashflow.local';
 const DEMO_PASSWORD = 'demo-password-123';
 const POOL_CENTS = 25_000_000; // $250,000
 
@@ -81,6 +94,8 @@ interface PlanSeed {
   posToken?: string;
   landlordName: string;
   landlordPayoutToken: string;
+  taxIdLast4: string;
+  owner: { fullName: string; title: string };
 }
 
 /** A business that is approved on healthy data and opens a plan in the past. */
@@ -98,6 +113,10 @@ async function seedPlan(userId: string, seed: PlanSeed) {
       foundedOn: seed.foundedOn,
       statedMonthlyRevenueCents: seed.monthlyRevenueCents,
       status: 'ACTIVE',
+      taxIdLast4: seed.taxIdLast4,
+      owners: { create: [{ ...seed.owner, ownershipBps: 10_000 }] },
+      // Signed up shortly before the plan opened, not today.
+      createdAt: effectiveAt(addDays(seed.planStart, -2)),
     },
   });
   const bank = await providers.bankLink.exchangePublicToken(seed.bankToken);
@@ -134,6 +153,7 @@ async function seedPlan(userId: string, seed: PlanSeed) {
       statedMonthlyRevenueCents: seed.monthlyRevenueCents,
       timeInBusinessMonths: seed.timeInBusinessMonths,
       requestedMonthlyRentCents: seed.rentCents,
+      createdAt: effectiveAt(addDays(seed.planStart, -1)),
     },
   });
   const application = await underwriteApplication({
@@ -174,7 +194,81 @@ async function seedPlan(userId: string, seed: PlanSeed) {
       asOf: seed.planStart,
     },
   );
-  return { business, bankLink, plan, goodToken: bank.providerAccountToken };
+  return { business, bankLink, lease, plan, goodToken: bank.providerAccountToken };
+}
+
+interface ReferredSeed {
+  legalName: string;
+  dba: string;
+  industry: Industry;
+  addressLine1: string;
+  postalCode: string;
+  monthlyRevenueCents: number;
+  rentCents: number;
+  bankToken: string;
+  taxIdLast4: string;
+  owner: { fullName: string; title: string };
+  /** The day the application is submitted. */
+  appliedOn: IsoDate;
+}
+
+/**
+ * A business with healthy cash flow whose application is referred by identity or screening.
+ * The seed fails if the engine did anything but refer it.
+ */
+async function seedReferred(userId: string, seed: ReferredSeed) {
+  const at = effectiveAt(seed.appliedOn);
+  const business = await db.business.create({
+    data: {
+      ownerUserId: userId,
+      legalName: seed.legalName,
+      dba: seed.dba,
+      industry: seed.industry,
+      addressLine1: seed.addressLine1,
+      city: 'Portland',
+      state: 'OR',
+      postalCode: seed.postalCode,
+      foundedOn: '2019-04-01',
+      statedMonthlyRevenueCents: seed.monthlyRevenueCents,
+      taxIdLast4: seed.taxIdLast4,
+      owners: { create: [{ ...seed.owner, ownershipBps: 10_000 }] },
+      createdAt: at,
+    },
+  });
+  const bank = await providers.bankLink.exchangePublicToken(seed.bankToken);
+  const bankLink = await db.bankLink.create({
+    data: {
+      businessId: business.id,
+      provider: providers.bankLink.name,
+      providerItemId: bank.providerItemId,
+      providerAccountToken: bank.providerAccountToken,
+      institutionName: bank.institutionName,
+      accountMask: bank.accountMask,
+      availableBalanceCents: bank.availableBalanceCents,
+      createdAt: at,
+    },
+  });
+  const draft = await db.underwritingApplication.create({
+    data: {
+      businessId: business.id,
+      bankLinkId: bankLink.id,
+      statedMonthlyRevenueCents: seed.monthlyRevenueCents,
+      timeInBusinessMonths: 80,
+      requestedMonthlyRentCents: seed.rentCents,
+      createdAt: at,
+    },
+  });
+  const application = await underwriteApplication({
+    db,
+    providers,
+    applicationId: draft.id,
+    bankLink,
+    asOf: seed.appliedOn,
+  });
+  if (application.status !== 'IN_REVIEW') {
+    throw new Error(`Seed expected ${seed.dba} to be referred, got ${application.status}`);
+  }
+  return { business, application };
 }
 
 async function main() {
@@ -198,6 +292,12 @@ async function main() {
   );
   const studioRecovery = addDays(studioChargeOff, 10);
   const replayFrom = addDays(studioFirstDue, -3);
+  // The florist's rent day is worked out like the cycle shop's, so its latest payout fell
+  // due yesterday at the latest and is still inside its release window today.
+  const floristLastDue = cyclesLastDue;
+  const floristFirstDue = monthsBefore(floristLastDue, 2);
+  const meridianApplied = addDays(today, -2);
+  const tidewaterApplied = addDays(today, -34);
 
   // Start clean so the seed is repeatable.
   await db.$executeRawUnsafe(`
@@ -205,7 +305,8 @@ async function main() {
       "LedgerEntry", "LedgerTransaction", "LedgerAccount",
       "Repayment", "Installment", "LandlordPayout", "RentPlan",
       "Lease", "UnderwritingDecision", "ApplicationReview", "UnderwritingApplication",
-      "BankLink", "CommerceLink", "Business", "RefreshToken", "User", "JobRun", "AuditEvent"
+      "BankLink", "CommerceLink", "BeneficialOwner", "ScreeningResult", "LeaseChange",
+      "Business", "RefreshToken", "User", "JobRun", "AuditEvent", "Alert", "CircuitBreaker"
     RESTART IDENTITY CASCADE
   `);
   await ensureSystemAccounts(db);
@@ -218,6 +319,10 @@ async function main() {
   const demo = await db.user.create({
     data: { email: DEMO_EMAIL, passwordHash, fullName: 'Dana Rivera' },
   });
+  const ops = await db.user.create({
+    data: { email: OPS_EMAIL, passwordHash, fullName: 'Sam Okafor' },
+  });
+  const dana = { fullName: 'Dana Rivera', title: 'Owner' };
 
   // ---- Blue Door Bakery: the happy path with history ----
   // It also connects its Square account, so its decision shows two sources.
@@ -237,6 +342,8 @@ async function main() {
     posToken: 'seed_blue_door_square_healthy_sales_60000',
     landlordName: 'Harbor View Properties',
     landlordPayoutToken: 'mock_landlord_harbor_view',
+    taxIdLast4: '4821',
+    owner: dana,
   });
 
   // ---- Cedar Street Cycles: delinquent, with a held payout ----
@@ -256,6 +363,8 @@ async function main() {
     bankToken: 'seed_cedar_cycles_healthy_rev_52000_rent_4800',
     landlordName: 'Eastside Commercial',
     landlordPayoutToken: 'mock_landlord_eastside',
+    taxIdLast4: '7310',
+    owner: dana,
   });
 
   // ---- Juniper Print Studio: charged off, with a partial recovery ----
@@ -275,6 +384,28 @@ async function main() {
     bankToken: 'seed_juniper_print_healthy_rev_44000_rent_3900',
     landlordName: 'Pearl District Holdings',
     landlordPayoutToken: 'mock_landlord_pearl',
+    taxIdLast4: '2264',
+    owner: dana,
+  });
+
+  // ---- Alder & Ash Florist: a landlord change inside its cooling-off period ----
+  const florist = await seedPlan(ops.id, {
+    legalName: 'Alder & Ash Florist LLC',
+    dba: 'Alder & Ash',
+    industry: 'RETAIL',
+    addressLine1: '904 NE Alberta St',
+    postalCode: '97211',
+    foundedOn: '2018-02-01',
+    monthlyRevenueCents: 3_800_000,
+    timeInBusinessMonths: 90,
+    rentCents: 340_000,
+    dueDayOfMonth: cyclesDueDay,
+    planStart: addDays(floristFirstDue, -3),
+    bankToken: 'seed_alder_ash_healthy_rev_38000_rent_3400',
+    landlordName: 'Alberta Arts Properties',
+    landlordPayoutToken: 'mock_landlord_alberta_arts',
+    taxIdLast4: '5507',
+    owner: { fullName: 'Sam Okafor', title: 'Managing member' },
   });
 
   const setAccountToken = (bankLinkId: string, token: string) =>
@@ -288,6 +419,57 @@ async function main() {
     }
     if (asOf === addDays(studioSecondDue, -1)) {
       await setAccountToken(studio.bankLink.id, 'mock_acct_juniper_fail');
+    }
+    if (asOf === floristLastDue) {
+      // On the morning rent is due, the landlord's bank details on the lease are changed.
+      // It could be the owner or someone in the owner's account: either way the change
+      // waits, the payout is held, and an alert opens.
+      await updateLease(ctx, {
+        leaseId: florist.lease.id,
+        userId: ops.id,
+        asOf,
+        body: {
+          landlordPayout: {
+            accountHolderName: 'Alberta Arts Properties LLC',
+            routingNumber: '021000021',
+            accountNumberLast4: '9034',
+            providerToken: 'mock_landlord_alberta_arts_new_account',
+          },
+        },
+      });
+    }
+    if (asOf === tidewaterApplied) {
+      // Tax id ending 0000: the sandbox identity provider cannot match it, so the
+      // application is referred. Nobody reviews it.
+      await seedReferred(ops.id, {
+        legalName: 'Tidewater Sign Works LLC',
+        dba: 'Tidewater Signs',
+        industry: 'PROFESSIONAL_SERVICES',
+        addressLine1: '3310 N Williams Ave',
+        postalCode: '97227',
+        monthlyRevenueCents: 4_100_000,
+        rentCents: 360_000,
+        bankToken: 'seed_tidewater_healthy_rev_41000_rent_3600',
+        taxIdLast4: '0000',
+        owner: { fullName: 'Priya Natarajan', title: 'Owner' },
+        appliedOn: asOf,
+      });
+    }
+    if (asOf === meridianApplied) {
+      // An owner whose name the sandbox screening provider reports as a possible match.
+      await seedReferred(ops.id, {
+        legalName: 'Meridian Supply Co LLC',
+        dba: 'Meridian Supply',
+        industry: 'RETAIL',
+        addressLine1: '1218 SE Division St',
+        postalCode: '97202',
+        monthlyRevenueCents: 4_600_000,
+        rentCents: 420_000,
+        bankToken: 'seed_meridian_healthy_rev_46000_rent_4200',
+        taxIdLast4: '6642',
+        owner: { fullName: 'Morgan Watchlist', title: 'Owner' },
+        appliedOn: asOf,
+      });
     }
     if (asOf === studioRecovery) {
       // The owner comes back and pays the older of the two written off installments.
@@ -338,6 +520,9 @@ async function main() {
       postalCode: '97227',
       foundedOn: monthsAgo(7),
       statedMonthlyRevenueCents: 900_000,
+      taxIdLast4: '3098',
+      owners: { create: [{ ...dana, ownershipBps: 10_000 }] },
+      createdAt: effectiveAt(addDays(today, -12)),
     },
   });
   const barbersBank = await providers.bankLink.exchangePublicToken(
@@ -361,6 +546,7 @@ async function main() {
       statedMonthlyRevenueCents: 900_000,
       timeInBusinessMonths: 7,
       requestedMonthlyRentCents: 350_000,
+      createdAt: effectiveAt(addDays(today, -12)),
     },
   });
   await underwriteApplication({
@@ -383,6 +569,8 @@ async function main() {
       postalCode: '97214',
       foundedOn: '2022-09-01',
       statedMonthlyRevenueCents: 2_100_000,
+      taxIdLast4: '1175',
+      owners: { create: [{ ...dana, ownershipBps: 10_000 }] },
     },
   });
   const yogaDraft = await db.underwritingApplication.create({
@@ -395,6 +583,35 @@ async function main() {
   });
   await underwriteApplication({ db, providers, applicationId: yogaDraft.id, bankLink: null });
 
+  // The monitoring state the console is seeded to show. Every alert below was opened by the
+  // monitor job during the replay; fail loudly if a severity is missing.
+  const floristPlan = await db.rentPlan.findUniqueOrThrow({
+    where: { id: florist.plan.id },
+    include: { payouts: { where: { status: 'HELD' } } },
+  });
+  if (floristPlan.payouts[0]?.heldReason !== 'LEASE_CHANGE_PENDING') {
+    throw new Error(
+      `Seed expected Alder & Ash to have a payout held by its lease change, got ${floristPlan.payouts[0]?.heldReason ?? 'none held'}`,
+    );
+  }
+  const openAlerts = await db.alert.groupBy({
+    by: ['severity'],
+    where: { status: { not: 'RESOLVED' } },
+    _count: { _all: true },
+  });
+  const bySeverity = Object.fromEntries(openAlerts.map((a) => [a.severity, a._count._all]));
+  for (const severity of ['INFO', 'WARNING', 'HIGH', 'CRITICAL'] as const) {
+    if (!bySeverity[severity]) {
+      throw new Error(`Seed expected at least one open ${severity} alert, found none`);
+    }
+  }
+  const openTypes = await db.alert.findMany({
+    where: { status: { not: 'RESOLVED' } },
+    orderBy: [{ severity: 'desc' }, { type: 'asc' }],
+    select: { severity: true, type: true },
+  });
+  const breaker = await db.circuitBreaker.findUnique({ where: { id: 'new_approvals' } });
+
   const pool = await accountBalance(db, ACCOUNTS.CAPITAL_POOL);
   const fees = await accountBalance(db, ACCOUNTS.FEE_REVENUE);
   const payouts = await db.landlordPayout.count({ where: { status: 'PAID' } });
@@ -403,12 +620,14 @@ async function main() {
   const tb = await trialBalance(db);
   process.stdout.write(
     [
-      `Demo login: ${DEMO_EMAIL} / ${DEMO_PASSWORD}`,
+      `Demo login: ${DEMO_EMAIL} / ${DEMO_PASSWORD} (and ${OPS_EMAIL}, same password)`,
       `Landlord payouts made: ${payouts}, installments collected: ${installments}`,
       `Capital pool: ${usd(pool)}, fee revenue: ${usd(fees)}`,
       `Receivables: ${usd(await receivablesBalance(db))}, allowance: ${usd(await allowanceBalance(db))}`,
       `Charged off: ${usd(summary.chargedOffCents)}, recovered: ${usd(summary.recoveredCents)}, provision expense: ${usd(summary.provisionExpenseCents)}`,
       `Plans by bucket: ${summary.buckets.map((b) => `${b.status} ${b.plans}`).join(', ')}. Held payouts: ${summary.heldPayouts}`,
+      `Open alerts: ${(['CRITICAL', 'HIGH', 'WARNING', 'INFO'] as const).map((s) => `${s} ${bySeverity[s] ?? 0}`).join(', ')}. Circuit breaker: ${breaker?.tripped ? 'TRIPPED' : 'not tripped'}`,
+      ...openTypes.map((a) => `  ${a.severity.padEnd(8)} ${a.type}`),
       `Trial balance: debits ${usd(tb.totalDebitsCents)}, credits ${usd(tb.totalCreditsCents)}, ${tb.balanced ? 'balanced' : 'UNBALANCED'}`,
       '',
     ].join('\n'),

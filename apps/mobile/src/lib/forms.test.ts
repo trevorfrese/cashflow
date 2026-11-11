@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   centsToDollarsInput,
   dollarsToCents,
+  percentToBps,
   formatDate,
   monthsSince,
   normalizeMonthInput,
@@ -59,5 +60,20 @@ describe('dates', () => {
     expect(ordinal(3)).toBe('3rd');
     expect(ordinal(11)).toBe('11th');
     expect(ordinal(22)).toBe('22nd');
+  });
+});
+
+describe('percentToBps', () => {
+  it('turns a whole percentage into basis points', () => {
+    expect(percentToBps('100')).toBe(10_000);
+    expect(percentToBps('25%')).toBe(2500);
+    expect(percentToBps(' 1 ')).toBe(100);
+  });
+
+  it('rejects zero, more than 100, and anything that is not a whole number', () => {
+    expect(percentToBps('0')).toBeNull();
+    expect(percentToBps('101')).toBeNull();
+    expect(percentToBps('12.5')).toBeNull();
+    expect(percentToBps('')).toBeNull();
   });
 });

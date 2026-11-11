@@ -11,8 +11,13 @@ Copy `.env.example` and set at least:
 - `DATABASE_URL`: a Postgres connection string.
 - `JWT_SECRET`: `openssl rand -base64 48`.
 - `CORS_ORIGIN`: the origins your clients run on, or `*` for a demo.
-- `ENABLE_ADMIN=false` on anything public. The admin routes are unauthenticated and let callers
-  run jobs and fund the mock pool.
+- `ENABLE_ADMIN=false` unless you need the operator routes. With `ENABLE_ADMIN=true` the API
+  refuses to start without `ADMIN_API_TOKEN` (and optionally `REVIEWER_API_TOKEN`): generate
+  each with `openssl rand -hex 32`, never reuse the placeholders from `.env.example`, and
+  see "Operator routes" in `README.md`.
+- Rate limiting is on by default and counts per client address in memory. Behind a proxy,
+  make sure the client address reaches the API, and note that several instances each keep
+  their own count.
 
 ## Docker
 

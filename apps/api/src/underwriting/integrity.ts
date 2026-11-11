@@ -44,6 +44,10 @@ export const INTEGRITY_CODES = [
   'DUPLICATE_LANDLORD_ACCOUNT',
   'DUPLICATE_BANK_ACCOUNT',
   'DUPLICATE_BUSINESS_IDENTITY',
+  'IDENTITY_VERIFICATION_FAILED',
+  'IDENTITY_NOT_VERIFIED',
+  'SCREENING_POSSIBLE_MATCH',
+  'SCREENING_MATCH',
 ] as const;
 export type IntegrityCode = (typeof INTEGRITY_CODES)[number];
 
@@ -144,6 +148,26 @@ export const INTEGRITY_RULES: Readonly<
     action: 'REFER',
     why: 'The same legal name at the same address under another user.',
   },
+  IDENTITY_VERIFICATION_FAILED: {
+    severity: 'CRITICAL',
+    action: 'KNOCKOUT',
+    why: 'The identity provider could not find the business or one of its owners. We do not lend to a party we cannot identify. A reviewer who verifies it another way can reconsider the decline.',
+  },
+  IDENTITY_NOT_VERIFIED: {
+    severity: 'MEDIUM',
+    action: 'REFER',
+    why: 'Verification came back needing review, or has not run (a business that predates it, a missing tax id or owner). A mismatch is usually a typo or a recent move, so a person looks rather than the engine declining.',
+  },
+  SCREENING_POSSIBLE_MATCH: {
+    severity: 'HIGH',
+    action: 'REFER',
+    why: 'A name resembles a sanctions or watchlist entry. Most are false positives on common names; none may be approved until a reviewer has cleared it.',
+  },
+  SCREENING_MATCH: {
+    severity: 'CRITICAL',
+    action: 'REFER',
+    why: 'A name matches a sanctions or watchlist entry. The application is blocked in review and cannot be approved while the hit is open. It is not declined automatically, because the decline reason would tell the applicant what was found.',
+  },
 };
 
 export interface IntegrityFlag {
@@ -171,6 +195,25 @@ export interface IntegrityContext {
   otherBusinessesWithSameIdentity?: number;
   /** A reviewer has verified the lease, which lifts the observed rent cap and its flags. */
   leaseVerified?: boolean;
+  /**
+   * Identity verification and sanctions screening, as the service gathered them from the
+   * identity provider's stored results. Absent means not checked.
+   */
+  identity?: IdentityFacts;
+}
+
+export interface IdentityFacts {
+  /** The worst verification status across the business and its beneficial owners. */
+  verification: 'VERIFIED' | 'REVIEW' | 'FAILED' | 'UNVERIFIED';
+  /** Provider reason codes behind anything that is not VERIFIED. */
+  verificationReasons: string[];
+  /**
+   * The worst open screening result across the business, its owners, and its landlords. A
+   * hit that a reviewer has cleared counts as CLEAR.
+   */
+  screening: 'CLEAR' | 'POSSIBLE_MATCH' | 'MATCH';
+  /** How many parties have an open hit. */
+  openHits: number;
 }
 
 export interface IntegrityInput {
@@ -560,6 +603,38 @@ export function checkContext(context: IntegrityContext | null | undefined): Inte
         { otherBusinesses: identity },
       ),
     );
+  }
+  const facts = context.identity;
+  if (facts) {
+    const reasons = facts.verificationReasons.join(', ') || 'no reason given';
+    if (facts.verification === 'FAILED') {
+      flags.push(
+        flag(
+          'IDENTITY_VERIFICATION_FAILED',
+          `Identity verification failed for the business or an owner: ${reasons}.`,
+          {},
+        ),
+      );
+    } else if (facts.verification !== 'VERIFIED') {
+      flags.push(
+        flag(
+          'IDENTITY_NOT_VERIFIED',
+          facts.verification === 'REVIEW'
+            ? `Identity verification needs review: ${reasons}.`
+            : `The business has not been through identity verification: ${reasons}.`,
+          {},
+        ),
+      );
+    }
+    if (facts.screening !== 'CLEAR') {
+      flags.push(
+        flag(
+          facts.screening === 'MATCH' ? 'SCREENING_MATCH' : 'SCREENING_POSSIBLE_MATCH',
+          `${facts.openHits} part${facts.openHits === 1 ? 'y has' : 'ies have'} an open sanctions or watchlist hit. Clear or confirm it in the screening queue before deciding.`,
+          { openHits: facts.openHits },
+        ),
+      );
+    }
   }
   return flags;
 }

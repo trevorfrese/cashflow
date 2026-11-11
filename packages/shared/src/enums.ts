@@ -82,6 +82,10 @@ export const PayoutHoldReason = z.enum([
   'PLAN_CLOSED',
   /** Not held by anything, but not paid within the release window (no capital, provider down). */
   'NOT_PAID_IN_TIME',
+  /** A change to the landlord's details on the lease is inside its waiting period. */
+  'LEASE_CHANGE_PENDING',
+  /** The lease's rent went up past the approved amount and a new decision is needed. */
+  'RENT_INCREASE_PENDING',
 ]);
 export type PayoutHoldReason = z.infer<typeof PayoutHoldReason>;
 
@@ -93,3 +97,30 @@ export type LedgerDirection = z.infer<typeof LedgerDirection>;
 
 export const ProviderName = z.enum(['mock', 'plaid', 'stripe']);
 export type ProviderName = z.infer<typeof ProviderName>;
+
+/** Where identity verification of a business or an owner stands. Operator facing. */
+export const VerificationStatus = z.enum(['UNVERIFIED', 'VERIFIED', 'REVIEW', 'FAILED']);
+export type VerificationStatus = z.infer<typeof VerificationStatus>;
+
+/** Result of screening a name against sanctions and watchlists. Operator facing. */
+export const ScreeningOutcome = z.enum(['CLEAR', 'POSSIBLE_MATCH', 'MATCH']);
+export type ScreeningOutcome = z.infer<typeof ScreeningOutcome>;
+
+export const ScreeningPartyType = z.enum(['BUSINESS', 'OWNER', 'LANDLORD']);
+export type ScreeningPartyType = z.infer<typeof ScreeningPartyType>;
+
+export const LeaseChangeStatus = z.enum(['PENDING', 'APPLIED', 'CANCELLED', 'REJECTED']);
+export type LeaseChangeStatus = z.infer<typeof LeaseChangeStatus>;
+
+export const AlertSeverity = z.enum(['INFO', 'WARNING', 'HIGH', 'CRITICAL']);
+export type AlertSeverity = z.infer<typeof AlertSeverity>;
+
+export const AlertStatus = z.enum(['OPEN', 'ACKNOWLEDGED', 'RESOLVED']);
+export type AlertStatus = z.infer<typeof AlertStatus>;
+
+export const AlertCategory = z.enum(['FRAUD', 'PAYMENTS', 'PORTFOLIO', 'BOOKS', 'COMPLIANCE']);
+export type AlertCategory = z.infer<typeof AlertCategory>;
+
+/** Who is calling an operator route. `admin` can do everything a `reviewer` can. */
+export const AdminRole = z.enum(['reviewer', 'admin']);
+export type AdminRole = z.infer<typeof AdminRole>;

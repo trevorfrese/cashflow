@@ -179,6 +179,10 @@ the numbers in front of the scorecard can be trusted. Each is a pure function in
 | `DUPLICATE_LANDLORD_ACCOUNT`        | Another user's business pays the same landlord account                                                | Inform     |
 | `DUPLICATE_BANK_ACCOUNT`            | Another user's business linked the same bank account                                                  | Refer      |
 | `DUPLICATE_BUSINESS_IDENTITY`       | Another user has a business with the same legal name and address                                      | Refer      |
+| `IDENTITY_VERIFICATION_FAILED`      | The identity provider could not find the business or one of its owners                                | Knockout   |
+| `IDENTITY_NOT_VERIFIED`             | Verification needs review, or has not run (no tax id, no owner, a business that predates it)          | Refer      |
+| `SCREENING_POSSIBLE_MATCH`          | The business, an owner, or a landlord has an open possible sanctions or watchlist match               | Refer      |
+| `SCREENING_MATCH`                   | The same, with a match                                                                                | Refer      |
 
 - **Knockout** declines, with a reason the applicant can read.
 - **Needs info** asks the applicant for something specific.
@@ -195,9 +199,19 @@ amount.
 Credits matched as round trips are left out of revenue whether or not the pattern is strong
 enough to flag, so padded deposits cannot buy a larger limit.
 
-The last four flags need the database. The service looks the facts up and passes them to the
-engine as `integrityContext`. The landlord check also runs when a plan is opened, because the
-lease is usually linked after the decision.
+The duplicate and landlord flags need the database. The service looks the facts up and passes
+them to the engine as `integrityContext`. The landlord check also runs when a plan is opened,
+because the lease is usually linked after the decision.
+
+The identity and screening flags come the same way. On every submission the service runs the
+business and its owners through the `IdentityProvider` again, stores the result, and hands the
+engine the stored verification status and the worst open screening hit
+(`integrityContext.identity`). The engine never calls the provider. A business that is not
+`VERIFIED` is never approved automatically. A failed verification declines, with a reason the
+applicant can act on. A screening match does not decline: it is held in review, cannot be
+approved while the hit is open, and only an admin can clear it. Declining on it would put what
+was found into the decline reason. The applicant is told the application is in review and
+nothing else.
 
 Flags, their details, and the referral triggers are internal. They appear in the decision
 snapshot and the operator review queue, never in what the applicant sees.
@@ -375,6 +389,9 @@ An application that would otherwise be approved is referred instead when any of 
 - a score fewer than 5 points above the cutoff (50 to 54)
 - a limit above $10,000 a month, which only a business past the first rung of the ladder can
   reach
+- the circuit breaker is tripped (trigger `CIRCUIT_BREAKER`): a monitoring rule found the book
+  outside what the policy was evaluated for, so every new approval gets a person until an
+  admin resets it. See "Monitoring" in `ARCHITECTURE.md`
 
 Counter offers on a first plan are **not** referred. They are a third of funded plans (28%
 bound by capacity, 5% by the ladder), so referring them all would put one applicant in five
@@ -396,9 +413,13 @@ Each review is an `ApplicationReview` row and produces a new current decision of
 `REVIEW`; the engine's decision stays in the history. A review whose outcome or terms differ
 from the engine's recommendation is an **override**: it needs at least one reason code, is
 marked on the review and the decision, and writes its own audit event. A reviewer's limit may
-not exceed the rent requested, and the fee must be inside the cap. The admin routes are not
-authenticated yet (Phase R4), so the reviewer's identity comes from the request body and is
-recorded as given.
+not exceed the rent requested, and the fee must be inside the cap. The reviewer is the person
+named in the `X-Admin-Actor` header of the authenticated request, never a field in the body.
+
+An approval is refused while the business has an open screening hit (clear it in the screening
+queue first), and for a business that is not verified unless the review carries the
+`IDENTITY_VERIFIED` reason code, which records that the reviewer verified it another way and
+marks the business verified.
 
 ## Periodic re-underwriting
 

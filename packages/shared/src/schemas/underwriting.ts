@@ -87,11 +87,11 @@ export const ReviewReasonCode = z.enum([
 ]);
 export type ReviewReasonCode = z.infer<typeof ReviewReasonCode>;
 
+/**
+ * A reviewer's decision. Who reviewed is not in the body: it is the person named in the
+ * `X-Admin-Actor` header of the authenticated request.
+ */
 export const RecordReviewRequest = z.object({
-  /**
-   * Who reviewed. A free text identity until admin authentication exists, recorded as given.
-   */
-  reviewer: z.string().min(1).max(200),
   decision: ReviewDecision,
   reasonCodes: z.array(ReviewReasonCode).max(10).default([]),
   /** Internal notes. Never shown to the applicant. */

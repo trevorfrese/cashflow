@@ -12,6 +12,17 @@ export function dollarsToCents(input: string): number | null {
   return Number.isSafeInteger(cents) ? cents : null;
 }
 
+/**
+ * Parse a whole percentage typed by a person ("100", "25%") into basis points, which is how
+ * the API takes an ownership share. Returns null unless it is from 1 to 100.
+ */
+export function percentToBps(input: string): number | null {
+  const cleaned = input.replace(/[%\s]/g, '');
+  if (!/^\d{1,3}$/.test(cleaned)) return null;
+  const percent = Number(cleaned);
+  return percent >= 1 && percent <= 100 ? percent * 100 : null;
+}
+
 /** Format cents back into an editable dollars string with no symbol. */
 export function centsToDollarsInput(cents: number): string {
   const dollars = Math.floor(cents / 100);

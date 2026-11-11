@@ -80,6 +80,11 @@ export interface EngineInput {
    * whose revenue has collapsed must be scored, not asked to explain the gap.
    */
   periodicReview?: boolean;
+  /**
+   * Portfolio controls in force, looked up by the service. `approvalsPaused` is the circuit
+   * breaker: an application the engine would approve is referred to a reviewer instead.
+   */
+  controls?: { approvalsPaused?: boolean } | null;
 }
 
 /**
@@ -403,6 +408,13 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
           'The landlord payout account on your lease matches a bank account linked to your business. Rent has to be paid to the landlord.',
         ),
       );
+    } else if (f.code === 'IDENTITY_VERIFICATION_FAILED') {
+      knockouts.push(
+        reason(
+          'IDENTITY_NOT_VERIFIED',
+          'We could not verify the business details you gave us. Check the legal name, address, tax id and owners on your profile, or contact support and we will help you finish verification.',
+        ),
+      );
     } else {
       knockouts.push(reason('INTEGRITY_CHECK_FAILED', 'We could not verify this application.'));
     }
@@ -653,6 +665,7 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
     limitCents,
     requestedCents: requested,
     firstPlan: exposureContext.onTimePeriods === 0 && exposureContext.businessCommittedCents === 0,
+    approvalsPaused: input.controls?.approvalsPaused ?? false,
   });
   if (triggers.length > 0) {
     snapshot.referTriggers = triggers;
@@ -675,6 +688,8 @@ export interface ReferInput {
   requestedCents: number;
   /** No plan yet and no on time history. */
   firstPlan: boolean;
+  /** The circuit breaker on automatic approvals is tripped. */
+  approvalsPaused?: boolean;
 }
 
 /**
@@ -683,6 +698,10 @@ export interface ReferInput {
  * decision snapshot and shown in the review queue, never to the applicant.
  */
 export function referTriggers(policy: CreditPolicy, input: ReferInput): string[] {
+  return withControls(escalationTriggers(policy, input), input);
+}
+
+function escalationTriggers(policy: CreditPolicy, input: ReferInput): string[] {
   const triggers = flagsWithAction(input.flags, 'REFER').map((f) => `INTEGRITY:${f.code}`);
   const rules = policy.escalation;
   if (!rules) return triggers;
@@ -696,5 +715,14 @@ export function referTriggers(policy: CreditPolicy, input: ReferInput): string[]
   ) {
     triggers.push('COUNTER_OFFER_FIRST_PLAN');
   }
+  return triggers;
+}
+
+/** Trigger recorded when the circuit breaker, not the application, caused the referral. */
+export const CIRCUIT_BREAKER_TRIGGER = 'CIRCUIT_BREAKER';
+
+function withControls(triggers: string[], input: ReferInput): string[] {
+  // Independent of the escalation rules: a tripped breaker refers under any policy version.
+  if (input.approvalsPaused) triggers.push(CIRCUIT_BREAKER_TRIGGER);
   return triggers;
 }

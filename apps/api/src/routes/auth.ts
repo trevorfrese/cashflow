@@ -11,6 +11,12 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
+import {
+  assertNotLocked,
+  lockedError,
+  recordFailedLogin,
+  recordSuccessfulLogin,
+} from '../auth/lockout.ts';
 import { hashPassword, verifyPassword } from '../auth/password.ts';
 import { consumeRefreshToken, hashRefreshToken, issueRefreshToken } from '../auth/tokens.ts';
 import { conflict, unauthorized } from '../errors.ts';
@@ -26,9 +32,19 @@ export async function authRoutes(app: FastifyInstance) {
     return { accessToken, refreshToken, expiresIn: config.ACCESS_TOKEN_TTL_SECONDS };
   };
 
+  // Register, login and refresh are counted on their own, tighter than the global limit:
+  // they are the routes a password or token guessing attack goes through.
+  const authLimit = {
+    rateLimit: {
+      max: config.RATE_LIMIT_AUTH_MAX,
+      timeWindow: config.RATE_LIMIT_WINDOW_SECONDS * 1000,
+    },
+  };
+
   r.post(
     '/auth/register',
     {
+      config: authLimit,
       schema: {
         tags: ['auth'],
         body: RegisterRequest,
@@ -52,18 +68,28 @@ export async function authRoutes(app: FastifyInstance) {
   r.post(
     '/auth/login',
     {
+      config: authLimit,
       schema: {
         tags: ['auth'],
         body: LoginRequest,
-        response: { 200: AuthResponse, 401: ApiError },
+        response: { 200: AuthResponse, 401: ApiError, 429: ApiError },
       },
     },
     async (request) => {
       const user = await db.user.findUnique({ where: { email: request.body.email } });
       // Same error for unknown email and bad password so the endpoint does not leak which emails exist.
-      if (!user || !(await verifyPassword(request.body.password, user.passwordHash))) {
+      if (!user) {
+        // Spend the same time as a real check so a missing account is not faster.
+        await hashPassword(request.body.password);
         throw unauthorized('Incorrect email or password');
       }
+      assertNotLocked(user);
+      if (!(await verifyPassword(request.body.password, user.passwordHash))) {
+        const lockedUntil = await recordFailedLogin(db, user, config);
+        if (lockedUntil) throw lockedError(lockedUntil);
+        throw unauthorized('Incorrect email or password');
+      }
+      await recordSuccessfulLogin(db, user);
       return { user: toUser(user), tokens: await tokensFor(user) };
     },
   );
@@ -71,6 +97,7 @@ export async function authRoutes(app: FastifyInstance) {
   r.post(
     '/auth/refresh',
     {
+      config: authLimit,
       schema: {
         tags: ['auth'],
         body: RefreshRequest,

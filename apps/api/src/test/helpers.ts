@@ -40,7 +40,8 @@ export async function resetDb(db: Db): Promise<void> {
       "LedgerEntry", "LedgerTransaction", "LedgerAccount",
       "Repayment", "Installment", "LandlordPayout", "RentPlan",
       "Lease", "UnderwritingDecision", "ApplicationReview", "UnderwritingApplication",
-      "BankLink", "CommerceLink", "Business", "RefreshToken", "User", "JobRun", "AuditEvent"
+      "BankLink", "CommerceLink", "BeneficialOwner", "ScreeningResult", "LeaseChange",
+      "Business", "RefreshToken", "User", "JobRun", "AuditEvent", "Alert", "CircuitBreaker"
     RESTART IDENTITY CASCADE
   `);
   await ensureSystemAccounts(db);
@@ -53,7 +54,11 @@ export interface Session {
 }
 
 /** Thin wrapper over app.inject that sends JSON and parses JSON. */
-export function client(app: FastifyInstance, session?: Session) {
+export function client(
+  app: FastifyInstance,
+  session?: Session,
+  extraHeaders: Record<string, string> = {},
+) {
   const call = async <T = unknown>(
     method: InjectOptions['method'],
     url: string,
@@ -66,6 +71,7 @@ export function client(app: FastifyInstance, session?: Session) {
       headers: {
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
         ...(session ? { authorization: `Bearer ${session.accessToken}` } : {}),
+        ...extraHeaders,
       },
     });
     const text = res.body;
@@ -78,9 +84,30 @@ export function client(app: FastifyInstance, session?: Session) {
   };
 }
 
+/** The person the suites act as on operator routes, unless a test names another. */
+export const TEST_ACTOR = 'test-operator@cashflow.example';
+
+/**
+ * A client for the operator routes: the bearer token for the role and the X-Admin-Actor
+ * header naming who is acting. The tokens are set in `setup-env.ts`.
+ */
+export function adminClient(
+  app: FastifyInstance,
+  options: { role?: 'admin' | 'reviewer'; actor?: string } = {},
+) {
+  const token =
+    (options.role ?? 'admin') === 'admin'
+      ? process.env.ADMIN_API_TOKEN
+      : process.env.REVIEWER_API_TOKEN;
+  return client(app, undefined, {
+    authorization: `Bearer ${token}`,
+    'x-admin-actor': options.actor ?? TEST_ACTOR,
+  });
+}
+
 /** Add capital to the pool through the operator route. */
 export async function fundPool(app: FastifyInstance, amountCents: number): Promise<void> {
-  const res = await client(app).post('/v1/admin/capital/fund', {
+  const res = await adminClient(app).post('/v1/admin/capital/fund', {
     amountCents,
     description: 'test funding',
   });
@@ -118,6 +145,8 @@ export const demoBusiness = {
   address: { line1: '412 Pine St', city: 'Portland', state: 'OR', postalCode: '97204' },
   foundedOn: '2021-03-01',
   statedMonthlyRevenueCents: 4_800_000,
+  taxIdLast4: '4821',
+  owners: [{ fullName: 'Dana Rivera', title: 'Owner', ownershipBps: 10_000 }],
 };
 
 export const demoLease = (businessId: string, overrides: Record<string, unknown> = {}) => ({
@@ -137,13 +166,24 @@ export const demoLease = (businessId: string, overrides: Record<string, unknown>
   ...overrides,
 });
 
-/** Walks a fresh user through approval and returns ids needed to build a plan. */
-export async function approvedBusiness(app: FastifyInstance, session: Session) {
+/**
+ * Walks a fresh user through approval and returns ids needed to build a plan. Pass a
+ * different `bankToken` for a second business in one test: the same token is the same bank
+ * account, which the integrity checks refer.
+ */
+export async function approvedBusiness(
+  app: FastifyInstance,
+  session: Session,
+  options: { bankToken?: string; business?: Record<string, unknown> } = {},
+) {
   const api = client(app, session);
-  const business = await api.post<{ id: string }>('/v1/businesses', demoBusiness);
+  const business = await api.post<{ id: string }>('/v1/businesses', {
+    ...demoBusiness,
+    ...options.business,
+  });
   const bankLink = await api.post<{ id: string }>('/v1/bank-links', {
     businessId: business.body.id,
-    publicToken: 'mock_healthy_rev_48000_rent_6200',
+    publicToken: options.bankToken ?? 'mock_healthy_rev_48000_rent_6200',
   });
   const application = await api.post<{ id: string }>('/v1/underwriting/applications', {
     businessId: business.body.id,
@@ -165,4 +205,35 @@ export async function approvedBusiness(app: FastifyInstance, session: Session) {
     applicationId: application.body.id,
     decision: submitted.body.decision,
   };
+}
+
+/**
+ * A rent due day that falls today or within the next three days, and the date it falls on.
+ * Days after the 28th are skipped so the same day exists in every month.
+ */
+export function soonDue(today: string = new Date().toISOString().slice(0, 10)): {
+  dueDay: number;
+  date: string;
+} {
+  for (let i = 0; i < 4; i++) {
+    const date = new Date(`${today}T00:00:00.000Z`);
+    date.setUTCDate(date.getUTCDate() + i);
+    if (date.getUTCDate() <= 28) {
+      return { dueDay: date.getUTCDate(), date: date.toISOString().slice(0, 10) };
+    }
+  }
+  throw new Error('unreachable: four consecutive days always include one on or before the 28th');
+}
+
+/** Run jobs through the operator route: all of them, or one by name. */
+export async function runJobsAsOf(app: FastifyInstance, asOf: string, only?: string) {
+  const res = await adminClient(app).post<Record<string, { ok: boolean; error?: string }>>(
+    '/v1/admin/jobs/run',
+    { asOf, ...(only ? { only } : {}) },
+  );
+  if (res.status !== 200) throw new Error(`jobs failed: ${res.status} ${JSON.stringify(res.body)}`);
+  for (const [name, job] of Object.entries(res.body)) {
+    if (name !== 'asOf' && !job.ok) throw new Error(`job ${name} failed on ${asOf}: ${job.error}`);
+  }
+  return res.body;
 }

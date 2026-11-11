@@ -29,6 +29,11 @@ export const LandlordPayout = z.object({
   failureReason: z.string().nullable(),
   /** Why the payout is held, or was when it was cancelled. Null when it was never held. */
   heldReason: PayoutHoldReason.nullable(),
+  /**
+   * Why the payout is held, in plain words for the owner. Null when it is not held. It never
+   * says more than the owner needs: a hold for a review says the account is under review.
+   */
+  heldMessage: z.string().nullable(),
   heldAt: IsoDateTimeSchema.nullable(),
   /**
    * Last calendar date on which a held payout can still be released and paid. After it the
@@ -178,8 +183,8 @@ export const DelinquencySummary = z.object({
 });
 export type DelinquencySummary = z.infer<typeof DelinquencySummary>;
 
+/** The reviewer is the person named in the `X-Admin-Actor` header, not a body field. */
 export const ReleaseFreezeRequest = z.object({
-  reviewer: z.string().min(1).max(120),
   reason: z.string().min(1).max(500),
 });
 export type ReleaseFreezeRequest = z.infer<typeof ReleaseFreezeRequest>;

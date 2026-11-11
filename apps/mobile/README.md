@@ -23,7 +23,8 @@ Copy `.env.example` to `.env` if the API is not on `http://localhost:4000`. On a
 device use your computer's LAN address; on the Android emulator use `http://10.0.2.2:4000`.
 
 Sign in with the demo account (`demo@cashflow.local` / `demo-password-123`) or tap
-"Use the demo account". It owns three businesses that show the three underwriting outcomes.
+"Use the demo account". It owns five businesses that show the underwriting outcomes and a
+plan that is current, one that is delinquent, and one that was charged off.
 
 ## Layout
 
@@ -32,7 +33,7 @@ app/                 Expo Router routes
   (auth)/            sign-in, register
   (tabs)/            home, history, settings
   settings/          rent (cadence, pause), businesses, bank accounts
-  business/new       business profile
+  business/new       business profile, tax id last 4, one owner
   bank/connect       sandbox bank picker (Plaid Link in production)
   application/new    underwriting application
   application/[id]   decision: score, grade, terms, reasons, cash flow summary
@@ -54,6 +55,23 @@ The bank connect screen lets you pick the account history the fake bank returns 
 underwriting outcome can be demoed: healthy, growing, seasonal, thin margins, existing
 debt, volatile, low balance, overdrafts, declining, new business. See
 `apps/api/UNDERWRITING.md` for what each one does to the decision.
+
+## Sandbox identity keywords
+
+The business profile asks for the last four digits of the tax id and one owner (name, title,
+ownership share). The full tax id, a date of birth, or an id number is never asked for. The
+API verifies and screens them against a sandbox identity provider that passes everything
+unless a name carries a keyword:
+
+- Tax id last 4 of `0000`, or `mismatch` in the business or owner name: the application goes
+  to review instead of being approved.
+- `unverifiable` in the business or owner name: the application is declined, with a message
+  to check the details or contact support.
+- `watchlist` or `sanctioned` in the business, owner, or landlord name: the application goes
+  to review, and a running plan has its rent payments held.
+
+The app is told only that the account is under review (`Business.verification`,
+`LandlordPayout.heldMessage`), never why. The full table is in `apps/api/README.md`.
 
 ## Tests
 

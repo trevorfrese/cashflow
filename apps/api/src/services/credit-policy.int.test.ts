@@ -19,6 +19,7 @@ import {
   resetDb,
   type Session,
   type TestHarness,
+  adminClient,
 } from '../test/helpers.ts';
 import { POLICY_VERSION } from '../underwriting/policy.ts';
 import { CURRENT_DECISION, decisionHistory } from './decisions.ts';
@@ -106,7 +107,8 @@ async function referred() {
   return second;
 }
 
-const admin = () => client(h.app);
+/** Operator routes as a reviewer. Who is reviewing travels in the X-Admin-Actor header. */
+const admin = (actor = 'pat@cashflow.example') => adminClient(h.app, { role: 'reviewer', actor });
 const auditTypes = async (subjectType: string, subjectId: string) => {
   const res = await admin().get<Array<{ eventType: string }>>(
     `/v1/admin/audit-events?subjectType=${subjectType}&subjectId=${subjectId}`,
@@ -262,14 +264,12 @@ describe('manual review', () => {
       review: { isOverride: boolean; reviewer: string; decision: string };
       application: ApplicationBody;
     }>(`/v1/admin/applications/${application.id}/review`, {
-      reviewer: 'pat@cashflow.example',
       decision: 'APPROVE',
       notes: 'Called both owners. Shared premises, separate businesses.',
     });
     expect(res.status).toBe(200);
     expect(res.body.review).toMatchObject({
       isOverride: false,
-      reviewer: 'pat@cashflow.example',
       decision: 'APPROVE',
     });
     expect(res.body.application.status).toBe('APPROVED');
@@ -306,7 +306,6 @@ describe('manual review', () => {
     const { application } = await referred();
     const url = `/v1/admin/applications/${application.id}/review`;
     const bare = await admin().post<{ error: { code: string } }>(url, {
-      reviewer: 'pat@cashflow.example',
       decision: 'DECLINE',
     });
     expect(bare.status).toBe(422);
@@ -318,7 +317,6 @@ describe('manual review', () => {
       review: { isOverride: boolean; reasonCodes: string[] };
       application: ApplicationBody;
     }>(url, {
-      reviewer: 'pat@cashflow.example',
       decision: 'DECLINE',
       reasonCodes: ['FRAUD_SUSPECTED', 'DOCUMENTS_NOT_PROVIDED'],
     });
@@ -348,22 +346,18 @@ describe('manual review', () => {
   it('treats different terms as an override, and keeps them inside the request and the fee cap', async () => {
     const { application } = await referred();
     const url = `/v1/admin/applications/${application.id}/review`;
-    const reviewer = 'pat@cashflow.example';
     const noCodes = await admin().post<{ error: { code: string } }>(url, {
-      reviewer,
       decision: 'APPROVE',
       approvedMonthlyLimitCents: 400_000,
     });
     expect(noCodes.body.error.code).toBe('REASON_CODES_REQUIRED');
     const tooMuch = await admin().post<{ error: { code: string } }>(url, {
-      reviewer,
       decision: 'APPROVE',
       approvedMonthlyLimitCents: RENT + 1,
       reasonCodes: ['EXPOSURE_ADJUSTED'],
     });
     expect(tooMuch.body.error.code).toBe('LIMIT_OUT_OF_RANGE');
     const tooDear = await admin().post<{ error: { code: string } }>(url, {
-      reviewer,
       decision: 'APPROVE',
       feeBps: 900,
       reasonCodes: ['PRICING_ADJUSTED'],
@@ -374,7 +368,6 @@ describe('manual review', () => {
       review: { isOverride: boolean };
       application: ApplicationBody;
     }>(url, {
-      reviewer,
       decision: 'APPROVE',
       approvedMonthlyLimitCents: 400_000,
       feeBps: 250,
@@ -392,13 +385,11 @@ describe('manual review', () => {
     const { api, application } = await referred();
     const url = `/v1/admin/applications/${application.id}/review`;
     const missing = await admin().post<{ error: { code: string } }>(url, {
-      reviewer: 'pat@cashflow.example',
       decision: 'REQUEST_INFO',
       reasonCodes: ['DOCUMENTS_NOT_PROVIDED'],
     });
     expect(missing.body.error.code).toBe('APPLICANT_MESSAGE_REQUIRED');
     const res = await admin().post<{ application: ApplicationBody }>(url, {
-      reviewer: 'pat@cashflow.example',
       decision: 'REQUEST_INFO',
       reasonCodes: ['DOCUMENTS_NOT_PROVIDED'],
       notes: 'internal: same account as another applicant',
@@ -427,17 +418,15 @@ describe('manual review', () => {
     });
     expect(application.status).toBe('DECLINED');
     const url = `/v1/admin/applications/${application.id}/review`;
-    const noTerms = await admin().post<{ error: { code: string } }>(url, {
-      reviewer: 'lee@cashflow.example',
+    const noTerms = await admin('lee@cashflow.example').post<{ error: { code: string } }>(url, {
       decision: 'APPROVE',
       reasonCodes: ['COMPENSATING_FACTORS'],
     });
     expect(noTerms.body.error.code).toBe('TERMS_REQUIRED');
-    const ok = await admin().post<{
+    const ok = await admin('lee@cashflow.example').post<{
       review: { isOverride: boolean };
       application: ApplicationBody;
     }>(url, {
-      reviewer: 'lee@cashflow.example',
       decision: 'APPROVE',
       approvedMonthlyLimitCents: 200_000,
       feeBps: 300,
@@ -447,8 +436,7 @@ describe('manual review', () => {
     expect(ok.body.review.isOverride).toBe(true);
     expect(ok.body.application).toMatchObject({ status: 'APPROVED' });
     // An approved application is no longer reviewable.
-    const closed = await admin().post<{ error: { code: string } }>(url, {
-      reviewer: 'lee@cashflow.example',
+    const closed = await admin('lee@cashflow.example').post<{ error: { code: string } }>(url, {
       decision: 'DECLINE',
       reasonCodes: ['OTHER'],
     });

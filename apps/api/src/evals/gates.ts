@@ -50,6 +50,16 @@ export const GATE_THRESHOLDS = {
    * must not pass the fraud gate by handing its hard cases to a queue.
    */
   maxReferRateBps: 500,
+  /**
+   * Honest applicants the data veracity checks knocked out or referred: at most 3%. The
+   * checks must not pass the fraud gate by flagging everyone. The number is the refer
+   * ceiling's headroom: the policy before the checks referred 1.7% of applicants against a
+   * 5% ceiling, which leaves 3.3 points, and the checks get no more than 3 of them, for
+   * referrals and knockouts together, so that the ceiling still binds on everything else.
+   * Set before the first measurement. Requests for information (connect the payout account)
+   * are not counted here; they are reported beside it and the approval floor bounds them.
+   */
+  maxVeracityAdverseHonestBps: 300,
 } as const;
 
 export interface GateResult {
@@ -235,6 +245,14 @@ export function evaluateGates(runs: {
       '<=',
       t.maxReferRateBps,
       'bps of applicants',
+    ),
+    gate(
+      'veracity_honest_adverse',
+      'At most 3% of honest applicants knocked out or referred by a data veracity finding (base)',
+      base.map((m) => (m.veracity.honest.applicants > 0 ? m.veracity.honest.adverseRateBps : null)),
+      '<=',
+      t.maxVeracityAdverseHonestBps,
+      'bps of honest applicants',
     ),
   ];
 }

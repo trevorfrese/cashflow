@@ -1,6 +1,11 @@
 import {
   BankLink,
   Business,
+  Connection,
+  ConnectionList,
+  MockAuthorizeResponse,
+  SeatInvitation,
+  StartOAuthResponse,
   Installment,
   LandlordPayout,
   Lease,
@@ -10,6 +15,7 @@ import {
   UnderwritingApplication,
 } from '@cashflow/shared';
 import type {
+  CommercePlatform,
   CreateApplicationRequest,
   CreateBankLinkRequest,
   CreateBusinessRequest,
@@ -22,11 +28,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 
 import { api } from './api';
+import { redirectParams } from './connections';
 
 /** Query keys in one place so invalidation stays consistent. */
 export const keys = {
   businesses: ['businesses'] as const,
   bankLinks: (businessId: string) => ['businesses', businessId, 'bank-links'] as const,
+  connections: (businessId: string) => ['businesses', businessId, 'connections'] as const,
   applications: (businessId: string) => ['businesses', businessId, 'applications'] as const,
   leases: (businessId: string) => ['businesses', businessId, 'leases'] as const,
   rentPlans: (businessId: string) => ['businesses', businessId, 'rent-plans'] as const,
@@ -73,7 +81,10 @@ export function useCreateBankLink() {
       });
       return api('/bank-links', { method: 'POST', body, schema: BankLink });
     },
-    onSuccess: (link) => qc.invalidateQueries({ queryKey: keys.bankLinks(link.businessId) }),
+    onSuccess: (link) => {
+      void qc.invalidateQueries({ queryKey: keys.bankLinks(link.businessId) });
+      void qc.invalidateQueries({ queryKey: keys.connections(link.businessId) });
+    },
   });
 }
 
@@ -224,4 +235,86 @@ export function useApplication(applicationId: string | undefined, businessId: st
     ...list,
     data: list.data?.find((a) => a.id === applicationId),
   };
+}
+
+// ---------- Data connections ----------
+
+export function useConnections(businessId: string | undefined) {
+  return useQuery({
+    queryKey: keys.connections(businessId ?? ''),
+    queryFn: () => api(`/businesses/${businessId}/connections`, { schema: ConnectionList }),
+    enabled: Boolean(businessId),
+  });
+}
+
+/** Where to send the owner to approve read-only access on the platform's own site. */
+export function useStartOAuth() {
+  return useMutation({
+    mutationFn: (body: { businessId: string; platform: CommercePlatform; redirectUri?: string }) =>
+      api('/connections/oauth/start', { method: 'POST', body, schema: StartOAuthResponse }),
+  });
+}
+
+/**
+ * The sandbox stand-in for the platform's consent page, then the redirect back: exactly the
+ * two requests a real round trip makes, without a browser.
+ */
+export function useApproveSandboxOAuth() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { state: string; scenario: string; approve: boolean }) => {
+      const page = await api('/connections/oauth/mock-authorize', {
+        method: 'POST',
+        body: input,
+        schema: MockAuthorizeResponse,
+      });
+      const redirect = redirectParams(page.redirectUrl);
+      return api('/connections/oauth/callback', {
+        method: 'POST',
+        body: {
+          state: redirect.state ?? input.state,
+          ...(redirect.code ? { code: redirect.code } : {}),
+          ...(redirect.error ? { error: redirect.error } : {}),
+        },
+        schema: Connection,
+      });
+    },
+    onSuccess: (c) => {
+      void qc.invalidateQueries({ queryKey: keys.connections(c.businessId) });
+    },
+  });
+}
+
+export function useCreateSeatInvitation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { businessId: string; platform: CommercePlatform; scenario?: string }) =>
+      api('/connections/seats', { method: 'POST', body, schema: SeatInvitation }),
+    onSuccess: (s) => {
+      void qc.invalidateQueries({ queryKey: keys.connections(s.connection.businessId) });
+    },
+  });
+}
+
+export function useVerifySeat() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (connectionId: string) =>
+      api(`/connections/${connectionId}/verify-seat`, { method: 'POST', schema: Connection }),
+    onSuccess: (c) => {
+      void qc.invalidateQueries({ queryKey: keys.connections(c.businessId) });
+    },
+  });
+}
+
+export function useDisconnect() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (connectionId: string) =>
+      api(`/connections/${connectionId}/disconnect`, { method: 'POST', schema: Connection }),
+    onSuccess: (c) => {
+      void qc.invalidateQueries({ queryKey: keys.connections(c.businessId) });
+      void qc.invalidateQueries({ queryKey: keys.bankLinks(c.businessId) });
+    },
+  });
 }

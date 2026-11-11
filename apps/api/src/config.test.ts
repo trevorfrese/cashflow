@@ -36,3 +36,26 @@ describe('ENABLE_DEV_TOOLS', () => {
     expect(loadConfig({ ...base, NODE_ENV: 'production' }).ENABLE_DEV_TOOLS).toBe(false);
   });
 });
+
+describe('CONNECTION_TOKEN_KEY', () => {
+  it('is not needed while every data provider is a mock', () => {
+    expect(loadConfig(base).CONNECTION_TOKEN_KEY).toBeUndefined();
+  });
+
+  it('is required by any real data adapter', () => {
+    for (const env of [
+      { COMMERCE_PROVIDER: 'square' },
+      { DELEGATED_SEAT_PROVIDER: 'toast' },
+      { BANK_LINK_PROVIDER: 'plaid' },
+    ]) {
+      expect(() => loadConfig({ ...base, ...env })).toThrow(/CONNECTION_TOKEN_KEY/);
+      expect(() =>
+        loadConfig({ ...base, ...env, CONNECTION_TOKEN_KEY: 'k'.repeat(40) }),
+      ).not.toThrow();
+    }
+  });
+
+  it('rejects a short key', () => {
+    expect(() => loadConfig({ ...base, CONNECTION_TOKEN_KEY: 'short' })).toThrow(/32/);
+  });
+});

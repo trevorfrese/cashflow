@@ -1098,6 +1098,8 @@ const GATE_DESCRIPTIONS: Readonly<Record<string, string>> = {
   pool_funding: 'Pool always able to fund a payout at the planned growth rate (base)',
   approval_floor: 'Usable approval rate at or above 30% of applicants (base)',
   refer_rate: 'At most 5% of applicants referred to a reviewer (base)',
+  veracity_honest_adverse:
+    'At most 3% of honest applicants knocked out or referred by a data veracity finding (base)',
 };
 
 interface BaselineFile {

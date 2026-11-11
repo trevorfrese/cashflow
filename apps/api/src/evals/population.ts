@@ -9,6 +9,12 @@ import {
 import { scenarioParams, type Scenario } from '../providers/bank-link/synthetic.ts';
 import { ASSUMPTIONS } from './assumptions.ts';
 import { clamp, createRng, type Rng } from './random.ts';
+import {
+  NEW_FRAUD_TYPES,
+  drawVeracity,
+  type ApplicantVeracity,
+  type NewFraudType,
+} from './veracity-sim.ts';
 
 /**
  * A synthetic population of rent advance applicants.
@@ -32,8 +38,12 @@ import { clamp, createRng, type Rng } from './random.ts';
  * `apps/api/evals/README.md` together with the bad rates they produce.
  */
 
-export const FRAUD_TYPES = ['inflated_revenue', 'round_trip', 'bust_out'] as const;
-export type FraudType = (typeof FRAUD_TYPES)[number];
+/** The original fraud archetypes, drawn by `fraudMix`. */
+export const ORIGINAL_FRAUD_TYPES = ['inflated_revenue', 'round_trip', 'bust_out'] as const;
+export type OriginalFraudType = (typeof ORIGINAL_FRAUD_TYPES)[number];
+/** Every fraud archetype: the original three and the five the veracity checks exist for. */
+export const FRAUD_TYPES = [...ORIGINAL_FRAUD_TYPES, ...NEW_FRAUD_TYPES] as const;
+export type FraudType = OriginalFraudType | NewFraudType;
 
 export const INDUSTRIES = [
   'restaurant',
@@ -68,6 +78,11 @@ export interface Applicant {
   latentHealth: number;
   /** Bank simulation parameters. Hazard events are dated. */
   params: ForwardParams;
+  /**
+   * What the applicant's connections show, and how. See `veracity-sim.ts`. Absent on hand
+   * built test applicants, which then carry no veracity facts.
+   */
+  veracity?: ApplicantVeracity;
 }
 
 export interface PopulationConfig {
@@ -82,7 +97,7 @@ export interface PopulationConfig {
   mix: Readonly<Record<Scenario, number>>;
   /** Share of all applicants that are fraud archetypes, in basis points. */
   fraudShareBps: number;
-  fraudMix: Readonly<Record<FraudType, number>>;
+  fraudMix: Readonly<Record<OriginalFraudType, number>>;
 }
 
 export const DEFAULT_MIX: Readonly<Record<Scenario, number>> = {
@@ -267,9 +282,10 @@ function drawCandidate(config: PopulationConfig, index: number, attempt: number)
     rng.int(1, 28),
   );
 
-  const fraud: FraudType | null = rng.chance(config.fraudShareBps / 10_000)
+  const originalFraud: OriginalFraudType | null = rng.chance(config.fraudShareBps / 10_000)
     ? rng.weighted(config.fraudMix)
     : null;
+  const fraud = originalFraud;
   // What the business looks like on paper. Fraud archetypes pick their own disguise.
   const archetype: Scenario =
     fraud === 'bust_out'
@@ -420,25 +436,61 @@ function drawCandidate(config: PopulationConfig, index: number, attempt: number)
         }
       : null;
 
+  // What the connections show. Drawn last, from its own stream, so the draws above are the
+  // original population's. 2.5% of honest applicants become a new fraud archetype here.
+  const v = drawVeracity({
+    seed: config.seed,
+    index,
+    attempt,
+    fraud,
+    archetype,
+    industry,
+    applicationDate,
+    historyDays,
+    timeInBusinessMonths,
+    revenueAtApplicationCents: revenueAtApplication,
+    statedMonthlyRevenueCents,
+    rentCents,
+    pos,
+    drawForwardHazards: (r, health) =>
+      drawForwardHazards(
+        r,
+        applicationDate,
+        health,
+        industryProfile.closure * (timeInBusinessMonths < 24 ? HAZARDS.youngMultiplier : 1),
+      ),
+  });
+  const o = v.overrides;
+  const finalHistoryDays = o.historyDays ?? historyDays;
+  let finalEvents = events;
+  if (o.forwardEvents) {
+    finalEvents = [
+      ...events.filter((e) => ('date' in e ? e.date : e.start) <= applicationDate),
+      ...o.forwardEvents,
+    ];
+  }
+  if (o.pastEvents) finalEvents = [...finalEvents, ...o.pastEvents];
+  const finalFraud: FraudType | null = fraud ?? v.veracity.fraud;
+
   // The simulator compounds growth from the start of the history, so back the starting level
   // out of the level wanted on the application date.
-  const startRevenue = revenueAtApplication / (1 + annualGrowth) ** (historyDays / 365);
+  const startRevenue = revenueAtApplication / (1 + annualGrowth) ** (finalHistoryDays / 365);
 
   return {
     id: `a${String(index).padStart(5, '0')}`,
     seedHex,
     archetype,
-    fraud,
-    segment: fraud ?? archetype,
+    fraud: finalFraud,
+    segment: finalFraud ?? archetype,
     industry,
     arrivalMonth,
     applicationDate,
-    historyDays,
+    historyDays: finalHistoryDays,
     timeInBusinessMonths,
-    statedMonthlyRevenueCents,
-    requestedRentCents,
-    pos,
-    latentHealth,
+    statedMonthlyRevenueCents: o.statedMonthlyRevenueCents ?? statedMonthlyRevenueCents,
+    requestedRentCents: o.requestedRentCents ?? requestedRentCents,
+    pos: o.pos !== undefined ? o.pos : pos,
+    latentHealth: o.latentHealth ?? latentHealth,
     params: {
       monthlyRevenueCents: Math.round(startRevenue),
       rentCents,
@@ -456,16 +508,17 @@ function drawCandidate(config: PopulationConfig, index: number, attempt: number)
       software,
       taxQuarterly,
       ownerDraw,
-      loan,
-      mcaDaily,
+      loan: o.params?.loan ?? loan,
+      mcaDaily: o.params?.mcaDaily ?? mcaDaily,
       openingBalanceMonths,
       batchedSettlement: base.batchedSettlement ?? false,
       annualGrowth,
       costFlex: rng.uniform(0.3, 0.7),
       ownerReserveCents,
       overdraftLimitCents: Math.round(revenueAtApplication * 0.15),
-      events,
+      events: finalEvents,
     },
+    veracity: v.veracity,
   };
 }
 

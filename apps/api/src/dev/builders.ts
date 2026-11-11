@@ -7,12 +7,26 @@
  * underwriting run, `createRentPlan`) and fails loudly if the engine told a different story
  * from the one the persona is for.
  */
-import { addDays, dueDateInMonth, parseIsoDate, type IsoDate } from '@cashflow/shared';
+import {
+  addDays,
+  dueDateInMonth,
+  parseIsoDate,
+  type CommercePlatform,
+  type IsoDate,
+} from '@cashflow/shared';
 
 import type { AppContext } from '../context.ts';
 import { effectiveAt } from '../dates.ts';
 import type { BankLink, Business, CommerceLink } from '../generated/prisma/client.ts';
 import type { Industry } from '../generated/prisma/enums.ts';
+import {
+  completeOAuth,
+  connectBank,
+  createSeatInvitation,
+  mockAuthorize,
+  startOAuth,
+  verifySeat,
+} from '../services/connections.ts';
 import { currentDecision } from '../services/decisions.ts';
 import { createRentPlan } from '../services/rent-plan.ts';
 import { underwriteApplication } from '../services/underwriting.ts';
@@ -82,39 +96,49 @@ export async function linkBank(
   publicToken: string,
   createdAt?: Date,
 ): Promise<{ bankLink: BankLink; accountToken: string }> {
-  const bank = await ctx.providers.bankLink.exchangePublicToken(publicToken);
-  const bankLink = await ctx.db.bankLink.create({
-    data: {
-      businessId,
-      provider: ctx.providers.bankLink.name,
-      providerItemId: bank.providerItemId,
-      providerAccountToken: bank.providerAccountToken,
-      institutionName: bank.institutionName,
-      accountMask: bank.accountMask,
-      availableBalanceCents: bank.availableBalanceCents,
-      ...(createdAt ? { createdAt } : {}),
-    },
+  const bankLink = await connectBank(ctx, {
+    businessId,
+    publicToken,
+    ...(createdAt ? { createdAt } : {}),
   });
-  return { bankLink, accountToken: bank.providerAccountToken };
+  return { bankLink, accountToken: bankLink.providerAccountToken };
 }
 
-/** The same for a sandbox point of sale. */
+/**
+ * Connect a sandbox point of sale the way the app does: start an OAuth authorization, approve
+ * it on the sandbox consent page with the token's keywords, and complete the callback. Toast
+ * goes through a delegated seat invitation and its check instead.
+ */
 export async function linkPointOfSale(
   ctx: AppContext,
   businessId: string,
   publicToken: string,
+  platform: CommercePlatform = 'SQUARE',
 ): Promise<CommerceLink> {
-  const pos = await ctx.providers.commerce.exchangePublicToken(publicToken, 'SQUARE');
-  return ctx.db.commerceLink.create({
-    data: {
+  const business = await ctx.db.business.findUniqueOrThrow({ where: { id: businessId } });
+  const userId = business.ownerUserId;
+  if (ctx.providers.commerce.accessMethod(platform) === 'DELEGATED_SEAT') {
+    const { link } = await createSeatInvitation(ctx, {
       businessId,
-      provider: ctx.providers.commerce.name,
-      platform: pos.platform,
-      providerItemId: pos.providerItemId,
-      locationName: pos.locationName,
-      connectedSince: pos.connectedSince,
-    },
+      platform,
+      scenario: publicToken,
+      userId,
+    });
+    return verifySeat(ctx, link.id);
+  }
+  const started = await startOAuth(ctx, {
+    businessId,
+    userId,
+    platform,
+    redirectUri: ctx.config.OAUTH_REDIRECT_URI,
   });
+  const approved = await mockAuthorize(ctx, {
+    state: started.state,
+    userId,
+    scenario: publicToken,
+    approve: true,
+  });
+  return completeOAuth(ctx, { state: started.state, userId, code: approved.code! });
 }
 
 export interface ApplySeed {

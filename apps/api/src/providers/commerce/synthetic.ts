@@ -4,6 +4,7 @@ import type { CommercePlatform, DailySales, IsoDate } from '@cashflow/shared';
 import {
   CommercePlatform as CommercePlatformSchema,
   addDays,
+  daysBetween,
   parseIsoDate,
 } from '@cashflow/shared';
 
@@ -76,22 +77,73 @@ export function parseCommerceScenario(token: string, platform: CommercePlatform)
   return { ...spec, platform: named ?? platform };
 }
 
-export function encodeCommerceItemId(spec: CommerceSpec, seedHex: string): string {
-  return `mock_pos_${spec.platform}_${spec.scenario}_r${spec.monthlyRevenueCents}_${seedHex}`;
+/**
+ * Sandbox keywords that change what the platform reports, beyond the sales level. See
+ * `apps/api/README.md`.
+ */
+export const COMMERCE_FLAGS = [
+  /** The platform account is in another business's legal name. */
+  'owner_mismatch',
+  /** The tax id on the platform account ends differently from the business's. */
+  'taxid_mismatch',
+  /** The platform pays out to an account that is not connected. */
+  'payout_elsewhere',
+  /** Sales that are never paid out: gross sales run well above payouts. */
+  'unsettled',
+  /** The platform account was created 45 days before it was connected. */
+  'new_account',
+  /** The token cannot be refreshed after the connect date: the owner must reconnect. */
+  'expired',
+  /** A delegated seat whose report pull fails (the report layout changed). */
+  'seat_layout_changed',
+  /** A delegated seat the merchant has not activated yet. */
+  'seat_inactive',
+  /** Pulls after the connect date report different sales for days that were final. */
+  'rewrites',
+] as const;
+export type CommerceFlag = (typeof COMMERCE_FLAGS)[number];
+
+export function parseCommerceFlags(token: string): CommerceFlag[] {
+  const lower = token.toLowerCase();
+  return COMMERCE_FLAGS.filter((f) => lower.includes(f));
 }
 
-export function decodeCommerceItemId(itemId: string): { spec: CommerceSpec; seedHex: string } {
-  const m = /^mock_pos_([A-Z]+)_([a-z_]+)_r(\d+)_([0-9a-f]+)$/.exec(itemId);
+export function encodeCommerceItemId(
+  spec: CommerceSpec,
+  seedHex: string,
+  anchor?: IsoDate,
+  flags: readonly CommerceFlag[] = [],
+): string {
+  const base = `mock_pos_${spec.platform}_${spec.scenario}_r${spec.monthlyRevenueCents}_${seedHex}`;
+  const a = anchor ? `_a${anchor.replaceAll('-', '')}` : '';
+  const x = flags.length > 0 ? `_x${flags.join('-')}` : '';
+  return `${base}${a}${x}`;
+}
+
+export interface DecodedCommerceItem {
+  spec: CommerceSpec;
+  seedHex: string;
+  anchor: IsoDate | null;
+  flags: CommerceFlag[];
+}
+
+export function decodeCommerceItemId(itemId: string): DecodedCommerceItem {
+  const m = /^mock_pos_([A-Z]+)_([a-z_]+)_r(\d+)_([0-9a-f]+)(?:_a(\d{8}))?(?:_x([a-z_-]+))?$/.exec(
+    itemId,
+  );
   if (!m) {
     return {
       spec: { ...parseScenario('healthy'), platform: 'SQUARE' },
       seedHex: createHash('sha256').update(itemId).digest('hex').slice(0, 12),
+      anchor: null,
+      flags: [],
     };
   }
   const platform = CommercePlatformSchema.safeParse(m[1]);
   const scenario = (SCENARIOS as readonly string[]).includes(m[2]!)
     ? (m[2] as Scenario)
     : 'healthy';
+  const a = m[5];
   return {
     spec: {
       scenario,
@@ -100,6 +152,10 @@ export function decodeCommerceItemId(itemId: string): { spec: CommerceSpec; seed
       platform: platform.success ? platform.data : 'SQUARE',
     },
     seedHex: m[4]!,
+    anchor: a ? `${a.slice(0, 4)}-${a.slice(4, 6)}-${a.slice(6, 8)}` : null,
+    flags: (m[6]?.split('-') ?? []).filter((f): f is CommerceFlag =>
+      (COMMERCE_FLAGS as readonly string[]).includes(f),
+    ),
   };
 }
 
@@ -157,9 +213,24 @@ function salesRow(
 }
 
 export function generateSales(spec: CommerceSpec, seedHex: string, asOf: IsoDate): SyntheticSales {
+  return generateSalesAt(spec, seedHex, asOf, asOf);
+}
+
+/**
+ * Sales as they stand on `asOf` for an account connected on `anchor`: exactly
+ * `generateSales(spec, seedHex, anchor)` up to the anchor, then the same stream continues day
+ * by day at the level it reached. A later pull sees the earlier pull's past unchanged.
+ */
+export function generateSalesAt(
+  spec: CommerceSpec,
+  seedHex: string,
+  anchor: IsoDate,
+  asOf: IsoDate,
+): SyntheticSales {
   const p = PARAMS[spec.scenario];
-  const start = addDays(asOf, -Math.max(p.days - 1, 0));
-  if (p.days === 0) return { dailySales: [], connectedSince: asOf };
+  const start = addDays(anchor, -Math.max(p.days - 1, 0));
+  if (p.days === 0) return { dailySales: [], connectedSince: anchor };
+  const total = p.days + Math.max(0, daysBetween(anchor, asOf));
 
   const rand = platformRand(seedHex);
   const weeklyRevenue = (spec.monthlyRevenueCents * 12) / 52;
@@ -168,14 +239,14 @@ export function generateSales(spec: CommerceSpec, seedHex: string, asOf: IsoDate
   let monthLevel = 1;
   let currentMonth = '';
 
-  for (let i = 0; i < p.days; i++) {
+  for (let i = 0; i < total; i++) {
     const date = addDays(start, i);
     const monthKey = date.slice(0, 7);
     if (monthKey !== currentMonth) {
       currentMonth = monthKey;
       monthLevel = Math.exp(normal(rand) * p.monthlyNoise);
     }
-    const progress = i / Math.max(p.days - 1, 1);
+    const progress = Math.min(1, i / Math.max(p.days - 1, 1));
     let trendFactor = 1 + p.trend * (progress - 0.5);
     if (p.collapse && progress > p.collapse.at) {
       trendFactor *= 1 - (p.collapse.depth * (progress - p.collapse.at)) / (1 - p.collapse.at);

@@ -56,6 +56,10 @@ export default function RootLayout() {
                   <Stack.Screen name="settings/rent" />
                   <Stack.Screen name="settings/businesses" />
                   <Stack.Screen name="settings/banks" />
+                  <Stack.Screen name="connections/index" />
+                  <Stack.Screen name="connections/pos" />
+                  <Stack.Screen name="connections/authorize" />
+                  <Stack.Screen name="connections/seat" />
                 </Stack>
                 <DevIndicator />
               </DevToolsProvider>

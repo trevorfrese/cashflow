@@ -3,7 +3,15 @@ import { MockBankLinkProvider } from './mock.ts';
 import { PlaidBankLinkProvider } from './plaid.ts';
 import type { BankLinkProvider } from './types.ts';
 
-export type { BankLinkProvider, LinkedAccount } from './types.ts';
+export type {
+  BankAccountIdentity,
+  BankCredentials,
+  BankLinkProvider,
+  ItemStatus,
+  LinkedAccount,
+  SandboxHolder,
+} from './types.ts';
+export { ReauthRequiredError } from './types.ts';
 
 export function createBankLinkProvider(config: Config): BankLinkProvider {
   switch (config.BANK_LINK_PROVIDER) {

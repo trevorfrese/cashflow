@@ -1,6 +1,7 @@
 import type { CashFlowSummary, CreditGrade, DecisionReason } from '@cashflow/shared';
 import { COMMERCE_PLATFORM_LABELS as PLATFORM_LABEL, formatCents } from '@cashflow/shared';
 
+import type { DepthCredit } from '../veracity/assess.ts';
 import { CURRENT_POLICY, type CreditPolicy } from './policy.ts';
 
 /**
@@ -76,6 +77,8 @@ function impactFor(points: number, max: number): DecisionReason['impact'] {
 export function scoreCashFlow(
   s: CashFlowSummary,
   policy: CreditPolicy = CURRENT_POLICY,
+  /** From the veracity assessment. Read by scorecard 3 only. */
+  depth: DepthCredit | null = null,
 ): Scorecard {
   const factors: Factor[] = [];
   const add = (
@@ -244,22 +247,30 @@ export function scoreCashFlow(
   );
 
   // 8. Depth and breadth of data: months of bank history, plus a point for a second
-  // source (a point of sale) that verifies sales independently of deposits.
+  // source (a point of sale) that verifies sales independently of deposits. Scorecard 3
+  // scales the bank credit by the bank's trust tier and gives the second source point only
+  // to a platform the veracity checks found independently verified (its payouts reconcile).
   const posMonths = s.commerce?.monthsOfHistory ?? 0;
-  add(
-    'DATA_DEPTH',
-    'Data history',
+  const v3 = policy.scorecard >= 3 && depth !== null;
+  const bankCredit =
     curve(s.monthsOfHistory, [
       [3, 0],
       [6, 1.5],
       [9, 3],
       [12, 4],
-    ]) + (posMonths >= 3 ? 1 : 0),
+    ]) * (v3 ? depth.bankMultiplier : 1);
+  const second = v3 ? depth.verifiedSecondSource && posMonths >= 3 : posMonths >= 3;
+  add(
+    'DATA_DEPTH',
+    'Data history',
+    bankCredit + (second ? 1 : 0),
     'dataDepth',
     `${s.monthsOfHistory} month${s.monthsOfHistory === 1 ? '' : 's'} of bank history reviewed${
-      posMonths >= 3
-        ? `, plus ${posMonths} month${posMonths === 1 ? '' : 's'} of ${PLATFORM_LABEL[s.commerce!.platform]} sales.`
-        : '. Connecting your point of sale adds a second source.'
+      second
+        ? `, plus ${posMonths} month${posMonths === 1 ? '' : 's'} of ${PLATFORM_LABEL[s.commerce!.platform]} sales${v3 ? ' that match your bank deposits' : ''}.`
+        : v3 && posMonths >= 3
+          ? `. Your ${PLATFORM_LABEL[s.commerce!.platform]} sales could not be matched to your connected bank deposits, so they were not counted as a second source.`
+          : '. Connecting your point of sale adds a second source.'
     }`,
   );
 

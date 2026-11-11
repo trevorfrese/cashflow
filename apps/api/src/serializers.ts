@@ -87,6 +87,8 @@ export const toBankLink = (l: BankLink): BankLinkDto => ({
   accountMask: l.accountMask,
   status: l.status,
   availableBalanceCents: l.availableBalanceCents,
+  accessMethod: l.accessMethod,
+  health: l.health,
   createdAt: iso(l.createdAt),
 });
 
@@ -98,6 +100,8 @@ export const toCommerceLink = (l: CommerceLink): CommerceLinkDto => ({
   locationName: l.locationName,
   status: l.status,
   connectedSince: l.connectedSince,
+  accessMethod: l.accessMethod,
+  health: l.health,
   createdAt: iso(l.createdAt),
 });
 

@@ -4,6 +4,7 @@ import {
   AuditLogPage,
   LandlordPayout,
   OperatorBusinessDetail,
+  OperatorConnections,
   OperatorRentPlan,
   RentPlan,
   type OperatorInstallment,
@@ -12,6 +13,7 @@ import Link from 'next/link';
 import { Fragment, use } from 'react';
 import { z } from 'zod';
 
+import { ConnectionsPanel } from '@/components/connections';
 import { AlertsTable, AuditTable, ReasonAction } from '@/components/shared';
 import {
   Card,
@@ -35,6 +37,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
   const business = useApi(`businesses/${id}`, OperatorBusinessDetail);
   const plans = useApi(`businesses/${id}/rent-plans`, Plans);
   const audit = useApi(`audit-log?businessId=${id}&limit=50`, AuditLogPage);
+  const connections = useApi(`businesses/${id}/connections`, OperatorConnections);
   const reloadAll = () => {
     business.reload();
     plans.reload();
@@ -61,6 +64,10 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
             </div>
           )
         }
+      </Load>
+
+      <Load from={connections} rows={6}>
+        {(c) => <ConnectionsPanel data={c} />}
       </Load>
 
       <Load from={business} rows={4}>

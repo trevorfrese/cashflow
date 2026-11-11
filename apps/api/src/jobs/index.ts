@@ -11,6 +11,7 @@ import { monitorJob } from './monitor.ts';
 import { processPayoutsJob } from './process-payouts.ts';
 import { provisionJob } from './provision.ts';
 import { reconcilePaymentsJob } from './reconcile-payments.ts';
+import { refreshConnectionsJob } from './refresh-connections.ts';
 import { rescreenJob } from './rescreen.ts';
 import { reunderwriteJob } from './reunderwrite.ts';
 
@@ -18,6 +19,7 @@ import { reunderwriteJob } from './reunderwrite.ts';
 export const JOBS = {
   rescreen: rescreenJob,
   'lease-changes': leaseChangesJob,
+  'refresh-connections': refreshConnectionsJob,
   reunderwrite: reunderwriteJob,
   'reconcile-payments': reconcilePaymentsJob,
   'age-receivables': ageReceivablesJob,
@@ -32,6 +34,7 @@ export type JobName = keyof typeof JOBS;
 export const JOB_NAMES = [
   'rescreen',
   'lease-changes',
+  'refresh-connections',
   'reunderwrite',
   'reconcile-payments',
   'age-receivables',
@@ -51,29 +54,33 @@ export const JOB_NAMES = [
  *                            generated or paid for it today.
  *   2. lease-changes         Landlord and payout changes whose cooling-off has ended apply,
  *                            so a payout they were holding goes out today to the new details.
- *   3. reunderwrite          A plan it freezes must get no new period and no payout today.
- *   4. reconcile-payments    Payments that came back are undone before anything reads who
+ *   3. refresh-connections   Tokens near expiry are refreshed, and businesses with an active
+ *                            plan are pulled again on the cadence and their veracity checked.
+ *                            Before re-underwriting, which then reads the fresh pull.
+ *   4. reunderwrite          A plan it freezes must get no new period and no payout today.
+ *   5. reconcile-payments    Payments that came back are undone before anything reads who
  *                            is paid up: a return can make a plan past due, or freeze it.
- *   5. age-receivables       Buckets and LATE marks are brought up to today, and plans at
+ *   6. age-receivables       Buckets and LATE marks are brought up to today, and plans at
  *                            the charge-off age are written off and closed, before periods
  *                            are generated or payouts decided for them.
- *   6. generate-periods      Next month's payout and installments exist, 30 days ahead, for
+ *   7. generate-periods      Next month's payout and installments exist, 30 days ahead, for
  *                            plans that are active and not frozen.
- *   7. process-payouts       Each due payout is paid, held, or cancelled, on the state the
+ *   8. process-payouts       Each due payout is paid, held, or cancelled, on the state the
  *                            three jobs above left. It runs before collections, so a
  *                            business has to be current at the start of the day for its
  *                            landlord to be paid, and so the first installment of a period
  *                            is collected on the day its payout goes out.
- *   8. collect-installments  Scheduled debits, a payment's effect on the bucket, and then
+ *   9. collect-installments  Scheduled debits, a payment's effect on the bucket, and then
  *                            the cash sweep: operating cash is settled with the pool.
- *   9. provision             So the allowance is set on the day's closing balances. Posts
+ *  10. provision             So the allowance is set on the day's closing balances. Posts
  *                            at most once per calendar month.
- *  10. monitor               Last: the rules read the state every other job left, and can
+ *  11. monitor               Last: the rules read the state every other job left, and can
  *                            tell whether each of them ran.
  */
 export async function runAllJobs(ctx: AppContext, asOf: IsoDate = todayIso()) {
   const rescreen = await rescreenJob(ctx, asOf);
   const leaseChanges = await leaseChangesJob(ctx, asOf);
+  const refreshConnections = await refreshConnectionsJob(ctx, asOf);
   const reunderwrite = await reunderwriteJob(ctx, asOf);
   const reconcilePayments = await reconcilePaymentsJob(ctx, asOf);
   const ageReceivables = await ageReceivablesJob(ctx, asOf);
@@ -86,6 +93,7 @@ export async function runAllJobs(ctx: AppContext, asOf: IsoDate = todayIso()) {
     asOf,
     rescreen,
     leaseChanges,
+    refreshConnections,
     reunderwrite,
     reconcilePayments,
     ageReceivables,

@@ -1,5 +1,6 @@
 import type { CreditGrade } from '@cashflow/shared';
 
+import type { VeracityPolicy } from '../veracity/types.ts';
 import { PD_TABLE_V2, type PdTable } from './pd-table.ts';
 
 /**
@@ -196,9 +197,11 @@ export interface CreditPolicy {
   /**
    * Which scorecard to run. 1 is the launch scorecard. 2 reads the season adjusted trend,
    * blends the low point of the cash buffer into the buffer factor, and counts overdraft
-   * fees from the whole year in conduct. See `scorecard.ts`.
+   * fees from the whole year in conduct. 3 is 2 with a data depth factor that reads the
+   * veracity assessment: the bank history credit scaled by the bank's trust tier, and the
+   * second source point only for a platform that reconciles. See `scorecard.ts`.
    */
-  scorecard: 1 | 2;
+  scorecard: 1 | 2 | 3;
   /** Null turns the section off, which is how version 1 behaves. */
   trend: TrendPolicy | null;
   integrity: IntegrityPolicy | null;
@@ -206,6 +209,8 @@ export interface CreditPolicy {
   exposure: ExposurePolicy | null;
   escalation: EscalationPolicy | null;
   reunderwriting: ReunderwritingPolicy;
+  /** Data veracity checks (`src/veracity/`). Null turns them off, as in versions 1 and 2. */
+  veracity: VeracityPolicy | null;
 }
 
 const GRADE_FLOORS: CreditPolicy['gradeFloors'] = [
@@ -261,6 +266,7 @@ export const POLICY_V1: CreditPolicy = {
   exposure: null,
   escalation: null,
   reunderwriting: { watchScore: 45 },
+  veracity: null,
 };
 
 /**
@@ -341,13 +347,73 @@ export const POLICY_V2: CreditPolicy = {
   reunderwriting: { watchScore: 50 },
 };
 
-export const CURRENT_POLICY: CreditPolicy = POLICY_V2;
+/**
+ * The veracity thresholds of version 3. The reasoning for each is in
+ * `apps/api/UNDERWRITING.md`, "Veracity", and the measured effect in `evals/report.md`.
+ */
+export const VERACITY_POLICY_V3: VeracityPolicy = {
+  nameMatchThreshold: 0.8,
+  reconciliation: {
+    windowDays: 90,
+    inTransitDays: 5,
+    daysBefore: 1,
+    daysAfter: 4,
+    toleranceBps: 50,
+    toleranceMinCents: 100,
+    maxCombine: 4,
+    minPayouts: 8,
+    excludeBelowBps: 8500,
+    referBelowBps: 5000,
+    claimedUnmatchedShareBps: 2000,
+    claimedUnmatchedMinCount: 3,
+    minPayoutToCardSalesBps: 7500,
+    unseenPayoutShareBps: 1500,
+  },
+  completeness: {
+    unseenTransferShareBps: 1000,
+    unseenTransferWindows: 3,
+    minBankToCardSalesBps: 7000,
+  },
+  consistency: {
+    pendingToleranceDays: 7,
+    materialItems: 3,
+    materialShareBps: 100,
+  },
+  age: {
+    recentAccountMonths: 6,
+    establishedBankMonths: 24,
+    establishedPlatformMonths: 12,
+    surgeBps: 4000,
+    gapDays: 14,
+  },
+  freshness: {
+    maxSnapshotAgeDays: 1,
+    maxDataAgeDays: 7,
+  },
+  depth: {
+    tierMultiplier: { HIGH: 1, MEDIUM: 0.75, LOW: 0.5, NONE: 0 },
+  },
+};
+
+/**
+ * Version 3: version 2 plus the data veracity checks. Every other number is version 2's: the
+ * PD table is not regenerated (see UNDERWRITING.md for why).
+ */
+export const POLICY_V3: CreditPolicy = {
+  ...POLICY_V2,
+  version: 'cashflow-v3',
+  scorecard: 3,
+  veracity: VERACITY_POLICY_V3,
+};
+
+export const CURRENT_POLICY: CreditPolicy = POLICY_V3;
 export const POLICY_VERSION: string = CURRENT_POLICY.version;
 
 /** Policies by version, for reading a stored decision back against the rules that made it. */
 export const POLICIES: Readonly<Record<string, CreditPolicy>> = {
   [POLICY_V1.version]: POLICY_V1,
   [POLICY_V2.version]: POLICY_V2,
+  [POLICY_V3.version]: POLICY_V3,
 };
 
 /** The cutoffs in force, for the decision snapshot. Internal: never sent to applicants. */
@@ -371,6 +437,7 @@ export function thresholdsInForce(policy: CreditPolicy) {
     escalation: policy.escalation,
     maxFeeBps: policy.expectedLossPricing?.maxFeeBps ?? null,
     minFeeCents: policy.expectedLossPricing?.minFeeCents ?? null,
+    veracity: policy.veracity,
   };
 }
 export type PolicyThresholds = ReturnType<typeof thresholdsInForce>;

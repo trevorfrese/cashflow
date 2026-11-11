@@ -24,12 +24,16 @@ import { effectiveAt } from '../dates.ts';
 import { collectInstallment } from '../services/collections.ts';
 import { updateLease } from '../services/lease-changes.ts';
 import { ACTIVE_SERVICING_POLICY } from '../servicing/policy.ts';
+import { createSeatInvitation } from '../services/connections.ts';
+import { latestAssessment } from '../services/connection-views.ts';
+import { reunderwritePlan } from '../services/reunderwriting.ts';
 import {
   apply,
   approvedLimitCents,
   createBusiness,
   createLease,
   linkBank,
+  linkPointOfSale,
   monthsAgo,
   monthsBefore,
   seedPlan,
@@ -604,6 +608,142 @@ export const PERSONAS: readonly PersonaDefinition[] = [
     },
   },
 
+  // ---- Existing customers: data connections ----
+  {
+    key: 'payout-account',
+    title: 'Fernwood Outfitters',
+    group: 'CUSTOMER',
+    section: 'Data connections',
+    demonstrates:
+      'An approved customer with an active plan who then connected Shopify, which pays out to a bank account that is not connected. The periodic review keeps the plan going and asks the owner to connect that account.',
+    screens: ['Home (connect your payout account)', 'Connections', 'Ops console, Customers'],
+    email: 'payout-account@cashflow.local',
+    fullName: 'Lena Moreau',
+    landing: 'CONNECTIONS',
+    build: {
+      kind: 'instant',
+      run: async ({ ctx, userId, today }) => {
+        const { plan } = await seedPlan(ctx, userId, {
+          legalName: 'Fernwood Outfitters LLC',
+          dba: 'Fernwood Outfitters',
+          industry: 'RETAIL',
+          addressLine1: '3120 SE Belmont St',
+          postalCode: '97214',
+          foundedOn: '2019-05-01',
+          monthlyRevenueCents: 4_200_000,
+          timeInBusinessMonths: 78,
+          rentCents: 380_000,
+          dueDayOfMonth: 1,
+          planStart: today,
+          bankToken: 'seed_fernwood_healthy_rev_42000_rent_3800',
+          posToken: 'seed_fernwood_square_healthy_sales_42000',
+          landlordName: 'Belmont Street Partners',
+          landlordPayoutToken: 'mock_landlord_belmont',
+          taxIdLast4: '6105',
+          owner: { fullName: 'Lena Moreau', title: 'Owner' },
+        });
+        // Later, an online store on Shopify, paying out to an account CashFlow cannot see.
+        await linkPointOfSale(
+          ctx,
+          plan.businessId,
+          'seed_fernwood_shopify_healthy_sales_42000_payout_elsewhere',
+          'SHOPIFY',
+        );
+        const outcome = await reunderwritePlan(ctx, plan.id, today);
+        const latest = await latestAssessment(ctx.db, plan.businessId);
+        const codes = latest?.veracity.findings.map((f) => f.code) ?? [];
+        if (outcome !== 'ok' || !codes.includes('PAYOUT_ACCOUNT_NOT_CONNECTED')) {
+          throw new Error(
+            `Expected Fernwood Outfitters' periodic review to pass and ask for the payout account, got ${outcome} with ${codes.join(', ') || 'no findings'}`,
+          );
+        }
+      },
+    },
+  },
+  {
+    key: 'ownership-review',
+    title: 'Pinecrest Ceramics',
+    group: 'CUSTOMER',
+    section: 'Data connections',
+    demonstrates:
+      'Referred because the bank reports the connected account as held by a different business. The owner is told only that the application is in review; the ops console shows the holder name and the evidence.',
+    screens: ['Home (In review)', 'Connections', 'Ops console, Reviews'],
+    email: 'ownership-review@cashflow.local',
+    fullName: 'Tomas Novak',
+    landing: 'HOME',
+    build: {
+      kind: 'instant',
+      builtOn: (today) => addDays(today, -1),
+      run: async ({ ctx, userId, today }) => {
+        const { application } = await seedReferred(ctx, userId, {
+          legalName: 'Pinecrest Ceramics LLC',
+          dba: 'Pinecrest Ceramics',
+          industry: 'RETAIL',
+          addressLine1: '5525 NE 42nd Ave',
+          postalCode: '97218',
+          foundedOn: '2020-02-01',
+          monthlyRevenueCents: 3_900_000,
+          rentCents: 350_000,
+          bankToken: 'seed_pinecrest_healthy_borrowed_rev_39000_rent_3500',
+          taxIdLast4: '7741',
+          owner: { fullName: 'Tomas Novak', title: 'Owner' },
+          appliedOn: addDays(today, -1),
+        });
+        const decision = await ctx.db.underwritingDecision.findFirstOrThrow({
+          where: { applicationId: application.id },
+          orderBy: { decidedAt: 'desc' },
+        });
+        const triggers =
+          (decision.snapshot as { referTriggers?: string[] } | null)?.referTriggers ?? [];
+        if (!triggers.includes('VERACITY:BANK_OWNER_MISMATCH')) {
+          throw new Error(
+            `Expected Pinecrest Ceramics to be referred for the account holder, got ${triggers.join(', ') || 'no triggers'}`,
+          );
+        }
+      },
+    },
+  },
+  {
+    key: 'toast-seat',
+    title: 'Saltwater Taqueria',
+    group: 'CUSTOMER',
+    section: 'Data connections',
+    demonstrates:
+      "A Toast restaurant: Toast has no API to approve access through, so the owner is invited to add CashFlow's own read-only reports user. The seat is waiting: follow the steps, then Check connection.",
+    screens: ['Connections (Toast instructions, Check connection)', 'Application'],
+    email: 'toast-seat@cashflow.local',
+    fullName: 'Ana Haddad',
+    landing: 'CONNECTIONS',
+    build: {
+      kind: 'instant',
+      run: async ({ ctx, userId }) => {
+        const business = await createBusiness(ctx, userId, {
+          legalName: 'Saltwater Taqueria LLC',
+          dba: 'Saltwater Taqueria',
+          industry: 'RESTAURANT',
+          addressLine1: '2401 NE Alberta St',
+          postalCode: '97211',
+          foundedOn: '2018-07-01',
+          monthlyRevenueCents: 5_000_000,
+          taxIdLast4: '3390',
+          owner: { fullName: 'Ana Haddad', title: 'Owner' },
+        });
+        await linkBank(ctx, business.id, 'seed_saltwater_healthy_rev_50000_rent_4500');
+        const { link } = await createSeatInvitation(ctx, {
+          businessId: business.id,
+          platform: 'TOAST',
+          scenario: 'healthy_sales_50000',
+          userId,
+        });
+        if (link.status !== 'PENDING') {
+          throw new Error(
+            `Expected Saltwater Taqueria's Toast seat to be pending, got ${link.status}`,
+          );
+        }
+      },
+    },
+  },
+
   // ---- Fresh applicants: nothing exists but the login ----
   {
     key: 'fresh-approved',
@@ -635,6 +775,7 @@ export const PERSONAS: readonly PersonaDefinition[] = [
         }),
         bankScenario: 'healthy',
         bankPublicToken: 'mock_healthy_rev_52000_dev_walk_a1',
+        pos: null,
         timeInBusinessMonths: 66,
         requestedMonthlyRentCents: 520_000,
       },
@@ -670,6 +811,7 @@ export const PERSONAS: readonly PersonaDefinition[] = [
         }),
         bankScenario: 'overdrafts',
         bankPublicToken: 'mock_overdrafts_rev_30000_dev_walk_b4',
+        pos: null,
         timeInBusinessMonths: 57,
         requestedMonthlyRentCents: 400_000,
       },
@@ -705,6 +847,7 @@ export const PERSONAS: readonly PersonaDefinition[] = [
         }),
         bankScenario: 'healthy',
         bankPublicToken: 'mock_healthy_rev_48000_dev_walk_c',
+        pos: null,
         timeInBusinessMonths: 75,
         requestedMonthlyRentCents: 480_000,
       },
@@ -742,6 +885,127 @@ export const PERSONAS: readonly PersonaDefinition[] = [
         bankPublicToken: 'mock_healthy_rev_30000_dev_walk_d3',
         timeInBusinessMonths: 68,
         requestedMonthlyRentCents: 600_000,
+        pos: null,
+      },
+    },
+  },
+  {
+    key: 'fresh-payout-elsewhere',
+    title: 'Fresh applicant: payout account not connected',
+    group: 'FRESH',
+    section: 'Data connections',
+    demonstrates:
+      'Connects Square through the sandbox consent page, but Square pays out to an account that is not connected. The decision asks for that account instead of deciding.',
+    screens: [
+      'Business',
+      'Connect bank',
+      'Connect Square',
+      'Application',
+      'Decision (connect your payout account)',
+    ],
+    email: 'fresh-payout-elsewhere@cashflow.local',
+    fullName: 'Wei Brennan',
+    landing: 'BUSINESS_NEW',
+    build: {
+      kind: 'fresh',
+      walkthrough: {
+        outcome: 'NEEDS_INFO',
+        summary:
+          'Preset: a healthy sandbox bank, and Square paying out to a different account. Expect a request to connect the payout account.',
+        business: freshBusiness({
+          legalName: 'Hawthorne Bike Works LLC',
+          dba: 'Hawthorne Bike Works',
+          industry: 'RETAIL',
+          line1: '3570 SE Hawthorne Blvd',
+          postalCode: '97214',
+          foundedOn: '2019-10-01',
+          revenueCents: 4_600_000,
+          taxIdLast4: '2218',
+          ownerName: 'Wei Brennan',
+        }),
+        bankScenario: 'healthy',
+        bankPublicToken: 'mock_healthy_rev_46000_dev_walk_f2',
+        timeInBusinessMonths: 72,
+        requestedMonthlyRentCents: 420_000,
+        pos: { platform: 'SQUARE', scenario: 'healthy_sales_46000_payout_elsewhere' },
+      },
+    },
+  },
+  {
+    key: 'fresh-ownership',
+    title: 'Fresh applicant: account held by another business',
+    group: 'FRESH',
+    section: 'Data connections',
+    demonstrates:
+      'Connects a sandbox bank account whose holder is a different business. Referred to a person; the owner only sees that it is in review.',
+    screens: ['Business', 'Connect bank', 'Application', 'Decision (In review)', 'Ops console'],
+    email: 'fresh-ownership@cashflow.local',
+    fullName: 'Omar Iyer',
+    landing: 'BUSINESS_NEW',
+    build: {
+      kind: 'fresh',
+      walkthrough: {
+        outcome: 'IN_REVIEW',
+        summary:
+          'Preset: a healthy sandbox bank held by another business (the borrowed keyword). Expect a referral to manual review.',
+        business: freshBusiness({
+          legalName: 'Division Street Florals LLC',
+          dba: 'Division Street Florals',
+          industry: 'RETAIL',
+          line1: '2626 SE Division St',
+          postalCode: '97202',
+          foundedOn: '2019-06-01',
+          revenueCents: 4_700_000,
+          taxIdLast4: '5163',
+          ownerName: 'Omar Iyer',
+        }),
+        bankScenario: 'healthy',
+        bankPublicToken: 'mock_healthy_borrowed_rev_47000_dev_walk_e1',
+        timeInBusinessMonths: 76,
+        requestedMonthlyRentCents: 430_000,
+        pos: null,
+      },
+    },
+  },
+  {
+    key: 'fresh-toast',
+    title: 'Fresh applicant: Toast through a read-only seat',
+    group: 'FRESH',
+    section: 'Data connections',
+    demonstrates:
+      "Invites CashFlow's read-only reports user to Toast, checks the seat, and applies with both sources. Expect an approval with Toast sales matched to the bank.",
+    screens: [
+      'Business',
+      'Connect bank',
+      'Connect Toast (seat instructions)',
+      'Application',
+      'Decision',
+    ],
+    email: 'fresh-toast@cashflow.local',
+    fullName: 'Grace Sato',
+    landing: 'BUSINESS_NEW',
+    build: {
+      kind: 'fresh',
+      walkthrough: {
+        outcome: 'APPROVED',
+        summary:
+          'Preset: a healthy sandbox bank and a Toast seat. Expect an instant approval with two verified sources.',
+        business: freshBusiness({
+          legalName: 'Killingsworth Kitchen LLC',
+          dba: 'Killingsworth Kitchen',
+          industry: 'RESTAURANT',
+          line1: '1101 N Killingsworth St',
+          postalCode: '97217',
+          foundedOn: '2020-04-01',
+          revenueCents: 5_000_000,
+          taxIdLast4: '8817',
+          ownerName: 'Grace Sato',
+        }),
+        bankScenario: 'healthy',
+        bankPublicToken: 'mock_healthy_rev_50000_dev_walk_g4',
+        timeInBusinessMonths: 64,
+        requestedMonthlyRentCents: 480_000,
+        pos: { platform: 'TOAST', scenario: 'healthy_sales_50000' },
       },
     },
   },

@@ -363,6 +363,7 @@ describe('GET /admin/applications/:id', () => {
     expect(detail.auditEvents.map((e) => e.eventType).sort()).toEqual([
       'APPLICATION_REFERRED',
       'DECISION_MADE',
+      'VERACITY_ASSESSED',
     ]);
 
     // The owner's view of the same application is unchanged: no terms, no internals.
@@ -606,6 +607,7 @@ describe('policy and evaluation', () => {
       'pool_funding',
       'approval_floor',
       'refer_rate',
+      'veracity_honest_adverse',
     ]);
     for (const gate of evaluation.gates) {
       expect(gate.description).not.toBe(gate.id);

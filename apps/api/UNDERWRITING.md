@@ -27,7 +27,8 @@ argument and defaults to `CURRENT_POLICY`.
 | Version       | Status  | What it is                                                                                                |
 | ------------- | ------- | --------------------------------------------------------------------------------------------------------- |
 | `cashflow-v1` | Retired | The launch policy. Kept as `POLICY_V1` so the portfolio evals can run it beside the current one.          |
-| `cashflow-v2` | Current | Integrity checks, earlier decline detection, expected loss pricing, exposure rules, and manual referrals. |
+| `cashflow-v2` | Retired | Integrity checks, earlier decline detection, expected loss pricing, exposure rules, and manual referrals. |
+| `cashflow-v3` | Current | Version 2 plus the data veracity checks (`src/veracity/`) and a data depth factor that reads them.        |
 
 Every stored decision carries the `policyVersion` that made it and a `snapshot`: a summary of
 the inputs, the thresholds in force, the integrity flags, the fee build up with PD and
@@ -64,9 +65,11 @@ flowchart LR
   B -->|too little data| J[NEEDS_INFO]
 ```
 
-1. **Bank data.** `services/underwriting.ts` asks the `BankLinkProvider` for 400 days of
-   transactions and the current balance: a little over a year, so the last four weeks can be
-   compared with the same weeks a year earlier. Categories are normalized to the
+1. **Bank data, through snapshots.** `services/connections.ts` (`gatherDecisionData`) reads
+   400 days of transactions and the current balance from the newest snapshot of the bank
+   connection, pulling again first when that snapshot is older than the freshness rule allows:
+   a little over a year, so the last four weeks can be compared with the same weeks a year
+   earlier. Platform sales and payouts come the same way. See `DATA_CONNECTIONS.md`. Categories are normalized to the
    `TransactionCategory` enum in `packages/shared` so the engine does not care which bank
    data vendor produced them.
 2. **Lookups.** The service also gathers what the pure rules cannot see: what the business
@@ -77,6 +80,8 @@ flowchart LR
    daily balances are reconstructed backward from the current balance. Credits the integrity
    checks matched to a same sized transfer out are left out of revenue.
 4. **Integrity checks** (`integrity.ts`). Can the numbers be trusted. See below.
+   4a. **Veracity checks** (`src/veracity/`). Is the data the business's own, complete, and
+   unaltered, and how was it obtained. See "Veracity".
 5. **Scorecard** (`scorecard.ts`). Eight factors, weights summing to 100, piecewise linear
    curves. Every factor emits a human readable reason tagged positive, negative, or
    informational.
@@ -215,6 +220,152 @@ nothing else.
 
 Flags, their details, and the referral triggers are internal. They appear in the decision
 snapshot and the operator review queue, never in what the applicant sees.
+
+## Veracity
+
+The integrity checks ask whether the numbers are plausible. The veracity checks ask whether
+the data is the business's own, complete, unaltered, and obtained in a way we can trust. They
+are pure functions in `src/veracity/`, each with unit tests for when it fires and when it does
+not, and they run inside `decide()` on facts the service gathers (`EngineInput.veracity`): each
+connection's platform-reported identity, its current snapshot, and earlier snapshots. Policy
+version 3 turns them on (`CreditPolicy.veracity`); versions 1 and 2 ignore the facts, so the
+evals can run all three on the same applicants. How the data is obtained, and why there is no
+upload path and no credentialed bank login, is in [`DATA_CONNECTIONS.md`](DATA_CONNECTIONS.md).
+
+### Trust tiers and how sources are used
+
+Each source gets a tier from its access method (direct OAuth HIGH, delegated seat MEDIUM,
+aggregator HIGH when the bank authorized it through OAuth and MEDIUM for a legacy connection),
+lowered to LOW when a finding refers, knocks out, or excludes it, and NONE when it could not be
+pulled. The applicant never picks it.
+
+- **Verified revenue** uses platform sales only when the platform's assessment allows it
+  (`usableForRevenue`). An excluded platform's features are still computed and stored, but
+  revenue, trend and stability come from the bank. The old coarse `depositMatchBps` stays
+  populated for compatibility; settlement reconciliation is now the primary signal.
+- **Data depth** (scorecard 3): the bank history credit (up to 4 of the factor's 5 points) is
+  multiplied by the bank's tier (HIGH 1, MEDIUM 0.75, LOW 0.5), and the second source point is
+  given only to a platform that is independently verified: usable, at least 8 payouts in the
+  window, at least 85% of them by amount found among deposits, and an account older than 6
+  months. Without veracity facts, scorecard 3 scores exactly as scorecard 2.
+- **The decision snapshot** stores the whole assessment: findings with evidence, per source
+  tiers, the reconciliation, and the ids and hashes of the snapshots read.
+- **The owner** sees reasons in plain words that name the next step and never a rule; an
+  operator sees every finding and its evidence (ops console, review and customer pages).
+- **Re-underwriting and the refresh job** go through the same path. In a periodic review an
+  ask (connect the payout account) is shown to the owner but does not stop the plan being
+  scored, except a bank that cannot be pulled.
+
+### Findings and what they do
+
+One table, `VERACITY_RULES` in `src/veracity/rules.ts`. The measured columns are from the
+default evaluation (5 seeds of 2,000, `evals/report.md`, "Data veracity"): the share of honest
+applicants on whom the finding fired, and the share of the fraud archetype it exists for on
+which it fired. "Exclude" means the source also stops counting toward revenue.
+
+| Finding                            | Check              | Consequence         | Honest fired | Fraud it targets: fired |
+| ---------------------------------- | ------------------ | ------------------- | -----------: | ----------------------- |
+| `BOTH_SOURCES_OTHER_BUSINESS`      | Ownership          | Knockout, exclude   |        0.00% | borrowed account 57%    |
+| `BANK_OWNER_MISMATCH`              | Ownership          | Refer               |        0.71% | borrowed account 100%   |
+| `PLATFORM_NAME_MISMATCH`           | Ownership          | Refer, exclude      |        0.62% | borrowed account 57%    |
+| `PLATFORM_TAX_ID_MISMATCH`         | Ownership          | Refer, exclude      |        0.47% | (none modeled)          |
+| `PERSONAL_ACCOUNT`                 | Ownership          | Inform              |        7.22% |                         |
+| `PAYOUT_ACCOUNT_NOT_CONNECTED`     | Payout destination | Needs info, exclude |        0.85% |                         |
+| `PAYOUTS_PARTLY_TO_UNSEEN_ACCOUNT` | Payout destination | Needs info, exclude |        0.00% | unsettled sales 50%     |
+| `SETTLEMENT_UNMATCHED`             | Settlement         | Refer, exclude      |        0.13% |                         |
+| `SETTLEMENT_LOW_MATCH`             | Settlement         | Exclude source      |        0.02% |                         |
+| `DEPOSITS_WITHOUT_PAYOUT`          | Settlement         | Refer, exclude      |        0.00% | (unit tested)           |
+| `SALES_NOT_PAID_OUT`               | Completeness       | Refer, exclude      |        0.00% | unsettled sales 50%     |
+| `POS_REVENUE_NOT_IN_BANK`          | Completeness       | Exclude source      |  not reached | (no payouts data)       |
+| `TRANSFERS_TO_UNSEEN_ACCOUNTS`     | Completeness       | Needs info          |        1.21% | hidden accounts 91%     |
+| `UNSHARED_ACCOUNTS`                | Completeness       | Inform              |       24.75% |                         |
+| `TRANSFERS_FROM_UNSEEN_ACCOUNTS`   | Completeness       | Inform              |        1.57% |                         |
+| `HISTORY_REWRITTEN`                | Consistency        | Knockout, exclude   |        0.00% | rewritten history 100%  |
+| `HISTORY_CHANGED`                  | Consistency        | Refer               |        0.35% |                         |
+| `SALES_HISTORY_CHANGED`            | Consistency        | Refer, exclude      |  not reached | (unit tested)           |
+| `HISTORY_MINOR_CHANGES`            | Consistency        | Inform              |        0.86% |                         |
+| `PLATFORM_NEW_WITH_SURGE`          | Account age        | Refer, exclude      |        0.35% | fresh POS account 80%   |
+| `PLATFORM_ACCOUNT_RECENT`          | Account age        | Reduce depth        |        6.26% |                         |
+| `BANK_ACCOUNT_RECENT`              | Account age        | Inform              |        0.30% |                         |
+| `DATA_GAP`                         | Account age        | Inform              |        0.00% |                         |
+| `BANK_DATA_UNAVAILABLE`            | Freshness          | Needs info          |        0.53% |                         |
+| `PLATFORM_DATA_UNAVAILABLE`        | Freshness          | Exclude source      |        0.96% |                         |
+| `LEGACY_BANK_CONNECTION`           | Method             | Reduce depth        |       18.92% |                         |
+| `DELEGATED_SEAT_SOURCE`            | Method             | Inform              |        6.15% |                         |
+
+Why each consequence:
+
+- **Knockout only where there is no innocent reading and a person could not fix it.**
+  `HISTORY_REWRITTEN`: posted debits vanishing from a closed period with nothing added. Late
+  posting inside the last 7 days of the earlier pull is forgiven; id and description changes
+  are ignored; duplicates are additions and go to `HISTORY_CHANGED`. The first run also knocked
+  out flattering additions, and two honest applicants whose aggregator duplicated old credits
+  were declined: that is why additions now refer. `BOTH_SOURCES_OTHER_BUSINESS`: the bank and
+  the platform, independently, name the same kind of thing (another business) as the holder.
+  Measured honest knockouts: 0 of 9,541.
+- **Needs info where the owner can settle it by connecting an account.** Payouts to an account
+  that is not connected, and sustained transfers to one, are both a missing connection: the
+  owner connects it, or the application waits. The first run referred `TRANSFERS_TO_UNSEEN_ACCOUNTS`
+  and `PAYOUTS_PARTLY_TO_UNSEEN_ACCOUNT`; review (which catches 70% of referred fraud by
+  assumption) let 2 of 9 hidden account and 1 of 5 unsettled sales applicants through on seed
+  1, and the fraud gate rose to 6.5% on that seed. Asking for the account is also what a
+  reviewer would do. The cost: honest businesses that sweep profit to savings are asked to
+  connect it (1.21% of honest applicants), and the evals treat an ask as terminal.
+- **Refer where an honest business can show it and a person can verify it.** A holder that is
+  a spouse or a holding company, a former company name on the platform, a tax id typo,
+  payouts that do not arrive, deposits that claim a platform with no record of them, a new
+  platform account arriving with a jump in revenue. Referral costs time, not the approval, for
+  an honest applicant (the evals assume a reviewer approves them), and it is bounded by the
+  refer ceiling and the new `veracity_honest_adverse` gate.
+- **Exclude the source when only that source is in doubt.** Weak reconciliation, a platform
+  that could not be pulled, or sales at the platform that do not reach the bank: decide on the
+  bank alone, which is what version 2 did for every applicant without a platform.
+- **Reduce depth for method strength.** A legacy bank connection and a young platform account
+  are weaker evidence, not bad evidence.
+- **Cap: nothing.** In a whole-lease product a capped limit is a counter offer that cannot open
+  a plan, so a cap is a decline in disguise. The mechanism exists (`CAP` holds the limit to 75%
+  of the request) and no finding uses it.
+- **Missing or failed connections are never a decline.** A bank that cannot be pulled is a
+  request to reconnect; a platform is dropped from the decision.
+
+### Thresholds
+
+All on `VERACITY_POLICY_V3` in `src/underwriting/policy.ts`.
+
+| Threshold                    | Value                                              | Why                                                                                                                                                                                                                                                                                                           |
+| ---------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name match                   | Dice 0.80 on normalized tokens                     | Suffixes, punctuation, case, "and"/"&", dba aliases and one-letter typos removed first. 0.80 accepts one extra word on a three word name ("Blue Door Bakery Cafe", 0.86) and rejects a changed word ("Blue Door Coffee", 0.67). People: same surname, and first name equal, an initial, or a common nickname. |
+| Reconciliation window        | 90 days, last 5 in transit                         | A quarter of payouts is enough to measure; payouts of the last few days may not have landed.                                                                                                                                                                                                                  |
+| Date tolerance               | 1 day before, 4 after                              | A processor can date a payout the day before it posts; weekends, holidays and holds push a deposit up to four days later.                                                                                                                                                                                     |
+| Amount tolerance             | larger of 0.5% and $1                              | Payout amounts are already net of fees, refunds and chargebacks, so they should match to the cent; this absorbs rounding and small bank adjustments.                                                                                                                                                          |
+| Combinations                 | up to 4                                            | Two or three locations paid separately, a bank that splits a transfer, a batch of daily payouts.                                                                                                                                                                                                              |
+| Minimum payouts              | 8                                                  | Fewer is not a rate.                                                                                                                                                                                                                                                                                          |
+| Use platform revenue         | 85% matched by amount                              | The old coarse check accepted 70% of monthly sales in deposits; matching payout by payout is precise, so the bar is higher.                                                                                                                                                                                   |
+| Refer                        | under 50% matched                                  | Most of what the platform says it paid into a connected account is not there.                                                                                                                                                                                                                                 |
+| Sales not paid out           | payouts under 75% of card net sales                | Payouts should be card sales less fees (about 97%); reserves and holds explain a few points, not a quarter.                                                                                                                                                                                                   |
+| Unseen payouts               | 15% of payouts                                     | Above rounding and a stray refund to another card.                                                                                                                                                                                                                                                            |
+| Deposits without a payout    | 3 or more, and 20% of deposits naming the platform | One or two can be a reversal or a correction.                                                                                                                                                                                                                                                                 |
+| Transfers to unseen accounts | 10% of 90 day revenue, in each of 3 months         | Sustained and material: the size of a loan or an advance, above a modest savings habit.                                                                                                                                                                                                                       |
+| Consistency tolerance        | last 7 days of the earlier pull forgiven           | Pending items post late, tips settle, a pending item drops: inside a week.                                                                                                                                                                                                                                    |
+| Material change              | 3 or more items, or 1% of volume                   | One or two corrected items are a bank correction.                                                                                                                                                                                                                                                             |
+| Recent account               | under 6 months                                     | Two quarters of history.                                                                                                                                                                                                                                                                                      |
+| Established business         | 24 months (bank), 12 (platform)                    | A two year old business with a three month old bank account is worth recording; a platform switch is common, so a lower bar applies there.                                                                                                                                                                    |
+| Surge                        | revenue 40% above the same span before             | Well above seasonal and growth movement over a few months.                                                                                                                                                                                                                                                    |
+| Data gap                     | 14 days                                            | Two weeks without a transaction in an operating account.                                                                                                                                                                                                                                                      |
+| Freshness                    | snapshot within 1 day, newest item within 7        | A decision reads today's data; the 7 days are the periodic review's existing rule.                                                                                                                                                                                                                            |
+
+These were chosen before the evaluation and not tuned on it. Two consequences and one
+condition were changed after the first run, with the reasons above; no threshold was.
+
+### The PD table
+
+Not regenerated. Version 3 changes the score only through the data depth factor (at most one
+point down for a legacy bank connection, and the second source point now needs a reconciled
+platform), and through which revenue figure is used when a platform is excluded. On the
+default run the honest applicants' through the door AUC is 0.873 against 0.873 for version 2
+on the same applicants, and the bad rate by grade is monotonic. Regenerating would change fees
+for every applicant for an effect inside the table's own noise; it is left for the next
+calibration.
 
 ## Policy rules
 
@@ -478,6 +629,15 @@ observed rent so the data matches what the applicant stated.
 | `new_business`      | Only four months of history                              | Needs info                                      |
 | `no_balance`        | No data returned                                         | Needs info                                      |
 
+Veracity keywords combine with any scenario. Bank: `personal` (a personal account in the
+owner's name), `borrowed` (held by another business), `new_account` (opened 60 days before
+it was linked), `hidden` (two more accounts on the login, not shared), `legacy` (not
+authorized through the bank's OAuth), `rewrites` (later pulls drop overdraft fees and debt
+payments), `expired` (later pulls need the owner to reconnect). Point of sale, on the sandbox
+consent page or a seat: `owner_mismatch`, `taxid_mismatch`, `payout_elsewhere`, `unsettled`,
+`new_account`, `expired`, `seat_inactive`, `seat_layout_changed`, `rewrites`. See
+`apps/api/README.md`.
+
 Example: `mock_healthy_rev_48000_rent_6200` is a $48,000 a month business paying $6,200
 in rent. Ask for the rent the token pins: a request more than 1.2 times the observed rent is
 capped, and one more than 2.4 times is declined. The sandbox history is one year long, so the
@@ -500,6 +660,7 @@ This is a reference implementation written to be read. It has not been calibrate
 real repayment outcomes. The weights, the cutoff, and the PD table are informed by a
 simulation of synthetic businesses, which shows that the policy is coherent under its
 assumptions and nothing more; all three need refitting on real outcomes before any real
-capital. The integrity checks were written against three scripted fraud behaviors and will
-catch those; real fraud adapts. The engine has no notion of industry seasonality beyond what
+capital. The integrity checks were written against three scripted fraud behaviors and the
+veracity checks against five more, and they will catch those; real fraud adapts. The honest
+messiness the veracity false positive rates are measured on is a set of choices as well. The engine has no notion of industry seasonality beyond what
 a year of history shows, and manual review has no document handling behind it yet.

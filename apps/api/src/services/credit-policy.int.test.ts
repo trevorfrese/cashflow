@@ -181,9 +181,12 @@ describe('decision history', () => {
       /snapshot|pdBps|expectedLoss|thresholds|minScore/,
     );
 
+    // Each engine decision also records its veracity assessment (data veracity phase).
     await expect(auditTypes('application', created.body.id)).resolves.toEqual([
       'DECISION_MADE',
+      'VERACITY_ASSESSED',
       'DECISION_MADE',
+      'VERACITY_ASSESSED',
       'LIMIT_FEE_SET',
     ]);
   });
@@ -254,6 +257,7 @@ describe('manual review', () => {
     ]);
     await expect(auditTypes('application', application.id)).resolves.toEqual([
       'DECISION_MADE',
+      'VERACITY_ASSESSED',
       'APPLICATION_REFERRED',
     ]);
   });
@@ -295,6 +299,7 @@ describe('manual review', () => {
     expect((await admin().get<unknown[]>('/v1/admin/reviews')).body).toEqual([]);
     await expect(auditTypes('application', application.id)).resolves.toEqual([
       'DECISION_MADE',
+      'VERACITY_ASSESSED',
       'APPLICATION_REFERRED',
       'REVIEW_RECORDED',
       'DECISION_MADE',

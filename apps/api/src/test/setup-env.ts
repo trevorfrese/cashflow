@@ -12,6 +12,9 @@ process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET ??= 'test-secret-not-for-production-use';
 process.env.ENABLE_ADMIN = 'true';
 process.env.JOBS_ENABLED = 'false';
+// Dev tools stay off in tests even when the local .env written by ./dev turns them on.
+// The suites that cover dev mode build their own app with it on.
+process.env.ENABLE_DEV_TOOLS = 'false';
 process.env.LOG_LEVEL = 'silent';
 process.env.UNDERWRITING_PROVIDER = 'mock';
 process.env.BANK_LINK_PROVIDER = 'mock';

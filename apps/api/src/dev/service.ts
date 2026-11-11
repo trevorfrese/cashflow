@@ -353,7 +353,8 @@ export async function landingFor(
     if (application) return { screen: 'APPLICATION', applicationId: application.id };
   }
   return {
-    screen: persona.landing === 'HISTORY' ? 'HISTORY' : 'HOME',
+    screen:
+      persona.landing === 'HISTORY' || persona.landing === 'CONNECTIONS' ? persona.landing : 'HOME',
     applicationId: null,
   };
 }
@@ -409,7 +410,11 @@ export async function overview(ctx: AppContext): Promise<DevOverview> {
     clock: readDevClock(),
     environment: {
       nodeEnv: config.NODE_ENV,
-      providers: Object.fromEntries(Object.entries(providers).map(([k, v]) => [k, v.name])),
+      providers: Object.fromEntries(
+        Object.entries(providers)
+          .filter(([, v]) => typeof (v as { name?: unknown }).name === 'string')
+          .map(([k, v]) => [k, (v as { name: string }).name]),
+      ),
       jobsEnabled: config.JOBS_ENABLED,
       adminEnabled: config.ENABLE_ADMIN,
     },

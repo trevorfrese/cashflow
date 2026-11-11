@@ -2,6 +2,7 @@
 
 import {
   OperatorApplicationDetail,
+  OperatorConnections,
   RecordReviewResponse,
   ReviewReasonCode,
   type OperatorDecision,
@@ -46,6 +47,7 @@ import {
   REVIEW_REASONS,
   triggerLabel,
 } from '@/lib/labels';
+import { ConnectionsPanel } from '@/components/connections';
 import { useAction, useApi } from '@/lib/use-api';
 
 type Detail = OperatorApplicationDetail;
@@ -60,10 +62,16 @@ const OUTCOME_OF: Record<Decision, string> = {
 export default function ReviewDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const detail = useApi(`applications/${id}`, OperatorApplicationDetail);
+  const connections = useApi(`applications/${id}/connections`, OperatorConnections);
   return (
-    <Load from={detail} rows={10}>
-      {(d) => <Review detail={d} reload={detail.reload} />}
-    </Load>
+    <>
+      <Load from={detail} rows={10}>
+        {(d) => <Review detail={d} reload={detail.reload} />}
+      </Load>
+      <Load from={connections} rows={6}>
+        {(c) => <ConnectionsPanel data={c} />}
+      </Load>
+    </>
   );
 }
 

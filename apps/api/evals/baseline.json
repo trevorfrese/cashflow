@@ -6,9 +6,10 @@
     "arrivalMonths": 12,
     "monthlyGrowthBps": 1000,
     "poolSizeCents": 750000000,
-    "policyVersion": "cashflow-v2",
+    "policyVersion": "cashflow-v3",
     "servicingPolicy": "standard",
-    "reviewFraudCatchRateBps": 7000
+    "reviewFraudCatchRateBps": 7000,
+    "gated": "v3_standard"
   },
   "configurations": {
     "v1_baseline": {
@@ -17,235 +18,236 @@
       "gated": false,
       "headline": {
         "base": {
-          "approvalRateBps": 6762,
-          "usableApprovalRateBps": 4472,
-          "counterOffers": 2290,
-          "unusableCounterOffers": 2290,
+          "approvalRateBps": 6611,
+          "usableApprovalRateBps": 4548,
+          "counterOffers": 2063,
+          "unusableCounterOffers": 2063,
           "referRateBps": 0,
-          "declineRateBps": 2490,
-          "needsInfoRateBps": 748,
-          "plans": 4472,
-          "volumeCents": 21895800000,
-          "feeIncomeCents": 329675591,
-          "costOfFundsCents": 89623317,
-          "servicingCostCents": 64396800,
-          "chargeOffCents": 484218750,
-          "recoveryCents": 48421875,
-          "netLossCents": 435796875,
-          "netLossBps": 199,
-          "netMarginCents": -260141401,
-          "netMarginBps": -119,
-          "badRateBps": 470,
-          "firstPaymentDefaultRateBps": 38,
-          "profitableShareBps": 9063,
+          "declineRateBps": 2436,
+          "needsInfoRateBps": 953,
+          "plans": 4548,
+          "volumeCents": 22771380000,
+          "feeIncomeCents": 344223754,
+          "costOfFundsCents": 101333259,
+          "servicingCostCents": 65491200,
+          "chargeOffCents": 590862500,
+          "recoveryCents": 59086250,
+          "netLossCents": 531776250,
+          "netLossBps": 234,
+          "netMarginCents": -354376955,
+          "netMarginBps": -156,
+          "badRateBps": 534,
+          "firstPaymentDefaultRateBps": 57,
+          "profitableShareBps": 9011,
           "auc": 0.67,
-          "ks": 0.262,
-          "fraudApprovalRateBps": 4574,
-          "poolMinCents": 381668887,
-          "poolPeakUtilizationBps": 5080,
+          "ks": 0.256,
+          "fraudApprovalRateBps": 4793,
+          "poolMinCents": 368499540,
+          "poolPeakUtilizationBps": 5257,
           "unfundedPayouts": 0,
           "heldPayouts": 0,
           "releasedPayouts": 0,
           "cancelledPayouts": 0,
           "rollRateBpsByBucket": {
-            "CURRENT": 43,
+            "CURRENT": 46,
             "GRACE": 0,
-            "DELINQUENT": 6060,
-            "DEFAULT": 9881
+            "DELINQUENT": 6050,
+            "DEFAULT": 9899
           },
           "entryRollRateBpsByBucket": {
-            "CURRENT": 43,
-            "GRACE": 3677,
-            "DELINQUENT": 5455,
-            "DEFAULT": 9482
+            "CURRENT": 46,
+            "GRACE": 3253,
+            "DELINQUENT": 5182,
+            "DEFAULT": 9548
           },
           "badRateBpsByGrade": {
-            "A": 413,
-            "B": 1219,
-            "C": 10000
+            "A": 463,
+            "B": 1344,
+            "C": 4167,
+            "D": 0
           }
         },
         "mild": {
-          "approvalRateBps": 6120,
-          "usableApprovalRateBps": 3777,
-          "counterOffers": 2343,
-          "unusableCounterOffers": 2343,
+          "approvalRateBps": 5978,
+          "usableApprovalRateBps": 3886,
+          "counterOffers": 2092,
+          "unusableCounterOffers": 2092,
           "referRateBps": 0,
-          "declineRateBps": 2914,
-          "needsInfoRateBps": 966,
-          "plans": 3777,
-          "volumeCents": 18083100000,
-          "feeIncomeCents": 273502585,
-          "costOfFundsCents": 77591365,
-          "servicingCostCents": 54388800,
-          "chargeOffCents": 432340000,
-          "recoveryCents": 43234000,
-          "netLossCents": 389106000,
-          "netLossBps": 215,
-          "netMarginCents": -247583580,
-          "netMarginBps": -137,
-          "badRateBps": 442,
-          "firstPaymentDefaultRateBps": 34,
-          "profitableShareBps": 9055,
-          "auc": 0.679,
-          "ks": 0.277,
-          "fraudApprovalRateBps": 3992,
-          "poolMinCents": 440143087,
-          "poolPeakUtilizationBps": 4317,
+          "declineRateBps": 2847,
+          "needsInfoRateBps": 1175,
+          "plans": 3886,
+          "volumeCents": 18981120000,
+          "feeIncomeCents": 288685325,
+          "costOfFundsCents": 84892604,
+          "servicingCostCents": 55958400,
+          "chargeOffCents": 489746250,
+          "recoveryCents": 48974625,
+          "netLossCents": 440771625,
+          "netLossBps": 232,
+          "netMarginCents": -292937304,
+          "netMarginBps": -154,
+          "badRateBps": 525,
+          "firstPaymentDefaultRateBps": 49,
+          "profitableShareBps": 9002,
+          "auc": 0.682,
+          "ks": 0.271,
+          "fraudApprovalRateBps": 4096,
+          "poolMinCents": 422208676,
+          "poolPeakUtilizationBps": 4524,
           "unfundedPayouts": 0,
           "heldPayouts": 0,
           "releasedPayouts": 0,
           "cancelledPayouts": 0,
           "rollRateBpsByBucket": {
-            "CURRENT": 37,
+            "CURRENT": 39,
             "GRACE": 0,
-            "DELINQUENT": 4275,
-            "DEFAULT": 9790
+            "DELINQUENT": 4347,
+            "DEFAULT": 9791
           },
           "entryRollRateBpsByBucket": {
-            "CURRENT": 38,
-            "GRACE": 3587,
-            "DELINQUENT": 4603,
-            "DEFAULT": 9110
+            "CURRENT": 41,
+            "GRACE": 2978,
+            "DELINQUENT": 4297,
+            "DEFAULT": 9093
           },
           "badRateBpsByGrade": {
-            "A": 375,
-            "B": 1201,
-            "C": 10000
+            "A": 441,
+            "B": 1261,
+            "C": 6250
           }
         }
       },
       "throughTheDoor": {
-        "scored": 9252,
+        "scored": 9047,
         "honest": {
-          "auc": 0.845,
-          "ks": 0.572,
-          "goods": 7480,
-          "bads": 1573
+          "auc": 0.843,
+          "ks": 0.563,
+          "goods": 7181,
+          "bads": 1508
         },
         "all": {
-          "auc": 0.837,
-          "ks": 0.536,
-          "goods": 7525,
-          "bads": 1727
+          "auc": 0.829,
+          "ks": 0.526,
+          "goods": 7304,
+          "bads": 1743
         },
         "bySeed": [
           {
             "seed": "1",
             "honest": {
-              "auc": 0.871,
-              "ks": 0.624,
-              "goods": 1517,
-              "bads": 305
+              "auc": 0.867,
+              "ks": 0.609,
+              "goods": 1460,
+              "bads": 297
             },
             "all": {
-              "auc": 0.863,
-              "ks": 0.579,
-              "goods": 1522,
-              "bads": 333
+              "auc": 0.854,
+              "ks": 0.562,
+              "goods": 1480,
+              "bads": 334
             }
           },
           {
             "seed": "2",
             "honest": {
-              "auc": 0.835,
-              "ks": 0.554,
-              "goods": 1494,
-              "bads": 305
+              "auc": 0.833,
+              "ks": 0.552,
+              "goods": 1428,
+              "bads": 288
             },
             "all": {
-              "auc": 0.828,
-              "ks": 0.526,
-              "goods": 1503,
-              "bads": 338
+              "auc": 0.824,
+              "ks": 0.523,
+              "goods": 1453,
+              "bads": 345
             }
           },
           {
             "seed": "3",
             "honest": {
-              "auc": 0.842,
-              "ks": 0.571,
-              "goods": 1506,
-              "bads": 299
+              "auc": 0.838,
+              "ks": 0.566,
+              "goods": 1446,
+              "bads": 288
             },
             "all": {
-              "auc": 0.829,
-              "ks": 0.543,
-              "goods": 1514,
-              "bads": 331
+              "auc": 0.823,
+              "ks": 0.531,
+              "goods": 1469,
+              "bads": 335
             }
           },
           {
             "seed": "4",
             "honest": {
-              "auc": 0.843,
-              "ks": 0.573,
-              "goods": 1502,
-              "bads": 304
+              "auc": 0.84,
+              "ks": 0.568,
+              "goods": 1447,
+              "bads": 293
             },
             "all": {
-              "auc": 0.832,
-              "ks": 0.542,
-              "goods": 1516,
-              "bads": 337
+              "auc": 0.819,
+              "ks": 0.52,
+              "goods": 1475,
+              "bads": 342
             }
           },
           {
             "seed": "5",
             "honest": {
-              "auc": 0.836,
-              "ks": 0.566,
-              "goods": 1461,
-              "bads": 360
+              "auc": 0.837,
+              "ks": 0.568,
+              "goods": 1400,
+              "bads": 342
             },
             "all": {
-              "auc": 0.83,
-              "ks": 0.535,
-              "goods": 1470,
-              "bads": 388
+              "auc": 0.824,
+              "ks": 0.525,
+              "goods": 1427,
+              "bads": 387
             }
           }
         ],
         "honestBadRateBpsByScoreBand": {
-          "0-29": 7917,
-          "30-39": 6490,
-          "40-44": 4969,
-          "45-49": 3743,
-          "50-54": 2396,
-          "55-59": 2283,
-          "60-64": 1453,
-          "65-69": 1100,
-          "70-74": 794,
-          "75-79": 796,
-          "80-84": 598,
-          "85-89": 554,
-          "90-94": 353,
+          "0-29": 7872,
+          "30-39": 6530,
+          "40-44": 5018,
+          "45-49": 3703,
+          "50-54": 2837,
+          "55-59": 2525,
+          "60-64": 1735,
+          "65-69": 1258,
+          "70-74": 810,
+          "75-79": 841,
+          "80-84": 628,
+          "85-89": 541,
+          "90-94": 383,
           "95-100": 225
         },
         "honestBadRateBpsByGrade": {
-          "A": 397,
-          "B": 782,
-          "C": 1681,
-          "D": 3430,
-          "F": 5924
+          "A": 407,
+          "B": 822,
+          "C": 1941,
+          "D": 3490,
+          "F": 5988
         },
         "honestBadRateBpsByPolicyOutcome": {
-          "approvedUsable": 416,
-          "approvedCounterOffer": 1102,
-          "declined": 4749
+          "approvedUsable": 440,
+          "approvedCounterOffer": 1101,
+          "declined": 4774
         },
         "badRateBpsByPolicyOutcome": {
-          "approvedUsable": 470,
-          "approvedCounterOffer": 1341,
-          "declined": 4859
+          "approvedUsable": 534,
+          "approvedCounterOffer": 1449,
+          "declined": 4930
         }
       },
       "gates": [
         {
           "id": "net_loss_base",
-          "value": 200,
-          "min": 150,
-          "max": 235,
+          "value": 234,
+          "min": 189,
+          "max": 295,
           "comparator": "<=",
           "threshold": 75,
           "unit": "bps of volume",
@@ -253,9 +255,9 @@
         },
         {
           "id": "net_margin_base",
-          "value": -52028280,
-          "min": -68080014,
-          "max": -29991086,
+          "value": -70875391,
+          "min": -100007049,
+          "max": -47740830,
           "comparator": ">",
           "threshold": 0,
           "unit": "cents",
@@ -263,9 +265,9 @@
         },
         {
           "id": "net_margin_mild_stress",
-          "value": -49516716,
-          "min": -88720296,
-          "max": -3864169,
+          "value": -58587461,
+          "min": -81968106,
+          "max": -27935246,
           "comparator": ">",
           "threshold": 0,
           "unit": "cents",
@@ -283,9 +285,9 @@
         },
         {
           "id": "auc",
-          "value": 0.845,
-          "min": 0.835,
-          "max": 0.871,
+          "value": 0.843,
+          "min": 0.833,
+          "max": 0.867,
           "comparator": ">=",
           "threshold": 0.7,
           "unit": "AUC",
@@ -293,9 +295,9 @@
         },
         {
           "id": "fraud_approval",
-          "value": 4570,
-          "min": 4423,
-          "max": 4746,
+          "value": 4817,
+          "min": 4412,
+          "max": 5325,
           "comparator": "<",
           "threshold": 500,
           "unit": "bps of fraud applicants",
@@ -313,9 +315,9 @@
         },
         {
           "id": "approval_floor",
-          "value": 4472,
-          "min": 4285,
-          "max": 4645,
+          "value": 4548,
+          "min": 4410,
+          "max": 4675,
           "comparator": ">=",
           "threshold": 3000,
           "unit": "bps of applicants",
@@ -329,6 +331,16 @@
           "comparator": "<=",
           "threshold": 500,
           "unit": "bps of applicants",
+          "pass": true
+        },
+        {
+          "id": "veracity_honest_adverse",
+          "value": 0,
+          "min": 0,
+          "max": 0,
+          "comparator": "<=",
+          "threshold": 300,
+          "unit": "bps of honest applicants",
           "pass": true
         }
       ]
@@ -339,52 +351,53 @@
       "gated": false,
       "headline": {
         "base": {
-          "approvalRateBps": 6762,
-          "usableApprovalRateBps": 4472,
-          "counterOffers": 2290,
-          "unusableCounterOffers": 2290,
+          "approvalRateBps": 6611,
+          "usableApprovalRateBps": 4548,
+          "counterOffers": 2063,
+          "unusableCounterOffers": 2063,
           "referRateBps": 0,
-          "declineRateBps": 2490,
-          "needsInfoRateBps": 748,
-          "plans": 4472,
-          "volumeCents": 21442940000,
-          "feeIncomeCents": 329104094,
-          "costOfFundsCents": 55110432,
-          "servicingCostCents": 63072000,
-          "chargeOffCents": 63882500,
-          "recoveryCents": 6388250,
-          "netLossCents": 57494250,
-          "netLossBps": 27,
-          "netMarginCents": 153427412,
-          "netMarginBps": 72,
-          "badRateBps": 479,
-          "firstPaymentDefaultRateBps": 38,
-          "profitableShareBps": 9061,
-          "auc": 0.673,
-          "ks": 0.266,
-          "fraudApprovalRateBps": 4574,
-          "poolMinCents": 390074737,
-          "poolPeakUtilizationBps": 4966,
+          "declineRateBps": 2436,
+          "needsInfoRateBps": 953,
+          "plans": 4548,
+          "volumeCents": 22214880000,
+          "feeIncomeCents": 343523246,
+          "costOfFundsCents": 58096950,
+          "servicingCostCents": 63840000,
+          "chargeOffCents": 72580000,
+          "recoveryCents": 7258000,
+          "netLossCents": 65322000,
+          "netLossBps": 29,
+          "netMarginCents": 156264296,
+          "netMarginBps": 70,
+          "badRateBps": 547,
+          "firstPaymentDefaultRateBps": 59,
+          "profitableShareBps": 9004,
+          "auc": 0.674,
+          "ks": 0.263,
+          "fraudApprovalRateBps": 4793,
+          "poolMinCents": 381673578,
+          "poolPeakUtilizationBps": 5081,
           "unfundedPayouts": 0,
-          "heldPayouts": 534,
-          "releasedPayouts": 50,
-          "cancelledPayouts": 484,
+          "heldPayouts": 639,
+          "releasedPayouts": 61,
+          "cancelledPayouts": 578,
           "rollRateBpsByBucket": {
-            "CURRENT": 46,
+            "CURRENT": 50,
             "GRACE": 0,
-            "DELINQUENT": 5457,
-            "DEFAULT": 9376
+            "DELINQUENT": 5548,
+            "DEFAULT": 9426
           },
           "entryRollRateBpsByBucket": {
-            "CURRENT": 55,
-            "GRACE": 3630,
-            "DELINQUENT": 4283,
-            "DEFAULT": 8128
+            "CURRENT": 59,
+            "GRACE": 3209,
+            "DELINQUENT": 3972,
+            "DEFAULT": 8255
           },
           "badRateBpsByGrade": {
-            "A": 420,
-            "B": 1254,
-            "C": 10000
+            "A": 472,
+            "B": 1375,
+            "C": 4167,
+            "D": 10000
           }
         }
       }
@@ -395,236 +408,237 @@
       "gated": false,
       "headline": {
         "base": {
-          "approvalRateBps": 6084,
-          "usableApprovalRateBps": 4071,
-          "counterOffers": 2013,
-          "unusableCounterOffers": 2013,
-          "referRateBps": 166,
-          "declineRateBps": 3168,
-          "needsInfoRateBps": 748,
-          "plans": 4071,
-          "volumeCents": 17264340000,
-          "feeIncomeCents": 265379537,
-          "costOfFundsCents": 62085457,
-          "servicingCostCents": 58622400,
-          "chargeOffCents": 271838750,
-          "recoveryCents": 27183875,
-          "netLossCents": 244654875,
-          "netLossBps": 142,
-          "netMarginCents": -99983195,
-          "netMarginBps": -58,
-          "badRateBps": 349,
-          "firstPaymentDefaultRateBps": 25,
-          "profitableShareBps": 9654,
-          "auc": 0.672,
-          "ks": 0.299,
-          "fraudApprovalRateBps": 78,
-          "poolMinCents": 460690699,
-          "poolPeakUtilizationBps": 4017,
+          "approvalRateBps": 5938,
+          "usableApprovalRateBps": 4095,
+          "counterOffers": 1843,
+          "unusableCounterOffers": 1843,
+          "referRateBps": 223,
+          "declineRateBps": 3108,
+          "needsInfoRateBps": 954,
+          "plans": 4095,
+          "volumeCents": 17495400000,
+          "feeIncomeCents": 270177988,
+          "costOfFundsCents": 67994047,
+          "servicingCostCents": 58968000,
+          "chargeOffCents": 334288750,
+          "recoveryCents": 33428875,
+          "netLossCents": 300859875,
+          "netLossBps": 172,
+          "netMarginCents": -157643934,
+          "netMarginBps": -90,
+          "badRateBps": 408,
+          "firstPaymentDefaultRateBps": 44,
+          "profitableShareBps": 9595,
+          "auc": 0.676,
+          "ks": 0.324,
+          "fraudApprovalRateBps": 1678,
+          "poolMinCents": 455619034,
+          "poolPeakUtilizationBps": 4086,
           "unfundedPayouts": 0,
           "heldPayouts": 0,
           "releasedPayouts": 0,
           "cancelledPayouts": 0,
           "rollRateBpsByBucket": {
-            "CURRENT": 34,
+            "CURRENT": 38,
             "GRACE": 0,
-            "DELINQUENT": 9132,
-            "DEFAULT": 9978
+            "DELINQUENT": 8535,
+            "DEFAULT": 9980
           },
           "entryRollRateBpsByBucket": {
-            "CURRENT": 34,
-            "GRACE": 8145,
-            "DELINQUENT": 8980,
-            "DEFAULT": 9878
+            "CURRENT": 38,
+            "GRACE": 7192,
+            "DELINQUENT": 8466,
+            "DEFAULT": 9859
           },
           "badRateBpsByGrade": {
-            "A": 310,
-            "B": 924,
-            "C": 588
+            "A": 356,
+            "B": 1010,
+            "C": 541,
+            "D": 3333
           }
         },
         "mild": {
-          "approvalRateBps": 5198,
-          "usableApprovalRateBps": 3299,
-          "counterOffers": 1899,
-          "unusableCounterOffers": 1899,
-          "referRateBps": 149,
-          "declineRateBps": 3836,
-          "needsInfoRateBps": 966,
-          "plans": 3299,
-          "volumeCents": 13735080000,
-          "feeIncomeCents": 212242152,
-          "costOfFundsCents": 48718257,
-          "servicingCostCents": 47505600,
-          "chargeOffCents": 204385000,
-          "recoveryCents": 20438500,
-          "netLossCents": 183946500,
-          "netLossBps": 134,
-          "netMarginCents": -67928205,
-          "netMarginBps": -49,
-          "badRateBps": 309,
-          "firstPaymentDefaultRateBps": 18,
-          "profitableShareBps": 9697,
-          "auc": 0.679,
-          "ks": 0.361,
-          "fraudApprovalRateBps": 0,
-          "poolMinCents": 517553953,
-          "poolPeakUtilizationBps": 3269,
+          "approvalRateBps": 5077,
+          "usableApprovalRateBps": 3360,
+          "counterOffers": 1717,
+          "unusableCounterOffers": 1717,
+          "referRateBps": 194,
+          "declineRateBps": 3746,
+          "needsInfoRateBps": 1177,
+          "plans": 3360,
+          "volumeCents": 14117580000,
+          "feeIncomeCents": 218895565,
+          "costOfFundsCents": 53191429,
+          "servicingCostCents": 48384000,
+          "chargeOffCents": 248471250,
+          "recoveryCents": 24847125,
+          "netLossCents": 223624125,
+          "netLossBps": 158,
+          "netMarginCents": -106303989,
+          "netMarginBps": -75,
+          "badRateBps": 390,
+          "firstPaymentDefaultRateBps": 36,
+          "profitableShareBps": 9622,
+          "auc": 0.7,
+          "ks": 0.376,
+          "fraudApprovalRateBps": 1329,
+          "poolMinCents": 508186528,
+          "poolPeakUtilizationBps": 3395,
           "unfundedPayouts": 0,
           "heldPayouts": 0,
           "releasedPayouts": 0,
           "cancelledPayouts": 0,
           "rollRateBpsByBucket": {
-            "CURRENT": 29,
+            "CURRENT": 33,
             "GRACE": 0,
-            "DELINQUENT": 8817,
-            "DEFAULT": 9923
+            "DELINQUENT": 8132,
+            "DEFAULT": 9908
           },
           "entryRollRateBpsByBucket": {
-            "CURRENT": 30,
-            "GRACE": 6622,
-            "DELINQUENT": 7903,
-            "DEFAULT": 9715
+            "CURRENT": 34,
+            "GRACE": 5362,
+            "DELINQUENT": 7066,
+            "DEFAULT": 9658
           },
           "badRateBpsByGrade": {
-            "A": 271,
-            "B": 880,
-            "C": 0,
-            "D": 0
+            "A": 322,
+            "B": 1048,
+            "C": 1389,
+            "D": 2500
           }
         }
       },
       "throughTheDoor": {
-        "scored": 9252,
+        "scored": 9046,
         "honest": {
-          "auc": 0.861,
-          "ks": 0.577,
-          "goods": 7477,
-          "bads": 1576
+          "auc": 0.859,
+          "ks": 0.581,
+          "goods": 7179,
+          "bads": 1510
         },
         "all": {
-          "auc": 0.852,
-          "ks": 0.546,
-          "goods": 7521,
-          "bads": 1731
+          "auc": 0.845,
+          "ks": 0.537,
+          "goods": 7300,
+          "bads": 1746
         },
         "bySeed": [
           {
             "seed": "1",
             "honest": {
-              "auc": 0.887,
+              "auc": 0.884,
               "ks": 0.624,
-              "goods": 1517,
-              "bads": 305
+              "goods": 1460,
+              "bads": 297
             },
             "all": {
-              "auc": 0.88,
-              "ks": 0.599,
-              "goods": 1523,
-              "bads": 332
+              "auc": 0.872,
+              "ks": 0.588,
+              "goods": 1481,
+              "bads": 333
             }
           },
           {
             "seed": "2",
             "honest": {
-              "auc": 0.848,
+              "auc": 0.845,
               "ks": 0.554,
-              "goods": 1494,
-              "bads": 305
+              "goods": 1428,
+              "bads": 288
             },
             "all": {
-              "auc": 0.844,
-              "ks": 0.533,
-              "goods": 1503,
-              "bads": 338
+              "auc": 0.838,
+              "ks": 0.529,
+              "goods": 1452,
+              "bads": 345
             }
           },
           {
             "seed": "3",
             "honest": {
-              "auc": 0.859,
-              "ks": 0.586,
-              "goods": 1503,
-              "bads": 302
+              "auc": 0.854,
+              "ks": 0.587,
+              "goods": 1444,
+              "bads": 290
             },
             "all": {
-              "auc": 0.846,
-              "ks": 0.541,
-              "goods": 1510,
-              "bads": 335
+              "auc": 0.839,
+              "ks": 0.533,
+              "goods": 1466,
+              "bads": 338
             }
           },
           {
             "seed": "4",
             "honest": {
-              "auc": 0.864,
+              "auc": 0.863,
               "ks": 0.594,
-              "goods": 1501,
-              "bads": 305
+              "goods": 1446,
+              "bads": 294
             },
             "all": {
-              "auc": 0.852,
-              "ks": 0.556,
-              "goods": 1514,
-              "bads": 339
+              "auc": 0.84,
+              "ks": 0.533,
+              "goods": 1473,
+              "bads": 344
             }
           },
           {
             "seed": "5",
             "honest": {
-              "auc": 0.848,
-              "ks": 0.557,
-              "goods": 1462,
-              "bads": 359
+              "auc": 0.85,
+              "ks": 0.562,
+              "goods": 1401,
+              "bads": 341
             },
             "all": {
-              "auc": 0.84,
-              "ks": 0.527,
-              "goods": 1471,
-              "bads": 387
+              "auc": 0.834,
+              "ks": 0.522,
+              "goods": 1428,
+              "bads": 386
             }
           }
         ],
         "honestBadRateBpsByScoreBand": {
-          "0-29": 8523,
-          "30-39": 4294,
-          "40-44": 2889,
-          "45-49": 3057,
-          "50-54": 2400,
-          "55-59": 1719,
-          "60-64": 1484,
-          "65-69": 1387,
-          "70-74": 1174,
-          "75-79": 773,
-          "80-84": 723,
-          "85-89": 452,
-          "90-94": 335,
-          "95-100": 171
+          "0-29": 8455,
+          "30-39": 4350,
+          "40-44": 3952,
+          "45-49": 3144,
+          "50-54": 2536,
+          "55-59": 1698,
+          "60-64": 1617,
+          "65-69": 1360,
+          "70-74": 1192,
+          "75-79": 725,
+          "80-84": 774,
+          "85-89": 493,
+          "90-94": 288,
+          "95-100": 192
         },
         "honestBadRateBpsByGrade": {
-          "A": 353,
-          "B": 997,
-          "C": 1564,
-          "D": 2689,
-          "F": 5005
+          "A": 362,
+          "B": 978,
+          "C": 1599,
+          "D": 2829,
+          "F": 5097
         },
         "honestBadRateBpsByPolicyOutcome": {
-          "approvedUsable": 349,
-          "approvedCounterOffer": 632,
-          "declined": 4399
+          "approvedUsable": 366,
+          "approvedCounterOffer": 599,
+          "declined": 4431
         },
         "badRateBpsByPolicyOutcome": {
-          "approvedUsable": 349,
-          "approvedCounterOffer": 631,
-          "declined": 4615
+          "approvedUsable": 408,
+          "approvedCounterOffer": 657,
+          "declined": 4691
         }
       },
       "gates": [
         {
           "id": "net_loss_base",
-          "value": 142,
-          "min": 101,
-          "max": 170,
+          "value": 173,
+          "min": 138,
+          "max": 195,
           "comparator": "<=",
           "threshold": 75,
           "unit": "bps of volume",
@@ -632,9 +646,9 @@
         },
         {
           "id": "net_margin_base",
-          "value": -19996639,
-          "min": -30323060,
-          "max": -4912677,
+          "value": -31528787,
+          "min": -39196245,
+          "max": -19477045,
           "comparator": ">",
           "threshold": 0,
           "unit": "cents",
@@ -642,9 +656,9 @@
         },
         {
           "id": "net_margin_mild_stress",
-          "value": -13585641,
-          "min": -26441218,
-          "max": 14497548,
+          "value": -21260798,
+          "min": -33932466,
+          "max": 1169005,
           "comparator": ">",
           "threshold": 0,
           "unit": "cents",
@@ -652,19 +666,19 @@
         },
         {
           "id": "bad_rate_monotonic",
-          "value": 0,
+          "value": 1,
           "min": 0,
-          "max": 1,
+          "max": 0,
           "comparator": "=",
           "threshold": 0,
           "unit": "inversions",
-          "pass": true
+          "pass": false
         },
         {
           "id": "auc",
-          "value": 0.861,
-          "min": 0.848,
-          "max": 0.887,
+          "value": 0.859,
+          "min": 0.845,
+          "max": 0.884,
           "comparator": ">=",
           "threshold": 0.7,
           "unit": "AUC",
@@ -672,13 +686,13 @@
         },
         {
           "id": "fraud_approval",
-          "value": 82,
-          "min": 0,
-          "max": 213,
+          "value": 1701,
+          "min": 1364,
+          "max": 2338,
           "comparator": "<",
           "threshold": 500,
           "unit": "bps of fraud applicants",
-          "pass": true
+          "pass": false
         },
         {
           "id": "pool_funding",
@@ -692,9 +706,9 @@
         },
         {
           "id": "approval_floor",
-          "value": 4071,
-          "min": 3900,
-          "max": 4245,
+          "value": 4095,
+          "min": 3945,
+          "max": 4235,
           "comparator": ">=",
           "threshold": 3000,
           "unit": "bps of applicants",
@@ -702,12 +716,22 @@
         },
         {
           "id": "refer_rate",
-          "value": 166,
-          "min": 145,
-          "max": 200,
+          "value": 223,
+          "min": 205,
+          "max": 240,
           "comparator": "<=",
           "threshold": 500,
           "unit": "bps of applicants",
+          "pass": true
+        },
+        {
+          "id": "veracity_honest_adverse",
+          "value": 0,
+          "min": 0,
+          "max": 0,
+          "comparator": "<=",
+          "threshold": 300,
+          "unit": "bps of honest applicants",
           "pass": true
         }
       ]
@@ -715,289 +739,240 @@
     "v2_standard": {
       "policyVersion": "cashflow-v2",
       "servicingPolicy": "standard",
-      "gated": true,
+      "gated": false,
       "headline": {
         "base": {
-          "approvalRateBps": 6084,
-          "usableApprovalRateBps": 4071,
-          "counterOffers": 2013,
-          "unusableCounterOffers": 2013,
-          "referRateBps": 166,
-          "declineRateBps": 3168,
-          "needsInfoRateBps": 748,
-          "plans": 4071,
-          "volumeCents": 17022075000,
-          "feeIncomeCents": 265300819,
-          "costOfFundsCents": 42439639,
-          "servicingCostCents": 57682800,
-          "chargeOffCents": 33780000,
-          "recoveryCents": 3378000,
-          "netLossCents": 30402000,
-          "netLossBps": 18,
-          "netMarginCents": 134776380,
-          "netMarginBps": 79,
-          "badRateBps": 346,
-          "firstPaymentDefaultRateBps": 25,
-          "profitableShareBps": 9656,
-          "auc": 0.67,
-          "ks": 0.295,
-          "fraudApprovalRateBps": 78,
-          "poolMinCents": 466210449,
-          "poolPeakUtilizationBps": 3942,
+          "approvalRateBps": 5938,
+          "usableApprovalRateBps": 4095,
+          "counterOffers": 1843,
+          "unusableCounterOffers": 1843,
+          "referRateBps": 223,
+          "declineRateBps": 3108,
+          "needsInfoRateBps": 954,
+          "plans": 4095,
+          "volumeCents": 17193395000,
+          "feeIncomeCents": 270042820,
+          "costOfFundsCents": 43398798,
+          "servicingCostCents": 57777600,
+          "chargeOffCents": 39012500,
+          "recoveryCents": 3901250,
+          "netLossCents": 35111250,
+          "netLossBps": 20,
+          "netMarginCents": 133755172,
+          "netMarginBps": 78,
+          "badRateBps": 408,
+          "firstPaymentDefaultRateBps": 44,
+          "profitableShareBps": 9597,
+          "auc": 0.676,
+          "ks": 0.324,
+          "fraudApprovalRateBps": 1678,
+          "poolMinCents": 464768784,
+          "poolPeakUtilizationBps": 3964,
           "unfundedPayouts": 0,
-          "heldPayouts": 328,
-          "releasedPayouts": 5,
-          "cancelledPayouts": 323,
+          "heldPayouts": 403,
+          "releasedPayouts": 9,
+          "cancelledPayouts": 394,
           "rollRateBpsByBucket": {
-            "CURRENT": 36,
+            "CURRENT": 41,
             "GRACE": 0,
-            "DELINQUENT": 9433,
-            "DEFAULT": 9979
+            "DELINQUENT": 8967,
+            "DEFAULT": 9934
           },
           "entryRollRateBpsByBucket": {
-            "CURRENT": 37,
-            "GRACE": 8454,
-            "DELINQUENT": 9077,
-            "DEFAULT": 9897
+            "CURRENT": 42,
+            "GRACE": 7074,
+            "DELINQUENT": 8263,
+            "DEFAULT": 9848
           },
           "badRateBpsByGrade": {
-            "A": 310,
-            "B": 884,
-            "C": 588
+            "A": 356,
+            "B": 976,
+            "C": 811,
+            "D": 3333
           }
         },
         "mild": {
-          "approvalRateBps": 5198,
-          "usableApprovalRateBps": 3299,
-          "counterOffers": 1899,
-          "unusableCounterOffers": 1899,
-          "referRateBps": 149,
-          "declineRateBps": 3836,
-          "needsInfoRateBps": 966,
-          "plans": 3299,
-          "volumeCents": 13547485000,
-          "feeIncomeCents": 212117495,
-          "costOfFundsCents": 33755499,
-          "servicingCostCents": 46786800,
-          "chargeOffCents": 23362500,
-          "recoveryCents": 2336250,
-          "netLossCents": 21026250,
-          "netLossBps": 16,
-          "netMarginCents": 110548946,
-          "netMarginBps": 82,
-          "badRateBps": 321,
-          "firstPaymentDefaultRateBps": 18,
-          "profitableShareBps": 9691,
-          "auc": 0.689,
-          "ks": 0.374,
-          "fraudApprovalRateBps": 0,
-          "poolMinCents": 522503703,
-          "poolPeakUtilizationBps": 3201,
+          "approvalRateBps": 5077,
+          "usableApprovalRateBps": 3360,
+          "counterOffers": 1717,
+          "unusableCounterOffers": 1717,
+          "referRateBps": 194,
+          "declineRateBps": 3746,
+          "needsInfoRateBps": 1177,
+          "plans": 3360,
+          "volumeCents": 13886270000,
+          "feeIncomeCents": 218679028,
+          "costOfFundsCents": 34991561,
+          "servicingCostCents": 47436000,
+          "chargeOffCents": 28118750,
+          "recoveryCents": 2811875,
+          "netLossCents": 25306875,
+          "netLossBps": 18,
+          "netMarginCents": 110944592,
+          "netMarginBps": 80,
+          "badRateBps": 411,
+          "firstPaymentDefaultRateBps": 36,
+          "profitableShareBps": 9619,
+          "auc": 0.713,
+          "ks": 0.393,
+          "fraudApprovalRateBps": 1329,
+          "poolMinCents": 517045716,
+          "poolPeakUtilizationBps": 3274,
           "unfundedPayouts": 0,
-          "heldPayouts": 261,
-          "releasedPayouts": 9,
-          "cancelledPayouts": 252,
+          "heldPayouts": 341,
+          "releasedPayouts": 19,
+          "cancelledPayouts": 322,
           "rollRateBpsByBucket": {
-            "CURRENT": 32,
+            "CURRENT": 37,
             "GRACE": 0,
-            "DELINQUENT": 8592,
-            "DEFAULT": 9762
+            "DELINQUENT": 8098,
+            "DEFAULT": 9648
           },
           "entryRollRateBpsByBucket": {
-            "CURRENT": 32,
-            "GRACE": 6331,
-            "DELINQUENT": 6719,
-            "DEFAULT": 9122
+            "CURRENT": 38,
+            "GRACE": 5171,
+            "DELINQUENT": 5688,
+            "DEFAULT": 8880
           },
           "badRateBpsByGrade": {
-            "A": 277,
-            "B": 972,
-            "C": 0,
-            "D": 0
-          }
-        },
-        "severe": {
-          "approvalRateBps": 3641,
-          "usableApprovalRateBps": 2359,
-          "counterOffers": 1282,
-          "unusableCounterOffers": 1282,
-          "referRateBps": 95,
-          "declineRateBps": 4385,
-          "needsInfoRateBps": 1974,
-          "plans": 2359,
-          "volumeCents": 9580025000,
-          "feeIncomeCents": 149953414,
-          "costOfFundsCents": 24661432,
-          "servicingCostCents": 33138000,
-          "chargeOffCents": 31250000,
-          "recoveryCents": 3125000,
-          "netLossCents": 28125000,
-          "netLossBps": 29,
-          "netMarginCents": 64028982,
-          "netMarginBps": 67,
-          "badRateBps": 721,
-          "firstPaymentDefaultRateBps": 21,
-          "profitableShareBps": 9462,
-          "auc": 0.785,
-          "ks": 0.469,
-          "fraudApprovalRateBps": 0,
-          "poolMinCents": 593686894,
-          "poolPeakUtilizationBps": 2255,
-          "unfundedPayouts": 0,
-          "heldPayouts": 432,
-          "releasedPayouts": 68,
-          "cancelledPayouts": 364,
-          "rollRateBpsByBucket": {
-            "CURRENT": 54,
-            "GRACE": 0,
-            "DELINQUENT": 4760,
-            "DEFAULT": 8452
-          },
-          "entryRollRateBpsByBucket": {
-            "CURRENT": 61,
-            "GRACE": 2790,
-            "DELINQUENT": 3650,
-            "DEFAULT": 6848
-          },
-          "badRateBpsByGrade": {
-            "A": 502,
-            "B": 2924,
-            "C": 6667,
-            "D": 10000
+            "A": 332,
+            "B": 1169,
+            "C": 1667,
+            "D": 2500
           }
         }
       },
       "throughTheDoor": {
-        "scored": 9252,
+        "scored": 9046,
         "honest": {
-          "auc": 0.875,
-          "ks": 0.608,
-          "goods": 7337,
-          "bads": 1716
+          "auc": 0.873,
+          "ks": 0.609,
+          "goods": 7043,
+          "bads": 1646
         },
         "all": {
-          "auc": 0.867,
-          "ks": 0.578,
-          "goods": 7378,
-          "bads": 1874
+          "auc": 0.859,
+          "ks": 0.567,
+          "goods": 7158,
+          "bads": 1888
         },
         "bySeed": [
           {
             "seed": "1",
             "honest": {
-              "auc": 0.898,
+              "auc": 0.896,
               "ks": 0.653,
-              "goods": 1488,
-              "bads": 334
+              "goods": 1431,
+              "bads": 326
             },
             "all": {
-              "auc": 0.891,
-              "ks": 0.627,
-              "goods": 1495,
-              "bads": 360
+              "auc": 0.885,
+              "ks": 0.619,
+              "goods": 1452,
+              "bads": 362
             }
           },
           {
             "seed": "2",
             "honest": {
-              "auc": 0.866,
+              "auc": 0.859,
               "ks": 0.589,
-              "goods": 1468,
-              "bads": 331
+              "goods": 1404,
+              "bads": 312
             },
             "all": {
-              "auc": 0.861,
-              "ks": 0.569,
-              "goods": 1476,
-              "bads": 365
+              "auc": 0.852,
+              "ks": 0.556,
+              "goods": 1425,
+              "bads": 372
             }
           },
           {
             "seed": "3",
             "honest": {
-              "auc": 0.876,
-              "ks": 0.619,
-              "goods": 1468,
-              "bads": 337
+              "auc": 0.872,
+              "ks": 0.616,
+              "goods": 1410,
+              "bads": 324
             },
             "all": {
-              "auc": 0.863,
-              "ks": 0.574,
-              "goods": 1474,
-              "bads": 371
+              "auc": 0.856,
+              "ks": 0.562,
+              "goods": 1431,
+              "bads": 373
             }
           },
           {
             "seed": "4",
             "honest": {
-              "auc": 0.873,
-              "ks": 0.617,
-              "goods": 1481,
-              "bads": 325
+              "auc": 0.874,
+              "ks": 0.618,
+              "goods": 1426,
+              "bads": 314
             },
             "all": {
-              "auc": 0.862,
-              "ks": 0.58,
-              "goods": 1493,
-              "bads": 360
+              "auc": 0.853,
+              "ks": 0.564,
+              "goods": 1451,
+              "bads": 366
             }
           },
           {
             "seed": "5",
             "honest": {
-              "auc": 0.863,
-              "ks": 0.594,
-              "goods": 1432,
-              "bads": 389
+              "auc": 0.864,
+              "ks": 0.599,
+              "goods": 1372,
+              "bads": 370
             },
             "all": {
-              "auc": 0.856,
-              "ks": 0.566,
-              "goods": 1440,
-              "bads": 418
+              "auc": 0.849,
+              "ks": 0.556,
+              "goods": 1399,
+              "bads": 415
             }
           }
         ],
         "honestBadRateBpsByScoreBand": {
-          "0-29": 8765,
-          "30-39": 5055,
-          "40-44": 2741,
-          "45-49": 3248,
-          "50-54": 2400,
-          "55-59": 1765,
-          "60-64": 1563,
+          "0-29": 8665,
+          "30-39": 5130,
+          "40-44": 4311,
+          "45-49": 3247,
+          "50-54": 2488,
+          "55-59": 1745,
+          "60-64": 1745,
           "65-69": 1329,
-          "70-74": 1174,
-          "75-79": 810,
-          "80-84": 738,
-          "85-89": 452,
-          "90-94": 335,
-          "95-100": 171
+          "70-74": 1217,
+          "75-79": 763,
+          "80-84": 789,
+          "85-89": 493,
+          "90-94": 288,
+          "95-100": 192
         },
         "honestBadRateBpsByGrade": {
-          "A": 356,
-          "B": 997,
-          "C": 1609,
-          "D": 2773,
-          "F": 5612
+          "A": 364,
+          "B": 996,
+          "C": 1664,
+          "D": 2854,
+          "F": 5733
         },
         "honestBadRateBpsByPolicyOutcome": {
-          "approvedUsable": 346,
-          "approvedCounterOffer": 636,
-          "declined": 4870
+          "approvedUsable": 366,
+          "approvedCounterOffer": 610,
+          "declined": 4905
         },
         "badRateBpsByPolicyOutcome": {
-          "approvedUsable": 346,
-          "approvedCounterOffer": 636,
-          "declined": 5066
+          "approvedUsable": 408,
+          "approvedCounterOffer": 667,
+          "declined": 5142
         }
       },
       "gates": [
         {
           "id": "net_loss_base",
-          "value": 18,
-          "min": 11,
-          "max": 21,
+          "value": 21,
+          "min": 15,
+          "max": 24,
           "comparator": "<=",
           "threshold": 75,
           "unit": "bps of volume",
@@ -1005,9 +980,9 @@
         },
         {
           "id": "net_margin_base",
-          "value": 26955276,
-          "min": 25435647,
-          "max": 30909452,
+          "value": 26751034,
+          "min": 25199969,
+          "max": 30353991,
           "comparator": ">",
           "threshold": 0,
           "unit": "cents",
@@ -1015,9 +990,393 @@
         },
         {
           "id": "net_margin_mild_stress",
-          "value": 22109789,
-          "min": 18679397,
-          "max": 27115360,
+          "value": 22188918,
+          "min": 19496291,
+          "max": 26732711,
+          "comparator": ">",
+          "threshold": 0,
+          "unit": "cents",
+          "pass": true
+        },
+        {
+          "id": "bad_rate_monotonic",
+          "value": 1,
+          "min": 0,
+          "max": 0,
+          "comparator": "=",
+          "threshold": 0,
+          "unit": "inversions",
+          "pass": false
+        },
+        {
+          "id": "auc",
+          "value": 0.873,
+          "min": 0.859,
+          "max": 0.896,
+          "comparator": ">=",
+          "threshold": 0.7,
+          "unit": "AUC",
+          "pass": true
+        },
+        {
+          "id": "fraud_approval",
+          "value": 1701,
+          "min": 1364,
+          "max": 2338,
+          "comparator": "<",
+          "threshold": 500,
+          "unit": "bps of fraud applicants",
+          "pass": false
+        },
+        {
+          "id": "pool_funding",
+          "value": 0,
+          "min": 0,
+          "max": 0,
+          "comparator": "=",
+          "threshold": 0,
+          "unit": "unfunded payouts",
+          "pass": true
+        },
+        {
+          "id": "approval_floor",
+          "value": 4095,
+          "min": 3945,
+          "max": 4235,
+          "comparator": ">=",
+          "threshold": 3000,
+          "unit": "bps of applicants",
+          "pass": true
+        },
+        {
+          "id": "refer_rate",
+          "value": 223,
+          "min": 205,
+          "max": 240,
+          "comparator": "<=",
+          "threshold": 500,
+          "unit": "bps of applicants",
+          "pass": true
+        },
+        {
+          "id": "veracity_honest_adverse",
+          "value": 0,
+          "min": 0,
+          "max": 0,
+          "comparator": "<=",
+          "threshold": 300,
+          "unit": "bps of honest applicants",
+          "pass": true
+        }
+      ]
+    },
+    "v3_standard": {
+      "policyVersion": "cashflow-v3",
+      "servicingPolicy": "standard",
+      "gated": true,
+      "headline": {
+        "base": {
+          "approvalRateBps": 5799,
+          "usableApprovalRateBps": 3987,
+          "counterOffers": 1812,
+          "unusableCounterOffers": 1812,
+          "referRateBps": 374,
+          "declineRateBps": 3099,
+          "needsInfoRateBps": 1102,
+          "plans": 3987,
+          "volumeCents": 16798190000,
+          "feeIncomeCents": 263655417,
+          "costOfFundsCents": 42294444,
+          "servicingCostCents": 56421600,
+          "chargeOffCents": 36282500,
+          "recoveryCents": 3628250,
+          "netLossCents": 32654250,
+          "netLossBps": 19,
+          "netMarginCents": 132285123,
+          "netMarginBps": 79,
+          "badRateBps": 374,
+          "firstPaymentDefaultRateBps": 30,
+          "profitableShareBps": 9631,
+          "auc": 0.676,
+          "ks": 0.332,
+          "fraudApprovalRateBps": 153,
+          "poolMinCents": 470110637,
+          "poolPeakUtilizationBps": 3888,
+          "unfundedPayouts": 0,
+          "heldPayouts": 353,
+          "releasedPayouts": 8,
+          "cancelledPayouts": 345,
+          "rollRateBpsByBucket": {
+            "CURRENT": 39,
+            "GRACE": 0,
+            "DELINQUENT": 9191,
+            "DEFAULT": 9929
+          },
+          "entryRollRateBpsByBucket": {
+            "CURRENT": 40,
+            "GRACE": 7698,
+            "DELINQUENT": 8478,
+            "DEFAULT": 9836
+          },
+          "badRateBpsByGrade": {
+            "A": 327,
+            "B": 887,
+            "C": 938,
+            "D": 1667
+          }
+        },
+        "mild": {
+          "approvalRateBps": 4951,
+          "usableApprovalRateBps": 3256,
+          "counterOffers": 1695,
+          "unusableCounterOffers": 1695,
+          "referRateBps": 329,
+          "declineRateBps": 3616,
+          "needsInfoRateBps": 1433,
+          "plans": 3256,
+          "volumeCents": 13510345000,
+          "feeIncomeCents": 212519860,
+          "costOfFundsCents": 33949898,
+          "servicingCostCents": 46104000,
+          "chargeOffCents": 25413750,
+          "recoveryCents": 2541375,
+          "netLossCents": 22872375,
+          "netLossBps": 17,
+          "netMarginCents": 109593587,
+          "netMarginBps": 81,
+          "badRateBps": 365,
+          "firstPaymentDefaultRateBps": 21,
+          "profitableShareBps": 9659,
+          "auc": 0.7,
+          "ks": 0.38,
+          "fraudApprovalRateBps": 44,
+          "poolMinCents": 523488420,
+          "poolPeakUtilizationBps": 3185,
+          "unfundedPayouts": 0,
+          "heldPayouts": 287,
+          "releasedPayouts": 10,
+          "cancelledPayouts": 277,
+          "rollRateBpsByBucket": {
+            "CURRENT": 35,
+            "GRACE": 0,
+            "DELINQUENT": 8460,
+            "DEFAULT": 9695
+          },
+          "entryRollRateBpsByBucket": {
+            "CURRENT": 35,
+            "GRACE": 5483,
+            "DELINQUENT": 5906,
+            "DEFAULT": 8983
+          },
+          "badRateBpsByGrade": {
+            "A": 305,
+            "B": 992,
+            "C": 1333,
+            "D": 0
+          }
+        },
+        "severe": {
+          "approvalRateBps": 3466,
+          "usableApprovalRateBps": 2311,
+          "counterOffers": 1155,
+          "unusableCounterOffers": 1155,
+          "referRateBps": 217,
+          "declineRateBps": 4048,
+          "needsInfoRateBps": 2486,
+          "plans": 2311,
+          "volumeCents": 9437510000,
+          "feeIncomeCents": 148283581,
+          "costOfFundsCents": 24597300,
+          "servicingCostCents": 32300400,
+          "chargeOffCents": 34845000,
+          "recoveryCents": 3484500,
+          "netLossCents": 31360500,
+          "netLossBps": 33,
+          "netMarginCents": 60025381,
+          "netMarginBps": 64,
+          "badRateBps": 848,
+          "firstPaymentDefaultRateBps": 22,
+          "profitableShareBps": 9355,
+          "auc": 0.798,
+          "ks": 0.479,
+          "fraudApprovalRateBps": 22,
+          "poolMinCents": 595886493,
+          "poolPeakUtilizationBps": 2222,
+          "unfundedPayouts": 0,
+          "heldPayouts": 505,
+          "releasedPayouts": 71,
+          "cancelledPayouts": 434,
+          "rollRateBpsByBucket": {
+            "CURRENT": 61,
+            "GRACE": 0,
+            "DELINQUENT": 4891,
+            "DEFAULT": 8374
+          },
+          "entryRollRateBpsByBucket": {
+            "CURRENT": 68,
+            "GRACE": 2782,
+            "DELINQUENT": 3689,
+            "DEFAULT": 6674
+          },
+          "badRateBpsByGrade": {
+            "A": 545,
+            "B": 3299,
+            "C": 7083,
+            "D": 10000
+          }
+        }
+      },
+      "throughTheDoor": {
+        "scored": 8898,
+        "honest": {
+          "auc": 0.873,
+          "ks": 0.609,
+          "goods": 6967,
+          "bads": 1627
+        },
+        "all": {
+          "auc": 0.859,
+          "ks": 0.566,
+          "goods": 7049,
+          "bads": 1849
+        },
+        "bySeed": [
+          {
+            "seed": "1",
+            "honest": {
+              "auc": 0.896,
+              "ks": 0.653,
+              "goods": 1417,
+              "bads": 324
+            },
+            "all": {
+              "auc": 0.885,
+              "ks": 0.616,
+              "goods": 1431,
+              "bads": 357
+            }
+          },
+          {
+            "seed": "2",
+            "honest": {
+              "auc": 0.858,
+              "ks": 0.585,
+              "goods": 1385,
+              "bads": 311
+            },
+            "all": {
+              "auc": 0.85,
+              "ks": 0.551,
+              "goods": 1396,
+              "bads": 360
+            }
+          },
+          {
+            "seed": "3",
+            "honest": {
+              "auc": 0.873,
+              "ks": 0.619,
+              "goods": 1397,
+              "bads": 319
+            },
+            "all": {
+              "auc": 0.857,
+              "ks": 0.563,
+              "goods": 1414,
+              "bads": 367
+            }
+          },
+          {
+            "seed": "4",
+            "honest": {
+              "auc": 0.873,
+              "ks": 0.62,
+              "goods": 1408,
+              "bads": 312
+            },
+            "all": {
+              "auc": 0.852,
+              "ks": 0.568,
+              "goods": 1430,
+              "bads": 362
+            }
+          },
+          {
+            "seed": "5",
+            "honest": {
+              "auc": 0.864,
+              "ks": 0.598,
+              "goods": 1360,
+              "bads": 361
+            },
+            "all": {
+              "auc": 0.848,
+              "ks": 0.557,
+              "goods": 1378,
+              "bads": 403
+            }
+          }
+        ],
+        "honestBadRateBpsByScoreBand": {
+          "0-29": 8509,
+          "30-39": 5076,
+          "40-44": 4106,
+          "45-49": 3228,
+          "50-54": 2400,
+          "55-59": 1951,
+          "60-64": 1471,
+          "65-69": 1307,
+          "70-74": 1220,
+          "75-79": 743,
+          "80-84": 774,
+          "85-89": 519,
+          "90-94": 263,
+          "95-100": 197
+        },
+        "honestBadRateBpsByGrade": {
+          "A": 366,
+          "B": 964,
+          "C": 1659,
+          "D": 2802,
+          "F": 5701
+        },
+        "honestBadRateBpsByPolicyOutcome": {
+          "approvedUsable": 366,
+          "approvedCounterOffer": 608,
+          "declined": 4893
+        },
+        "badRateBpsByPolicyOutcome": {
+          "approvedUsable": 374,
+          "approvedCounterOffer": 613,
+          "declined": 5127
+        }
+      },
+      "gates": [
+        {
+          "id": "net_loss_base",
+          "value": 19,
+          "min": 13,
+          "max": 23,
+          "comparator": "<=",
+          "threshold": 75,
+          "unit": "bps of volume",
+          "pass": true
+        },
+        {
+          "id": "net_margin_base",
+          "value": 26457025,
+          "min": 24839536,
+          "max": 30091471,
+          "comparator": ">",
+          "threshold": 0,
+          "unit": "cents",
+          "pass": true
+        },
+        {
+          "id": "net_margin_mild_stress",
+          "value": 21918717,
+          "min": 19071166,
+          "max": 26825540,
           "comparator": ">",
           "threshold": 0,
           "unit": "cents",
@@ -1027,7 +1386,7 @@
           "id": "bad_rate_monotonic",
           "value": 0,
           "min": 0,
-          "max": 1,
+          "max": 0,
           "comparator": "=",
           "threshold": 0,
           "unit": "inversions",
@@ -1035,9 +1394,9 @@
         },
         {
           "id": "auc",
-          "value": 0.875,
-          "min": 0.863,
-          "max": 0.898,
+          "value": 0.873,
+          "min": 0.858,
+          "max": 0.896,
           "comparator": ">=",
           "threshold": 0.7,
           "unit": "AUC",
@@ -1045,9 +1404,9 @@
         },
         {
           "id": "fraud_approval",
-          "value": 82,
-          "min": 0,
-          "max": 213,
+          "value": 156,
+          "min": 102,
+          "max": 260,
           "comparator": "<",
           "threshold": 500,
           "unit": "bps of fraud applicants",
@@ -1065,9 +1424,9 @@
         },
         {
           "id": "approval_floor",
-          "value": 4071,
-          "min": 3900,
-          "max": 4245,
+          "value": 3987,
+          "min": 3840,
+          "max": 4150,
           "comparator": ">=",
           "threshold": 3000,
           "unit": "bps of applicants",
@@ -1075,118 +1434,187 @@
         },
         {
           "id": "refer_rate",
-          "value": 166,
-          "min": 145,
-          "max": 200,
+          "value": 374,
+          "min": 345,
+          "max": 390,
           "comparator": "<=",
           "threshold": 500,
           "unit": "bps of applicants",
           "pass": true
+        },
+        {
+          "id": "veracity_honest_adverse",
+          "value": 152,
+          "min": 135,
+          "max": 184,
+          "comparator": "<=",
+          "threshold": 300,
+          "unit": "bps of honest applicants",
+          "pass": true
         }
-      ]
+      ],
+      "veracity": {
+        "honest": {
+          "applicants": 9541,
+          "knockout": 0,
+          "refer": 145,
+          "needsInfo": 230,
+          "adverseRateBps": 152,
+          "needsInfoRateBps": 241,
+          "lostUsable": 83
+        },
+        "fraud": {
+          "inflated_revenue": {
+            "applicants": 87,
+            "caught": 0,
+            "approved": 2
+          },
+          "round_trip": {
+            "applicants": 92,
+            "caught": 0,
+            "approved": 0
+          },
+          "bust_out": {
+            "applicants": 79,
+            "caught": 0,
+            "approved": 0
+          },
+          "unsettled_sales": {
+            "applicants": 36,
+            "caught": 20,
+            "approved": 0
+          },
+          "borrowed_account": {
+            "applicants": 44,
+            "caught": 37,
+            "approved": 3
+          },
+          "fresh_pos_account": {
+            "applicants": 35,
+            "caught": 13,
+            "approved": 1
+          },
+          "hidden_accounts": {
+            "applicants": 44,
+            "caught": 40,
+            "approved": 1
+          },
+          "rewritten_history": {
+            "applicants": 42,
+            "caught": 42,
+            "approved": 0
+          }
+        },
+        "counterfactualBadRateBps": {
+          "affected": 1319,
+          "unaffected": 1917,
+          "unaffectedApprovedUsable": 363
+        }
+      }
     }
   },
   "sensitivities": {
     "partial_advance": {
       "base": {
-        "approvalRateBps": 6084,
-        "usableApprovalRateBps": 6084,
-        "counterOffers": 2013,
+        "approvalRateBps": 5799,
+        "usableApprovalRateBps": 5799,
+        "counterOffers": 1812,
         "unusableCounterOffers": 0,
-        "referRateBps": 166,
-        "declineRateBps": 3168,
-        "needsInfoRateBps": 748,
-        "plans": 6084,
-        "volumeCents": 28366195000,
-        "feeIncomeCents": 485698255,
-        "costOfFundsCents": 74353830,
-        "servicingCostCents": 85944000,
-        "chargeOffCents": 67120000,
-        "recoveryCents": 6712000,
-        "netLossCents": 60408000,
-        "netLossBps": 21,
-        "netMarginCents": 264992425,
+        "referRateBps": 374,
+        "declineRateBps": 3099,
+        "needsInfoRateBps": 1102,
+        "plans": 5799,
+        "volumeCents": 27250130000,
+        "feeIncomeCents": 466641241,
+        "costOfFundsCents": 71629852,
+        "servicingCostCents": 81865200,
+        "chargeOffCents": 65815000,
+        "recoveryCents": 6581500,
+        "netLossCents": 59233500,
+        "netLossBps": 22,
+        "netMarginCents": 253912689,
         "netMarginBps": 93,
-        "badRateBps": 436,
-        "firstPaymentDefaultRateBps": 25,
-        "profitableShareBps": 9581,
-        "auc": 0.678,
-        "ks": 0.277,
-        "fraudApprovalRateBps": 78,
-        "poolMinCents": 283566333,
-        "poolPeakUtilizationBps": 6392,
+        "badRateBps": 438,
+        "firstPaymentDefaultRateBps": 31,
+        "profitableShareBps": 9578,
+        "auc": 0.674,
+        "ks": 0.289,
+        "fraudApprovalRateBps": 153,
+        "poolMinCents": 303159591,
+        "poolPeakUtilizationBps": 6133,
         "unfundedPayouts": 0,
-        "heldPayouts": 625,
-        "releasedPayouts": 25,
-        "cancelledPayouts": 600,
+        "heldPayouts": 616,
+        "releasedPayouts": 28,
+        "cancelledPayouts": 588,
         "rollRateBpsByBucket": {
-          "CURRENT": 41,
+          "CURRENT": 42,
           "GRACE": 0,
-          "DELINQUENT": 8646,
-          "DEFAULT": 9804
+          "DELINQUENT": 8599,
+          "DEFAULT": 9863
         },
         "entryRollRateBpsByBucket": {
-          "CURRENT": 42,
-          "GRACE": 5206,
-          "DELINQUENT": 6139,
-          "DEFAULT": 9399
+          "CURRENT": 43,
+          "GRACE": 4676,
+          "DELINQUENT": 5515,
+          "DEFAULT": 9540
         },
         "badRateBpsByGrade": {
-          "A": 297,
-          "B": 661,
+          "A": 311,
+          "B": 607,
           "C": 859,
-          "D": 1586
+          "D": 1643
         }
       }
     },
     "manual_payment": {
       "base": {
-        "approvalRateBps": 6084,
-        "usableApprovalRateBps": 4071,
-        "counterOffers": 2013,
-        "unusableCounterOffers": 2013,
-        "referRateBps": 166,
-        "declineRateBps": 3168,
-        "needsInfoRateBps": 748,
-        "plans": 4071,
-        "volumeCents": 17023885000,
-        "feeIncomeCents": 265329506,
-        "costOfFundsCents": 42455274,
-        "servicingCostCents": 57688800,
-        "chargeOffCents": 33865000,
-        "recoveryCents": 3386500,
-        "netLossCents": 30478500,
-        "netLossBps": 18,
-        "netMarginCents": 134706932,
+        "approvalRateBps": 5799,
+        "usableApprovalRateBps": 3987,
+        "counterOffers": 1812,
+        "unusableCounterOffers": 1812,
+        "referRateBps": 374,
+        "declineRateBps": 3099,
+        "needsInfoRateBps": 1102,
+        "plans": 3987,
+        "volumeCents": 16800000000,
+        "feeIncomeCents": 263686029,
+        "costOfFundsCents": 42310448,
+        "servicingCostCents": 56427600,
+        "chargeOffCents": 36323750,
+        "recoveryCents": 3632375,
+        "netLossCents": 32691375,
+        "netLossBps": 19,
+        "netMarginCents": 132256606,
         "netMarginBps": 79,
-        "badRateBps": 346,
-        "firstPaymentDefaultRateBps": 25,
-        "profitableShareBps": 9656,
-        "auc": 0.67,
-        "ks": 0.295,
-        "fraudApprovalRateBps": 78,
-        "poolMinCents": 466210449,
-        "poolPeakUtilizationBps": 3942,
+        "badRateBps": 374,
+        "firstPaymentDefaultRateBps": 30,
+        "profitableShareBps": 9631,
+        "auc": 0.676,
+        "ks": 0.332,
+        "fraudApprovalRateBps": 153,
+        "poolMinCents": 470110637,
+        "poolPeakUtilizationBps": 3888,
         "unfundedPayouts": 0,
-        "heldPayouts": 326,
-        "releasedPayouts": 7,
-        "cancelledPayouts": 319,
+        "heldPayouts": 353,
+        "releasedPayouts": 10,
+        "cancelledPayouts": 343,
         "rollRateBpsByBucket": {
-          "CURRENT": 36,
+          "CURRENT": 38,
           "GRACE": 0,
-          "DELINQUENT": 9064,
-          "DEFAULT": 9979
+          "DELINQUENT": 8814,
+          "DEFAULT": 9964
         },
         "entryRollRateBpsByBucket": {
-          "CURRENT": 37,
-          "GRACE": 8156,
-          "DELINQUENT": 8677,
-          "DEFAULT": 9836
+          "CURRENT": 40,
+          "GRACE": 7471,
+          "DELINQUENT": 8152,
+          "DEFAULT": 9797
         },
         "badRateBpsByGrade": {
-          "A": 310,
-          "B": 884,
-          "C": 588
+          "A": 327,
+          "B": 887,
+          "C": 938,
+          "D": 1667
         }
       }
     }

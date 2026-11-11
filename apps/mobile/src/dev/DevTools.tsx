@@ -62,6 +62,7 @@ function land(landing: DevSession['landing']) {
   setTimeout(() => {
     if (landing.screen === 'HISTORY') router.replace('/(tabs)/history');
     else if (landing.screen === 'BUSINESS_NEW') router.push('/business/new');
+    else if (landing.screen === 'CONNECTIONS') router.push('/connections');
     else if (landing.screen === 'APPLICATION' && landing.applicationId) {
       router.push({ pathname: '/application/[id]', params: { id: landing.applicationId } });
     }

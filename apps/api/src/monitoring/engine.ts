@@ -3,6 +3,7 @@ import type { AlertSeverity } from '@cashflow/shared';
 import type { MonitoringPolicy } from './policy.ts';
 import { BOOKS_RULES } from './rules/books.ts';
 import { COMPLIANCE_RULES } from './rules/compliance.ts';
+import { CONNECTION_RULES } from './rules/connections.ts';
 import { EVENT_RULES } from './rules/events.ts';
 import { FRAUD_RULES } from './rules/fraud.ts';
 import { PAYMENTS_RULES } from './rules/payments.ts';
@@ -21,6 +22,7 @@ export const RULES: Rule[] = [
   ...PORTFOLIO_RULES,
   ...BOOKS_RULES,
   ...COMPLIANCE_RULES,
+  ...CONNECTION_RULES,
 ];
 
 export const ruleByType = (type: string, rules: readonly Rule[] = RULES) =>

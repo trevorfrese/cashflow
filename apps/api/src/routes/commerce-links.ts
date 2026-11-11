@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { unprocessable } from '../errors.ts';
 import { toCommerceLink } from '../serializers.ts';
+import { connectCommerceWithToken } from '../services/connections.ts';
 import { currentUserId, getOwnedBusiness } from './helpers.ts';
 
 /** Point of sale and commerce platform connections. Read only data for underwriting. */
@@ -28,7 +29,7 @@ export async function commerceLinkRoutes(app: FastifyInstance) {
         request.body.businessId,
         request.body.platform,
       );
-      return { linkToken, provider: providers.commerce.name };
+      return { linkToken, provider: providers.commerce.nameFor(request.body.platform) };
     },
   );
 
@@ -44,11 +45,16 @@ export async function commerceLinkRoutes(app: FastifyInstance) {
     },
     async (request, reply) => {
       await getOwnedBusiness(db, request.body.businessId, currentUserId(request));
-      let linked;
+      let row;
       try {
-        linked = await providers.commerce.exchangePublicToken(
-          request.body.publicToken,
-          request.body.platform,
+        row = await connectCommerceWithToken(
+          { db, providers },
+          {
+            businessId: request.body.businessId,
+            platform: request.body.platform,
+            publicToken: request.body.publicToken,
+            actor: { type: 'user', id: currentUserId(request) },
+          },
         );
       } catch (err) {
         throw unprocessable(
@@ -56,17 +62,6 @@ export async function commerceLinkRoutes(app: FastifyInstance) {
           err instanceof Error ? err.message : 'Commerce link failed',
         );
       }
-      const row = await db.commerceLink.create({
-        data: {
-          businessId: request.body.businessId,
-          provider: providers.commerce.name,
-          platform: linked.platform,
-          providerItemId: linked.providerItemId,
-          locationName: linked.locationName,
-          connectedSince: linked.connectedSince,
-          status: 'LINKED',
-        },
-      });
       return reply.code(201).send(toCommerceLink(row));
     },
   );

@@ -55,6 +55,12 @@ export default function Settings() {
           subtitle={`${(links.data ?? []).length} connected for ${business?.dba ?? business?.legalName ?? 'this business'}`}
           right={chevron}
           onPress={() => router.push('/settings/banks')}
+        />
+        <ListRow
+          title="Connected data"
+          subtitle="Bank and point of sale connections, and how each was made"
+          right={chevron}
+          onPress={() => router.push('/connections')}
           last
         />
       </Card>

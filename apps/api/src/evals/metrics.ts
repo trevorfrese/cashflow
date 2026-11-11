@@ -2,6 +2,7 @@ import type { CreditGrade } from '@cashflow/shared';
 
 import { ASSUMPTIONS } from './assumptions.ts';
 import { OPEN_BUCKETS, type OpenBucket } from '../servicing/policy.ts';
+import { veracityMetrics, type VeracityMetrics } from './veracity-metrics.ts';
 import {
   emptyBucketRoll,
   type BucketRoll,
@@ -146,6 +147,8 @@ export interface PortfolioMetrics {
   bucketRoll: BucketRollRow[];
   /** The same, for principal recorded once when its plan first moved into each bucket. */
   bucketEntryRoll: BucketRollRow[];
+  /** What the data veracity checks did. Zeros under a policy without them. */
+  veracity: VeracityMetrics;
 }
 
 export interface BucketRollRow {
@@ -620,6 +623,7 @@ export function computeMetrics(
     concentration: concentration(byIndustry),
     bucketRoll: bucketRollRows(result.bucketRoll),
     bucketEntryRoll: bucketRollRows(result.bucketEntryRoll),
+    veracity: veracityMetrics(customers),
   };
 }
 

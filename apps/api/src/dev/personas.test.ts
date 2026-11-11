@@ -33,6 +33,12 @@ describe('the persona registry', () => {
       'fresh-declined',
       'fresh-referred',
       'fresh-counter-offer',
+      'payout-account',
+      'ownership-review',
+      'toast-seat',
+      'fresh-payout-elsewhere',
+      'fresh-ownership',
+      'fresh-toast',
     ]) {
       expect(personaByKey(key), key).toBeDefined();
     }
@@ -59,7 +65,18 @@ describe('the persona registry', () => {
         w.business.statedMonthlyRevenueCents,
       );
     }
-    expect([...outcomes].sort()).toEqual(['APPROVED', 'COUNTER_OFFER', 'DECLINED', 'IN_REVIEW']);
+    expect([...outcomes].sort()).toEqual([
+      'APPROVED',
+      'COUNTER_OFFER',
+      'DECLINED',
+      'IN_REVIEW',
+      'NEEDS_INFO',
+    ]);
+    // Every preset bank token is its own account: two presets never share one.
+    const tokens = fresh.map((p) =>
+      p.build.kind === 'fresh' ? p.build.walkthrough.bankPublicToken : '',
+    );
+    expect(new Set(tokens).size).toBe(tokens.length);
   });
 
   it('builds only fresh and instant personas one at a time', () => {

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { BankLinkStatus } from '../enums';
+import { BankLinkStatus, ConnectionAccessMethod, ConnectionHealth } from '../enums';
 import { Cents, Id, IsoDateSchema, IsoDateTimeSchema } from './common';
 
 /**
@@ -75,6 +75,9 @@ export const CommerceLink = z.object({
   status: BankLinkStatus,
   /** When the business started selling on the platform, as the platform reports it. */
   connectedSince: IsoDateSchema,
+  /** Direct OAuth for platforms with an API, a delegated read-only seat for Toast. */
+  accessMethod: ConnectionAccessMethod.default('DIRECT_OAUTH'),
+  health: ConnectionHealth.default('HEALTHY'),
   createdAt: IsoDateTimeSchema,
 });
 export type CommerceLink = z.infer<typeof CommerceLink>;

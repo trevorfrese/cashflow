@@ -6,6 +6,7 @@ import {
   OperatorBusinessDetail,
   OperatorBusinessList,
   OperatorBusinessListQuery,
+  OperatorConnections,
   OperatorEvaluation,
   OperatorPolicy,
   OperatorPortfolio,
@@ -16,7 +17,9 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
 import { requireRole } from '../auth/admin.ts';
+import { notFound } from '../errors.ts';
 import { todayIso } from '../dates.ts';
+import { operatorConnections } from '../services/connection-views.ts';
 import {
   applicationDetail,
   auditLog,
@@ -94,6 +97,40 @@ export async function adminConsoleRoutes(app: FastifyInstance) {
       schema: { tags, security, params: Params, response: { 200: OperatorApplicationDetail } },
     },
     async (request) => applicationDetail(db, request.params.id, todayIso()),
+  );
+
+  /**
+   * A business's data connections as an operator sees them: method, trust tier, health, what
+   * the platform or bank reported about the account, the snapshots (time, hash, counts), and
+   * the latest veracity assessment with every finding and its evidence. No token, ever.
+   */
+  r.get(
+    '/admin/businesses/:id/connections',
+    {
+      ...reviewer,
+      schema: { tags, security, params: Params, response: { 200: OperatorConnections } },
+    },
+    async (request) => {
+      const business = await db.business.findUnique({ where: { id: request.params.id } });
+      if (!business) throw notFound('Business');
+      return operatorConnections(db, business.id);
+    },
+  );
+
+  /** The same, with the veracity assessment of this application's current decision. */
+  r.get(
+    '/admin/applications/:id/connections',
+    {
+      ...reviewer,
+      schema: { tags, security, params: Params, response: { 200: OperatorConnections } },
+    },
+    async (request) => {
+      const application = await db.underwritingApplication.findUnique({
+        where: { id: request.params.id },
+      });
+      if (!application) throw notFound('Application');
+      return operatorConnections(db, application.businessId, application.id);
+    },
   );
 
   /** Audit events across every subject, newest first, with filters. Paged. */

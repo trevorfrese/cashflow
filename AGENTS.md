@@ -80,21 +80,27 @@ Do not use `prisma migrate dev` or `prisma migrate reset` from an agent: they pr
 
 Defined in `apps/api/src/dev/personas.ts`. Each is its own login (password `demo-password-123`) with one business.
 
-| Key                   | Business             | What it demonstrates                                                             |
-| --------------------- | -------------------- | -------------------------------------------------------------------------------- |
-| `active-plan`         | Blue Door Bakery     | Approved, a $10,000 plan, three months paid on time. Login `demo@cashflow.local` |
-| `delinquent`          | Cedar Street Cycles  | Debits failing for a month, plan delinquent, latest landlord payout held         |
-| `charged-off`         | Juniper Print Studio | Written off at 90 days past due, plan closed, one payment recovered              |
-| `landlord-change`     | Alder & Ash Florist  | Landlord payout change in its cooling-off period, payout held                    |
-| `declined`            | Northside Barbers    | Declined with reasons (overdrafts, too new, rent too high)                       |
-| `needs-info`          | Lakeview Yoga        | Applied with no bank linked                                                      |
-| `manual-review`       | Tidewater Sign Works | Referred 34 days ago on a tax id mismatch, never reviewed: past the deadline     |
-| `identity-review`     | Meridian Supply      | Owner is a possible watchlist match: in review, nothing can be advanced          |
-| `counter-offer`       | Sellwood Books       | Approved for less than the lease rent, so the plan cannot start                  |
-| `fresh-approved`      | none yet             | Onboarding preset to end in an approval                                          |
-| `fresh-declined`      | none yet             | Onboarding preset to end in a decline for overdrafts                             |
-| `fresh-referred`      | none yet             | Onboarding preset to end in manual review (tax id ending 0000)                   |
-| `fresh-counter-offer` | none yet             | Onboarding preset to end in an approval below the requested rent                 |
+| Key                      | Business             | What it demonstrates                                                                                     |
+| ------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------- |
+| `active-plan`            | Blue Door Bakery     | Approved, a $10,000 plan, three months paid on time. Login `demo@cashflow.local`                         |
+| `delinquent`             | Cedar Street Cycles  | Debits failing for a month, plan delinquent, latest landlord payout held                                 |
+| `charged-off`            | Juniper Print Studio | Written off at 90 days past due, plan closed, one payment recovered                                      |
+| `landlord-change`        | Alder & Ash Florist  | Landlord payout change in its cooling-off period, payout held                                            |
+| `declined`               | Northside Barbers    | Declined with reasons (overdrafts, too new, rent too high)                                               |
+| `needs-info`             | Lakeview Yoga        | Applied with no bank linked                                                                              |
+| `manual-review`          | Tidewater Sign Works | Referred 34 days ago on a tax id mismatch, never reviewed: past the deadline                             |
+| `identity-review`        | Meridian Supply      | Owner is a possible watchlist match: in review, nothing can be advanced                                  |
+| `counter-offer`          | Sellwood Books       | Approved for less than the lease rent, so the plan cannot start                                          |
+| `payout-account`         | Fernwood Outfitters  | Active plan; a Shopify connection pays out to an account not connected. The owner is asked to connect it |
+| `ownership-review`       | Pinecrest Ceramics   | Referred: the bank reports the account as held by another business                                       |
+| `toast-seat`             | Saltwater Taqueria   | Toast read-only seat invited and waiting: the steps, then Check connection                               |
+| `fresh-approved`         | none yet             | Onboarding preset to end in an approval                                                                  |
+| `fresh-declined`         | none yet             | Onboarding preset to end in a decline for overdrafts                                                     |
+| `fresh-referred`         | none yet             | Onboarding preset to end in manual review (tax id ending 0000)                                           |
+| `fresh-counter-offer`    | none yet             | Onboarding preset to end in an approval below the requested rent                                         |
+| `fresh-payout-elsewhere` | none yet             | Preset: Square through the sandbox consent page, paying out elsewhere: needs info                        |
+| `fresh-ownership`        | none yet             | Preset: a bank account held by another business: referred                                                |
+| `fresh-toast`            | none yet             | Preset: Toast through a read-only seat: approved with two verified sources                               |
 
 Other logins are `<key>@cashflow.local`. The first four are months of replayed ledger history: they are rebuilt only by a full reset (`./dev reset`). The rest can be rebuilt one at a time (`./dev reset --persona <key>`), as a new account with new ids.
 

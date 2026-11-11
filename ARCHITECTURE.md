@@ -63,15 +63,51 @@ Every external dependency that touches money or risk sits behind an interface in
 and the sandbox implementation is always the default. Nothing in this repository can move
 real funds without someone deliberately configuring it to.
 
-| Provider               | Interface                                                 | Default                                                                    | Real world                                                                                         |
-| ---------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `UnderwritingProvider` | `decide(input) -> decision`                               | `cashflow`: the in-house cash flow engine, deterministic and explainable   | The same engine on real bank data, optionally blended with a bureau or vendor score                |
-| `BankLinkProvider`     | link token, exchange public token, balances, transactions | `mock`: deterministic synthetic histories by token keyword                 | Plaid, MX, Finicity. A `plaid.ts` skeleton shows the shape                                         |
-| `PaymentsProvider`     | `charge`, `payout`, idempotent by key; `listReturns`      | `mock`: succeeds unless the token says `fail` or `return_r01` and so on    | Stripe, Modern Treasury, Increase. A `stripe.ts` skeleton shows the shape                          |
-| `CapitalProvider`      | `availableCents`, `reserve`, `fund`                       | `mock`: a pool that lives in the ledger                                    | A credit facility, a warehouse line, or a fund                                                     |
-| `IdentityProvider`     | `verifyBusiness`, `verifyOwners`, `screenParty`           | `mock`: verifies and clears everything except names with a sandbox keyword | A business and owner verification vendor and a sanctions screening vendor. No skeleton is included |
+| Provider                | Interface                                                                                                                                           | Default                                                                               | Real world                                                                                                     |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `UnderwritingProvider`  | `decide(input) -> decision`                                                                                                                         | `cashflow`: the in-house cash flow engine, deterministic and explainable              | The same engine on real bank data, optionally blended with a bureau or vendor score                            |
+| `BankLinkProvider`      | link token, exchange public token, balances, transactions, account identity, every account on the login, item health, revoke                        | `mock`: deterministic synthetic histories by token keyword, anchored on the link date | Plaid, MX, Finicity, bank-authorized OAuth. A `plaid.ts` skeleton shows the shape. No credentialed login, ever |
+| `CommerceDataProvider`  | read-only OAuth (authorization URL with state and PKCE, code exchange, refresh, revoke), account identity, payout destination, daily sales, payouts | `mock` for every platform, with a sandbox consent page                                | Square, Shopify, Stripe, Clover skeletons, one per platform, chosen by `COMMERCE_PROVIDER`                     |
+| `DelegatedSeatProvider` | invitation for CashFlow's own read-only service user, seat check, a `ReportPuller` that fails closed                                                | `mock` on the sandbox platform's data                                                 | A Toast skeleton that refuses to run. No browser automation exists                                             |
+| `PaymentsProvider`      | `charge`, `payout`, idempotent by key; `listReturns`                                                                                                | `mock`: succeeds unless the token says `fail` or `return_r01` and so on               | Stripe, Modern Treasury, Increase. A `stripe.ts` skeleton shows the shape                                      |
+| `CapitalProvider`       | `availableCents`, `reserve`, `fund`                                                                                                                 | `mock`: a pool that lives in the ledger                                               | A credit facility, a warehouse line, or a fund                                                                 |
+| `IdentityProvider`      | `verifyBusiness`, `verifyOwners`, `screenParty`                                                                                                     | `mock`: verifies and clears everything except names with a sandbox keyword            | A business and owner verification vendor and a sanctions screening vendor. No skeleton is included             |
 
-### How a real capital source plugs in
+### Data connections and snapshots
+
+Every bank and point of sale connection records how its data is obtained (`DIRECT_OAUTH`,
+`DELEGATED_SEAT`, or `AGGREGATOR`), what the platform or bank reports about the account (holder,
+legal name, account type, created or opened, payout destination, every account on the login),
+its scopes, token expiry, health, last pull, and revocation. Tokens are sealed with AES-256-GCM
+(`src/crypto/token-vault.ts`) and never returned or logged. Every pull is stored as an
+append-only `DataSnapshot` with a sha256 over its canonical payload, and underwriting reads
+only through snapshots, re-pulling first when the newest is older than the policy allows.
+Each decision stores the ids and hashes of the snapshots it read. There is no upload path and
+no credentialed bank login. The design, the delegated seat's limits, token handling, and the
+list for counsel are in [`apps/api/DATA_CONNECTIONS.md`](apps/api/DATA_CONNECTIONS.md); the
+veracity checks that run on the snapshots are in
+[`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md), "Veracity".
+
+```mermaid
+sequenceDiagram
+  participant O as Owner (app)
+  participant A as API
+  participant P as Platform (or sandbox page)
+  participant S as Snapshots
+  O->>A: POST /connections/oauth/start
+  A-->>O: authorization URL (state, PKCE challenge, read-only scopes)
+  O->>P: approve read-only access on the platform's site
+  P-->>O: redirect with code and state
+  O->>A: POST /connections/oauth/callback
+  A->>P: exchange code with the PKCE verifier
+  A->>P: account identity, payout destination, sales, payouts
+  A->>S: append snapshot (hash, counts)
+  O->>A: submit application
+  A->>S: newest snapshot, or pull again (freshness rule)
+  A->>A: veracity checks, then decide()
+```
+
+## How a real capital source plugs in
 
 The capital pool is the part that makes this a business rather than a demo. In the sandbox
 it is a ledger account, `capital_pool`, seeded with $250,000 of `pool_equity`. Payouts draw
@@ -287,7 +323,7 @@ payment, the principal is booked to `recovery_income` and the plan stays closed.
 
 ### Jobs
 
-Ten jobs in `apps/api/src/jobs/` run in this order, on a cron inside the API process
+Eleven jobs in `apps/api/src/jobs/` run in this order, on a cron inside the API process
 (`JOBS_ENABLED=true`) or by hand with `pnpm --filter @cashflow/api job:run --as-of
 YYYY-MM-DD`. Each is idempotent for a given date:
 
@@ -296,27 +332,32 @@ YYYY-MM-DD`. Each is idempotent for a given date:
    before anything is generated or paid for it that day.
 2. **lease-changes** applies landlord and payout changes whose cooling-off period has ended,
    so a payout they were holding goes out the same day to the new details.
-3. **reunderwrite** re-scores each active plan once a month and freezes one that has
+3. **refresh-connections** refreshes platform tokens within three days of expiry, pulls
+   every business with an active plan again once its last pull is seven days old (through the
+   same path a decision uses), runs the veracity checks on the result, and audits the
+   assessment, which the monitoring rules read. A failed pull marks the connection. Once a
+   day per business.
+4. **reunderwrite** re-scores each active plan once a month and freezes one that has
    deteriorated. Before payouts, so a plan it freezes gets no new period and no payout the
    same day.
-4. **reconcile-payments** polls for returned payments and undoes each one. Before anything
+5. **reconcile-payments** polls for returned payments and undoes each one. Before anything
    reads who is paid up.
-5. **age-receivables** recomputes every plan's delinquency bucket, marks installments
+6. **age-receivables** recomputes every plan's delinquency bucket, marks installments
    `LATE` once past grace whether or not a debit was attempted, writes an audit event on
    every change of bucket, and charges off plans at 90 days.
-6. **generate-periods** creates next month's landlord payout and its installments for every
+7. **generate-periods** creates next month's landlord payout and its installments for every
    active plan that is not frozen, 30 days before the due date, using
    `buildInstallmentSchedule` from `packages/shared`.
-7. **process-payouts** pays, holds, releases, or cancels every payout that is due: reserve
+8. **process-payouts** pays, holds, releases, or cancels every payout that is due: reserve
    capital, call the payments provider, post the ledger, mark `PAID`. A capital shortfall or
    a provider failure marks the payout `FAILED` with the reason and it is tried again on the
    next run.
-8. **collect-installments** makes the debits the policy schedules for today on every
+9. **collect-installments** makes the debits the policy schedules for today on every
    installment whose payout has been paid, posts the ledger, and settles operating cash with
    the pool.
-9. **provision** sets the allowance to the policy's reserve on outstanding principal by
-   bucket and posts the change. It posts on the first run of each calendar month only.
-10. **monitor** runs every monitoring rule on the state the others left and opens, refreshes,
+10. **provision** sets the allowance to the policy's reserve on outstanding principal by
+    bucket and posts the change. It posts on the first run of each calendar month only.
+11. **monitor** runs every monitoring rule on the state the others left and opens, refreshes,
     and resolves alerts. See "Monitoring".
 
 Each run records a `JobRun` row with a summary so a dashboard or an on-call engineer can see
@@ -453,13 +494,14 @@ severity (`INFO`, `WARNING`, `HIGH`, `CRITICAL`), a subject, a status (`OPEN`,
 - **A broken rule is isolated.** A rule that throws is logged and reported in the job run,
   the others still run, and its open alerts are left alone.
 
-| Category   | Rules                                                                                                                                                                                                                                                                                                                                                     |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Fraud      | Landlord change pending, or applied shortly before a payout. Landlord payout account is a borrower's bank account. One landlord account paid by several unrelated users. One bank account linked by several businesses. Application velocity and reapplying after a decline. Open screening hits. Unauthorized returns and account lockouts (from events) |
-| Payments   | Unauthorized, administrative and overall return rates over 60 days against the network thresholds, each with a minimum sample. Repeated failures on one bank account. Collection attempts exhausted. Returned and cancelled payouts, disabled bank links (from events)                                                                                    |
-| Portfolio  | First payment default rate by origination month. Share of principal delinquent or in default. Month over month roll. Industry and single name concentration against the credit policy caps. Pool utilization. Realized against expected loss by cohort. Charge-offs (from events)                                                                         |
-| Books      | Trial balance. Operating cash left after a full run. Each receivable account against unpaid principal on paid payouts. Allowance and pool never negative. Jobs that failed or stopped. Append-only triggers present (`pg_trigger`)                                                                                                                        |
-| Compliance | Applications undecided at 20 and 30 days. Screening results older than the rescreen interval. An application deleted inside the 12 month retention period. Businesses with a plan that are not verified. Adverse action notice missing (inactive until a later phase stores the notice)                                                                   |
+| Category                                   | Rules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fraud                                      | Landlord change pending, or applied shortly before a payout. Landlord payout account is a borrower's bank account. One landlord account paid by several unrelated users. One bank account linked by several businesses. Application velocity and reapplying after a decline. Open screening hits. Unauthorized returns and account lockouts (from events)                                                                                                                                                                                                                           |
+| Payments                                   | Unauthorized, administrative and overall return rates over 60 days against the network thresholds, each with a minimum sample. Repeated failures on one bank account. Collection attempts exhausted. Returned and cancelled payouts, disabled bank links (from events)                                                                                                                                                                                                                                                                                                              |
+| Portfolio                                  | First payment default rate by origination month. Share of principal delinquent or in default. Month over month roll. Industry and single name concentration against the credit policy caps. Pool utilization. Realized against expected loss by cohort. Charge-offs (from events)                                                                                                                                                                                                                                                                                                   |
+| Books                                      | Trial balance. Operating cash left after a full run. Each receivable account against unpaid principal on paid payouts. Allowance and pool never negative. Jobs that failed or stopped. Append-only triggers present (`pg_trigger`)                                                                                                                                                                                                                                                                                                                                                  |
+| Data (alert categories FRAUD and PAYMENTS) | A bank or platform connection on a business with an active plan that needs reconnecting, fails, or has an expired token (warning, high for a bank; auto-resolves). History rewritten between pulls (high, critical when it flatters; once, closed by a person). A platform's payout destination changed after the plan started (warning; once). Settlement match fell 20 points from the decision to under 85% (warning, high under 50%; auto-resolves). Several businesses under different users on one platform account or payout account (warning, high at three; auto-resolves) |
+| Compliance                                 | Applications undecided at 20 and 30 days. Screening results older than the rescreen interval. An application deleted inside the 12 month retention period. Businesses with a plan that are not verified. Adverse action notice missing (inactive until a later phase stores the notice)                                                                                                                                                                                                                                                                                             |
 
 Every rule's threshold, severity and reasoning is in `monitoring/policy.ts` and the rule's own
 description, which the summary endpoint returns.

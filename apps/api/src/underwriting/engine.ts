@@ -7,6 +7,8 @@ import type {
   DecisionOutcome,
   DecisionReason,
   IsoDate,
+  VeracityAssessment,
+  VeracityFinding,
 } from '@cashflow/shared';
 import { formatCents } from '@cashflow/shared';
 
@@ -34,6 +36,8 @@ import {
 } from './policy.ts';
 import { priceFee, type FeeBuildUp } from './pricing.ts';
 import { scoreCashFlow } from './scorecard.ts';
+import { assessVeracity, depthCredit, findingsWith } from '../veracity/assess.ts';
+import type { VeracityInput } from '../veracity/types.ts';
 
 /**
  * Cash flow based underwriting for rent advances.
@@ -85,6 +89,12 @@ export interface EngineInput {
    * breaker: an application the engine would approve is referred to a reviewer instead.
    */
   controls?: { approvalsPaused?: boolean } | null;
+  /**
+   * Data veracity facts: every connection's platform-reported identity and its snapshots.
+   * The service gathers them; the engine runs the pure checks in `src/veracity/` under the
+   * policy's thresholds. Absent, or a policy without `veracity`, means not checked.
+   */
+  veracity?: VeracityInput | null;
 }
 
 /**
@@ -112,6 +122,8 @@ export interface DecisionSnapshot {
   funding: FundingCheck | null;
   /** Empty unless the outcome is REFER. */
   referTriggers: string[];
+  /** The data veracity assessment, with the snapshot ids and hashes it read. */
+  veracity: VeracityAssessment | null;
   /** What the engine would have done had nothing sent the application to a reviewer. */
   recommendation: {
     outcome: DecisionOutcome;
@@ -268,8 +280,12 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
     exposure: null,
     funding: null,
     referTriggers: [],
+    veracity: null,
     recommendation: { outcome: 'NEEDS_INFO', approvedMonthlyLimitCents: null, feeBps: null },
   };
+  const veracity =
+    policy.veracity && input.veracity ? assessVeracity(input.veracity, policy.veracity) : null;
+  snapshot.veracity = veracity;
   const needsInfo = (
     reasons: DecisionReason[],
     cashFlow: CashFlowSummary | null,
@@ -287,6 +303,12 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
   });
 
   if (!input.bankData) {
+    const reconnect = veracity ? findingsWith(veracity, 'NEEDS_INFO') : [];
+    if (reconnect.length > 0)
+      return needsInfo(
+        reconnect.map((f) => veracityReason(f)),
+        null,
+      );
     return needsInfo(
       [
         reason(
@@ -313,7 +335,9 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
     statedMonthlyRevenueCents: input.statedMonthlyRevenueCents,
     requestedMonthlyRentCents: requested,
     provisionalFeeBps: policy.scoredCoverageFeeBps,
-    commerce: input.commerceData ?? null,
+    commerce: input.commerceData
+      ? { ...input.commerceData, trusted: commerceTrusted(veracity) }
+      : null,
     ...(roundTrips.length > 0
       ? { excludeTransactionIds: new Set(roundTrips.map((m) => m.creditId)) }
       : {}),
@@ -352,6 +376,21 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
     : [];
   snapshot.integrityFlags = flags;
   const integrityKnockouts = flagsWithAction(flags, 'KNOCKOUT');
+  const veracityKnockouts = veracity ? findingsWith(veracity, 'KNOCKOUT') : [];
+
+  // Something only the owner can fix (connect the account sales are paid into, reconnect a
+  // bank that could not be refreshed) is asked for, never declined. A periodic review is
+  // scored anyway: the owner is prompted, and the plan is judged on the bank.
+  if (veracity && integrityKnockouts.length === 0 && veracityKnockouts.length === 0) {
+    const asks = findingsWith(veracity, 'NEEDS_INFO').filter(
+      (f) => !input.periodicReview || f.code === 'BANK_DATA_UNAVAILABLE',
+    );
+    if (asks.length > 0)
+      return needsInfo(
+        asks.map((f) => veracityReason(f)),
+        cashFlow,
+      );
+  }
 
   // A knockout flag is decided now. Otherwise a large gap between stated and verified
   // revenue is a question for the applicant, not a decline.
@@ -372,7 +411,11 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
     );
   }
 
-  const card = scoreCashFlow(cashFlow, policy);
+  const card = scoreCashFlow(
+    cashFlow,
+    policy,
+    veracity && policy.veracity ? depthCredit(veracity, policy.veracity) : null,
+  );
   const reasons: DecisionReason[] = card.factors.map((f) => reason(f.code, f.message, f.impact));
   const knockouts: DecisionReason[] = [];
 
@@ -419,6 +462,7 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
       knockouts.push(reason('INTEGRITY_CHECK_FAILED', 'We could not verify this application.'));
     }
   }
+  for (const f of veracityKnockouts) knockouts.push(veracityReason(f, 'NEGATIVE'));
   if (input.timeInBusinessMonths < policy.minTimeInBusinessMonths) {
     knockouts.push(
       reason(
@@ -559,6 +603,15 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
   }
   snapshot.pricing = fee;
   snapshot.exposure = limit;
+  // A veracity finding mapped to CAP holds the limit to a share of the request. None is
+  // mapped to it in version 3: in a whole lease product a cap is an unusable counter offer.
+  if (veracity && findingsWith(veracity, 'CAP').length > 0) {
+    limitCents = Math.min(
+      limitCents,
+      Math.floor((requested * 7500) / 10_000 / policy.limitIncrementCents) *
+        policy.limitIncrementCents,
+    );
+  }
 
   if (capacity <= 0) {
     return declined([
@@ -666,6 +719,7 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
     requestedCents: requested,
     firstPlan: exposureContext.onTimePeriods === 0 && exposureContext.businessCommittedCents === 0,
     approvalsPaused: input.controls?.approvalsPaused ?? false,
+    veracityFindings: veracity?.findings ?? [],
   });
   if (triggers.length > 0) {
     snapshot.referTriggers = triggers;
@@ -690,6 +744,7 @@ export interface ReferInput {
   firstPlan: boolean;
   /** The circuit breaker on automatic approvals is tripped. */
   approvalsPaused?: boolean;
+  veracityFindings?: readonly VeracityFinding[];
 }
 
 /**
@@ -703,6 +758,11 @@ export function referTriggers(policy: CreditPolicy, input: ReferInput): string[]
 
 function escalationTriggers(policy: CreditPolicy, input: ReferInput): string[] {
   const triggers = flagsWithAction(input.flags, 'REFER').map((f) => `INTEGRITY:${f.code}`);
+  for (const f of input.veracityFindings ?? []) {
+    if (f.consequence === 'REFER' && !triggers.includes(`VERACITY:${f.code}`)) {
+      triggers.push(`VERACITY:${f.code}`);
+    }
+  }
   const rules = policy.escalation;
   if (!rules) return triggers;
   if (input.score < policy.minScore + rules.scoreBandAboveCutoff)
@@ -725,4 +785,33 @@ function withControls(triggers: string[], input: ReferInput): string[] {
   // Independent of the escalation rules: a tripped breaker refers under any policy version.
   if (input.approvalsPaused) triggers.push(CIRCUIT_BREAKER_TRIGGER);
   return triggers;
+}
+
+/** Whether the primary platform may count toward verified revenue. True when not checked. */
+function commerceTrusted(veracity: VeracityAssessment | null): boolean {
+  if (!veracity) return true;
+  const source = veracity.sources.find((s) => s.kind === 'COMMERCE');
+  return source ? source.usableForRevenue : true;
+}
+
+/** A finding as a reason the owner may read: its own wording, never the rule. */
+function veracityReason(
+  f: VeracityFinding,
+  impact: DecisionReason['impact'] = 'INFO',
+): DecisionReason {
+  const code =
+    f.consequence === 'KNOCKOUT'
+      ? f.code === 'HISTORY_REWRITTEN'
+        ? 'ACCOUNT_HISTORY_NOT_VERIFIED'
+        : 'ACCOUNT_OWNERSHIP_NOT_CONFIRMED'
+      : f.customerAction === 'CONNECT_PAYOUT_ACCOUNT'
+        ? 'PAYOUT_ACCOUNT_NOT_CONNECTED'
+        : f.customerAction === 'RECONNECT'
+          ? 'RECONNECT_REQUIRED'
+          : 'CONNECTION_ACTION_NEEDED';
+  return {
+    code,
+    message: f.customerMessage ?? 'We need more information about the accounts you connected.',
+    impact,
+  };
 }

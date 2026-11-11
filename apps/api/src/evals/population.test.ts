@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { createForwardSimulation } from '../providers/bank-link/business-sim.ts';
 import { addDays } from '@cashflow/shared';
-import { drawPopulation, FRAUD_TYPES } from './population.ts';
+import { drawPopulation, ORIGINAL_FRAUD_TYPES } from './population.ts';
+import { NEW_FRAUD_TYPES } from './veracity-sim.ts';
 
 describe('population', () => {
   it('is deterministic for a seed and different across seeds', () => {
@@ -48,10 +49,12 @@ describe('population', () => {
 
   it('honors the fraud share and gives each fraud type its tell', () => {
     const pop = drawPopulation({ n: 400, seed: 'pop', fraudShareBps: 3000 });
-    const fraud = pop.filter((a) => a.fraud !== null);
+    const fraud = pop.filter(
+      (a) => a.fraud !== null && (ORIGINAL_FRAUD_TYPES as readonly string[]).includes(a.fraud),
+    );
     expect(fraud.length).toBeGreaterThan(80);
     expect(fraud.length).toBeLessThan(160);
-    expect(new Set(fraud.map((a) => a.fraud))).toEqual(new Set(FRAUD_TYPES));
+    expect(new Set(fraud.map((a) => a.fraud))).toEqual(new Set(ORIGINAL_FRAUD_TYPES));
     for (const a of fraud) {
       expect(a.segment).toBe(a.fraud);
       expect(a.pos).toBeNull();
@@ -64,8 +67,35 @@ describe('population', () => {
         expect(a.params.events.some((e) => e.kind === 'round_trip')).toBe(true);
       }
     }
-    expect(drawPopulation({ n: 200, seed: 'pop', fraudShareBps: 0 }).some((a) => a.fraud)).toBe(
-      false,
+    expect(
+      drawPopulation({ n: 200, seed: 'pop', fraudShareBps: 0 }).some(
+        (a) => a.fraud !== null && (ORIGINAL_FRAUD_TYPES as readonly string[]).includes(a.fraud),
+      ),
+    ).toBe(false);
+  });
+
+  it('draws the veracity fraud archetypes from honest applicants, each with its tell', () => {
+    const pop = drawPopulation({ n: 1500, seed: 'veracity' });
+    const fresh = pop.filter(
+      (a) => a.fraud !== null && (NEW_FRAUD_TYPES as readonly string[]).includes(a.fraud),
+    );
+    // 2.5% of applicants, give or take sampling.
+    expect(fresh.length).toBeGreaterThan(15);
+    expect(fresh.length).toBeLessThan(65);
+    expect(new Set(fresh.map((a) => a.fraud))).toEqual(new Set(NEW_FRAUD_TYPES));
+    for (const a of fresh) {
+      const v = a.veracity!;
+      expect(v.fraud).toBe(a.fraud);
+      expect(v.tags).toEqual([]);
+      if (a.fraud === 'unsettled_sales') expect(a.pos).not.toBeNull();
+      if (a.fraud === 'borrowed_account') expect(v.bank.ownerNames[0]).toMatch(/Holdings LLC$/);
+      if (a.fraud === 'fresh_pos_account') expect(a.pos!.days).toBe(v.burstDays);
+      if (a.fraud === 'rewritten_history') expect(v.priorPullDaysBefore).toBeGreaterThan(0);
+    }
+    // Honest applicants carry their messiness as tags.
+    const honest = pop.filter((a) => a.fraud === null);
+    expect(honest.filter((a) => a.veracity!.tags.includes('legacy_bank')).length).toBeGreaterThan(
+      200,
     );
   });
 

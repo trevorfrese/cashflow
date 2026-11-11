@@ -22,15 +22,32 @@ import { useBusiness } from '@/lib/business';
 import { formatDate, formatPeriod, ordinal, todayIso } from '@/lib/forms';
 import {
   useApplications,
+  useConnections,
   useInstallments,
   useLeases,
   usePayInstallment,
   useRentPlan,
   useRentPlans,
 } from '@/lib/queries';
+import { pendingActions } from '@/lib/connections';
 import { heldPayoutNotice, IN_REVIEW_COPY, pastDueNotice } from '@/lib/plan-notices';
 import { deriveStage, type Stage } from '@/lib/stage';
 import { border, colors, spacing } from '@/theme';
+
+/** Anything about the business's connected data that needs the owner, with the way to fix it. */
+function ConnectionPrompts({ businessId }: { businessId: string | undefined }) {
+  const list = useConnections(businessId);
+  const actions = pendingActions(list.data).filter((a) => a.code !== 'CONNECT_BANK');
+  if (actions.length === 0) return null;
+  return (
+    <Card>
+      {actions.map((a) => (
+        <Notice key={a.code} tone="warning" title="Action needed" message={a.message} />
+      ))}
+      <Button title="Review connections" size="sm" onPress={() => router.push('/connections')} />
+    </Card>
+  );
+}
 
 export default function Home() {
   const biz = useBusiness();
@@ -67,6 +84,7 @@ export default function Home() {
         </View>
 
         {error ? <Notice tone="danger" message={describeError(error)} /> : null}
+        <ConnectionPrompts businessId={business?.id} />
 
         {!biz.isLoading && biz.businesses.length === 0 ? (
           <Card>

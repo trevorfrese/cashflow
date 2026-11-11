@@ -61,6 +61,11 @@ export interface FeatureInput {
     platform: CommercePlatform;
     dailySales: DailySales[];
     connectedSince: IsoDate;
+    /**
+     * False when the veracity checks excluded the platform: its features are still computed
+     * and stored, but revenue, trend and stability come from the bank.
+     */
+    trusted?: boolean;
   } | null;
 }
 
@@ -224,6 +229,7 @@ export function computeCashFlowFeatures(input: FeatureInput): CashFlowSummary {
   const bankPrior3 = bankRevenues.slice(-6, -3);
   const usePos =
     commerce !== null &&
+    input.commerce?.trusted !== false &&
     commerce.monthsOfHistory >= 3 &&
     (commerce.depositMatchBps === null || commerce.depositMatchBps >= MIN_DEPOSIT_MATCH_BPS);
   const verifiedMonthlyRevenueCents = usePos

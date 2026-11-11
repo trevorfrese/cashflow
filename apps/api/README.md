@@ -98,6 +98,9 @@ contains `return_r03` has its landlord payout sent back. The mock remembers pend
 for the life of one process, so they show up when the jobs run inside the API server, the
 seed, or a test, and not across separate `job:run` invocations.
 
+The jobs now include `refresh-connections` (third, before `reunderwrite`): tokens near
+expiry are refreshed and businesses with an active plan are pulled again weekly and checked.
+
 The seed has one business in each state: Blue Door Bakery is current, Cedar Street Cycles is
 delinquent with a held payout, and Juniper Print Studio was charged off and has since paid
 one of its two written off installments. Alder & Ash Florist has
@@ -124,6 +127,67 @@ deterministic, has no network access, and stores nothing.
 
 A business with no tax id or no owners (a row from before verification) comes back `REVIEW`.
 Try an owner called "Morgan Watchlist", or a landlord called "Sanctioned Holdings".
+
+## Sandbox data connections
+
+Everything below is the sandbox: deterministic, offline, and nothing is ever sent to a real
+platform, aggregator, or bank. How it works and why is in [`DATA_CONNECTIONS.md`](DATA_CONNECTIONS.md);
+what each finding does to a decision is in `UNDERWRITING.md`, "Veracity".
+
+**Connecting a point of sale.** Platforms with an API connect by read-only OAuth:
+
+```sh
+# 1. Where to send the owner: a state, a PKCE challenge, read-only scopes.
+curl -s -X POST localhost:4000/v1/connections/oauth/start -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"businessId":"<id>","platform":"SQUARE"}'
+# 2. The sandbox stand-in for the platform's consent page answers with the redirect.
+curl -s -X POST localhost:4000/v1/connections/oauth/mock-authorize -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"state":"<state>","scenario":"healthy_sales_48000"}'
+# 3. Hand the redirect's code and state back.
+curl -s -X POST localhost:4000/v1/connections/oauth/callback -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{"state":"<state>","code":"<code>"}'
+```
+
+Toast connects through a delegated seat: `POST /v1/connections/seats` returns CashFlow's
+service user and the steps, and `POST /v1/connections/:id/verify-seat` checks it.
+`GET /v1/businesses/:id/connections` lists every connection with its method, trust tier,
+health, what it verified, and what the owner can do; `POST /v1/connections/:id/disconnect`
+revokes it. The original sandbox shortcut, `POST /v1/commerce-links` with a token, still works.
+
+**Keywords.** They combine with the scenario keywords (`healthy`, `declining`, `sales_40000`, ...).
+
+| Where                         | Keyword               | What the sandbox reports                                                       |
+| ----------------------------- | --------------------- | ------------------------------------------------------------------------------ |
+| Bank public token             | `personal`            | A personal account in the first owner's name                                   |
+| Bank public token             | `borrowed`            | An account held by another business (Harlow Ventures LLC)                      |
+| Bank public token             | `new_account`         | Opened 60 days before it was linked                                            |
+| Bank public token             | `hidden`              | Two more accounts on the same login, not shared                                |
+| Bank public token             | `legacy`              | Not authorized through the bank's own OAuth                                    |
+| Bank public token             | `rewrites`            | Pulls after the link date leave out overdraft fees and debt payments           |
+| Bank public token             | `expired`             | Pulls after the link date need the owner to reconnect                          |
+| Consent page scenario or seat | `owner_mismatch`      | The platform account is in another business's legal name                       |
+| Consent page scenario or seat | `taxid_mismatch`      | The platform reports a tax id ending 9999                                      |
+| Consent page scenario or seat | `payout_elsewhere`    | Payouts go to an account that is not connected                                 |
+| Consent page scenario or seat | `unsettled`           | Gross sales 80% above what is paid out, for the last 120 days                  |
+| Consent page scenario or seat | `new_account`         | The platform account was created 45 days before it was connected               |
+| Consent page scenario         | `expired`             | The token cannot be refreshed after the connect date                           |
+| Seat scenario                 | `seat_inactive`       | The CashFlow reports user has not been added: the seat stays pending           |
+| Seat scenario                 | `seat_layout_changed` | Every report pull fails as a layout change would: the connection goes to ERROR |
+| Consent page scenario or seat | `rewrites`            | Pulls after the connect date report higher sales for days that were final      |
+
+The sandbox platform pays out exactly the card deposits of the business's connected sandbox
+bank, so the two generators reconcile; sandbox histories are anchored on the day they are
+connected and continue from there.
+
+**Environment.**
+
+| Variable                                                                                                                                                                         | Default   | Meaning                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
+| `COMMERCE_PROVIDER`                                                                                                                                                              | `mock`    | `square`, `shopify`, `stripe` or `clover` puts that platform on its compile-only skeleton; the rest stay mock   |
+| `DELEGATED_SEAT_PROVIDER`                                                                                                                                                        | `mock`    | `toast` is a skeleton that refuses to run                                                                       |
+| `CONNECTION_TOKEN_KEY`                                                                                                                                                           | unset     | Seals tokens at rest. Required by every real adapter; the API refuses to start without it then                  |
+| `OAUTH_REDIRECT_URI`                                                                                                                                                             | app route | Where a platform sends the owner back                                                                           |
+| `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `STRIPE_CONNECT_CLIENT_ID`, `CLOVER_APP_ID`, `CLOVER_APP_SECRET`, `CLOVER_ENV`, `TOAST_SEAT_SERVICE_USER`, `TOAST_SEAT_CREDENTIALS_REF` | unset     | Credentials the skeletons check for. `TOAST_SEAT_CREDENTIALS_REF` is a secret store reference, never a password |
 
 ## Operator routes
 

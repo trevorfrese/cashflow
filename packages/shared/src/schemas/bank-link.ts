@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { BankLinkStatus } from '../enums';
+import { BankLinkStatus, ConnectionAccessMethod, ConnectionHealth } from '../enums';
 import { Cents, Id, IsoDateTimeSchema } from './common';
 
 export const CreateBankLinkRequest = z.object({
@@ -22,6 +22,9 @@ export const BankLink = z.object({
   status: BankLinkStatus,
   /** Latest observed available balance, if the provider reports one. */
   availableBalanceCents: Cents.nullable(),
+  /** How the data is obtained: always an aggregator for a bank. */
+  accessMethod: ConnectionAccessMethod.default('AGGREGATOR'),
+  health: ConnectionHealth.default('HEALTHY'),
   createdAt: IsoDateTimeSchema,
 });
 export type BankLink = z.infer<typeof BankLink>;

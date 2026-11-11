@@ -14,6 +14,7 @@ export const PROXIED_ROUTES: ReadonlyArray<{ method: 'GET' | 'POST'; path: strin
   // Review queue
   { method: 'GET', path: 'reviews' },
   { method: 'GET', path: 'applications/:id' },
+  { method: 'GET', path: 'applications/:id/connections' },
   { method: 'POST', path: 'applications/:id/review' },
   // Alerts
   { method: 'GET', path: 'alerts' },
@@ -34,6 +35,7 @@ export const PROXIED_ROUTES: ReadonlyArray<{ method: 'GET' | 'POST'; path: strin
   { method: 'GET', path: 'businesses' },
   { method: 'GET', path: 'businesses/:id' },
   { method: 'GET', path: 'businesses/:id/rent-plans' },
+  { method: 'GET', path: 'businesses/:id/connections' },
   { method: 'POST', path: 'rent-plans/:id/release-freeze' },
   { method: 'POST', path: 'payouts/:id/resend' },
   // Audit

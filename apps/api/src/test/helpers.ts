@@ -45,7 +45,8 @@ export async function resetDb(db: Db): Promise<void> {
       "Repayment", "Installment", "LandlordPayout", "RentPlan",
       "Lease", "UnderwritingDecision", "ApplicationReview", "UnderwritingApplication",
       "BankLink", "CommerceLink", "BeneficialOwner", "ScreeningResult", "LeaseChange",
-      "Business", "RefreshToken", "User", "JobRun", "AuditEvent", "Alert", "CircuitBreaker"
+      "Business", "RefreshToken", "User", "JobRun", "AuditEvent", "Alert", "CircuitBreaker",
+      "DataSnapshot", "ConnectionAuthorization"
     RESTART IDENTITY CASCADE
   `);
   await ensureSystemAccounts(db);

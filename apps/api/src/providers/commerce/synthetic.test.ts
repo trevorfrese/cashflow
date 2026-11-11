@@ -4,6 +4,7 @@ import {
   decodeCommerceItemId,
   encodeCommerceItemId,
   generateSales,
+  generateSalesAt,
   parseCommerceScenario,
 } from './synthetic.ts';
 
@@ -26,7 +27,23 @@ describe('synthetic platform sales', () => {
     expect(decodeCommerceItemId(id)).toEqual({
       spec: { ...spec, rentCents: 0 },
       seedHex: 'abc123',
+      anchor: null,
+      flags: [],
     });
+    const anchored = encodeCommerceItemId(spec, 'abc123', '2026-11-09', ['payout_elsewhere']);
+    expect(decodeCommerceItemId(anchored)).toMatchObject({
+      anchor: '2026-11-09',
+      flags: ['payout_elsewhere'],
+    });
+  });
+
+  it('continues an anchored history so a later pull sees the same past', () => {
+    const spec = parseCommerceScenario('healthy_sales_40000', 'SQUARE');
+    const atLink = generateSalesAt(spec, 'abcdef123456', AS_OF, AS_OF);
+    expect(atLink).toEqual(generateSales(spec, 'abcdef123456', AS_OF));
+    const later = generateSalesAt(spec, 'abcdef123456', AS_OF, '2026-12-09');
+    expect(later.dailySales.slice(0, atLink.dailySales.length)).toEqual(atLink.dailySales);
+    expect(later.dailySales.length).toBeGreaterThan(atLink.dailySales.length + 20);
   });
 
   it('generates a year of daily sales near the pinned level and is deterministic', () => {

@@ -256,7 +256,7 @@ function columns(e: Evaluation): Column[] {
       gates: c.gates,
     })),
     {
-      name: 'v2_standard (gated)',
+      name: `${e.run.gated} (gated)`,
       base: e.baseBySeed,
       mild: e.mildBySeed,
       throughTheDoor: e.throughTheDoor,
@@ -424,7 +424,7 @@ const SWAP_ALIGN: Align[] = ['left', 'right', 'right', 'right', 'right', 'right'
 function swapSection(e: Evaluation): string[] {
   const rows = e.comparisons
     .filter((c) => c.swapSet !== null)
-    .map((c) => swapRow(`${c.name} to v2_standard`, c.swapSet!));
+    .map((c) => swapRow(`${c.name} to ${e.run.gated}`, c.swapSet!));
   if (rows.length === 0) return [];
   return [
     '## Swap sets against the earlier configurations',
@@ -506,7 +506,7 @@ function sensitivitySection(e: Evaluation): string[] {
         'Funded only AUC (mean, range)',
       ],
       [
-        row('v2_standard (gated)', e.base, e.baseBySeed),
+        row(`${e.run.gated} (gated)`, e.base, e.baseBySeed),
         ...e.sensitivities.map((c) => row(c.name, c.metrics, c.metricsBySeed)),
       ],
       ['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
@@ -554,7 +554,7 @@ function challengerSection(e: Evaluation): string[] {
         'Fraud approved',
       ],
       [
-        row('v2_standard (gated)', e.base, e.baseBySeed),
+        row(`${e.run.gated} (gated)`, e.base, e.baseBySeed),
         ...e.challengers.map((c) => row(c.name, c.metrics, c.metricsBySeed)),
       ],
       ['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
@@ -562,7 +562,7 @@ function challengerSection(e: Evaluation): string[] {
     '',
     markdownTable(
       SWAP_HEADERS,
-      e.challengers.map((c) => swapRow(`v2_standard to ${c.name}`, c.swapSet)),
+      e.challengers.map((c) => swapRow(`${e.run.gated} to ${c.name}`, c.swapSet)),
       SWAP_ALIGN,
     ),
     '',
@@ -727,6 +727,209 @@ function throughTheDoorSection(e: Evaluation): string[] {
   ];
 }
 
+const VERACITY_TAG_LABELS: Record<string, string> = {
+  personal_account: 'Sole proprietor on a personal account',
+  owner_nickname: 'Bank holder name is a nickname of the owner',
+  unlisted_holder: 'Bank holder is a spouse or an unlisted holding company',
+  legacy_bank: 'Legacy (non OAuth) bank connection',
+  unshared_savings: 'A savings account on the login was not shared',
+  savings_transfers: 'Profit moved to an unconnected savings account',
+  new_bank_account: 'Recently opened bank account at an established business',
+  late_posting: 'Recent items posted late between pulls',
+  resync_minor: 'Aggregator re-sync changed one or two old items',
+  resync_duplicates: 'Aggregator re-sync duplicated old items',
+  bank_pull_fails: 'Bank pull failed at decision time',
+  pos_trading_name: 'Platform account in the trading name',
+  pos_owner_name: "Platform account in the owner's own name",
+  pos_other_name: 'Platform account in a former or parent company name',
+  pos_tax_typo: 'Platform tax id differs by a typo',
+  second_payout_connected: 'Sales paid to a second account, connected',
+  second_payout_unconnected: 'Sales paid to a second account, not connected',
+  multi_location: 'Two locations paid separately',
+  processor_holds: 'Processor holds delay some payouts',
+  split_deposits: 'Bank splits some deposits',
+  payout_rounding: 'Small differences between payout and deposit',
+  platform_switch: 'Switched platforms mid history',
+  pos_token_expired: 'Platform token expired, refresh refused',
+  seat_pull_fails: 'Delegated seat report pull failed',
+};
+
+function veracitySection(e: Evaluation): string[] {
+  const v = e.base.veracity;
+  const h = v.honest;
+  const seeds = e.baseBySeed.map((m) => m.veracity.honest);
+  const meanRange2 = (vals: number[]) =>
+    `${pct(vals.reduce((a, b) => a + b, 0) / vals.length, 2)} (${pct(Math.min(...vals), 2)} to ${pct(Math.max(...vals), 2)})`;
+  const fraudRows = Object.entries(v.fraud).map(([type, f]) => {
+    const top = Object.entries(f.byCode)
+      .filter(
+        ([code]) =>
+          ![
+            'UNSHARED_ACCOUNTS',
+            'LEGACY_BANK_CONNECTION',
+            'DELEGATED_SEAT_SOURCE',
+            'PERSONAL_ACCOUNT',
+            'PLATFORM_ACCOUNT_RECENT',
+          ].includes(code),
+      )
+      .sort((a, b) => b[1] - a[1])
+      .map(([code, n]) => `${code} ${pct((n * 10_000) / Math.max(1, f.applicants), 0)}`)
+      .join(', ');
+    return [
+      type,
+      count(f.applicants),
+      pct((f.caught * 10_000) / Math.max(1, f.applicants), 0),
+      `${f.byEffect.knockout} / ${f.byEffect.refer} / ${f.byEffect.needsInfo}`,
+      pct((f.approved * 10_000) / Math.max(1, f.applicants), 1),
+      top || 'none',
+    ];
+  });
+  const codeRows = Object.entries(h.byCode)
+    .sort((a, b) => b[1].fired - a[1].fired)
+    .map(([code, c]) => [
+      code,
+      count(c.fired),
+      pct((c.fired * 10_000) / Math.max(1, h.applicants), 2),
+      count(c.adverse),
+      count(c.needsInfo),
+    ]);
+  const tagRows = Object.entries(h.byTag).map(([tag, t]) => [
+    VERACITY_TAG_LABELS[tag] ?? tag,
+    count(t.applicants),
+    `${t.knockout} / ${t.refer} / ${t.needsInfo}`,
+    pct(t.anyRateBps, 1),
+  ]);
+  const cf = e.veracityCounterfactual.pooled;
+  const v2 = e.comparisons.find((c) => c.name === 'v2_standard');
+  const effectRows = v2
+    ? [
+        [
+          'Usable approval rate',
+          pct(v2.base.overall.usableApprovalRateBps),
+          pct(e.base.overall.usableApprovalRateBps),
+        ],
+        ['Refer rate', pct(v2.base.overall.referRateBps), pct(e.base.overall.referRateBps)],
+        ['Needs info rate', pct(v2.base.needsInfoRateBps), pct(e.base.needsInfoRateBps)],
+        [
+          'Fraud applicants approved',
+          pct(v2.base.fraud.approvalRateBps),
+          pct(e.base.fraud.approvalRateBps),
+        ],
+        [
+          'Net loss, bps of volume',
+          String(v2.base.overall.netLossBps),
+          String(e.base.overall.netLossBps),
+        ],
+        [
+          'Net margin, bps of volume',
+          String(v2.base.overall.netMarginBps),
+          String(e.base.overall.netMarginBps),
+        ],
+        [
+          'Net margin',
+          dollars(v2.base.overall.netMarginCents),
+          dollars(e.base.overall.netMarginCents),
+        ],
+        ['Bad rate, funded plans', pct(v2.base.overall.badRateBps), pct(e.base.overall.badRateBps)],
+      ]
+    : [];
+  return [
+    '## Data veracity (base case)',
+    '',
+    'What the veracity checks (`src/veracity/`) caught and what they cost, on the same applicants.',
+    'The connections each applicant has, the honest messiness they show, and the five fraud',
+    'archetypes are drawn in `src/evals/veracity-sim.ts`; every rate there is a choice. An',
+    'applicant is "affected" when a veracity finding knocked it out, referred it, or asked it',
+    'for information; the knockouts and referrals are what the `veracity_honest_adverse` gate',
+    'counts.',
+    '',
+    '### Detection by fraud archetype',
+    '',
+    'Seeds pooled. Caught is the share on which a veracity finding changed the outcome. The',
+    'last column is the share of the archetype on which each substantive finding fired.',
+    '',
+    markdownTable(
+      [
+        'Archetype',
+        'Applicants',
+        'Caught',
+        'Knockout / refer / info',
+        'Approved after review',
+        'Findings that fired',
+      ],
+      fraudRows,
+      ['left', 'right', 'right', 'right', 'right', 'left'],
+    ),
+    '',
+    '### Honest applicants: false positives',
+    '',
+    `Knocked out or referred (the gate): ${pct(h.adverseRateBps, 2)} of ${count(h.applicants)} honest applicants, mean of seeds ${meanRange2(seeds.map((s) => s.adverseRateBps))}. Asked for information: ${pct(h.needsInfoRateBps, 2)}, mean of seeds ${meanRange2(seeds.map((s) => s.needsInfoRateBps))}. Any of the three: ${pct(h.anyRateBps, 2)}. Knockouts ${h.knockout}, referrals ${h.refer}, requests for information ${h.needsInfo}. Of the knocked out and the asked, ${h.lostUsable} would have had a usable approval on the same data without the checks (a referred honest applicant is approved by the reviewer here, so a referral costs time, not the approval).`,
+    '',
+    'By finding: honest applicants on whom it fired, and on how many the outcome was adverse',
+    'or a request for information (a finding that fires beside another one is counted for each).',
+    '',
+    markdownTable(
+      ['Finding', 'Fired', 'Share of honest', 'Knocked out or referred', 'Asked for information'],
+      codeRows,
+      ['left', 'right', 'right', 'right', 'right'],
+    ),
+    '',
+    'By the honest messiness simulated:',
+    '',
+    markdownTable(
+      ['Honest situation', 'Applicants', 'Knockout / refer / info', 'Affected'],
+      tagRows,
+      ['left', 'right', 'right', 'right'],
+    ),
+    '',
+    '### Were the affected honest applicants riskier?',
+    '',
+    'Each affected honest applicant funded at the rent requested in a counterfactual run that',
+    'decides without the veracity facts, against honest applicants the checks left alone, from',
+    'the through the door run.',
+    '',
+    markdownTable(
+      ['Group', 'Plans', 'Bad', 'Bad rate'],
+      [
+        [
+          'Affected honest applicants',
+          count(cf.affected.plans),
+          count(cf.affected.bad),
+          pct(cf.affected.badRateBps),
+        ],
+        [
+          'Unaffected honest applicants, all scored',
+          count(cf.unaffected.plans),
+          count(cf.unaffected.bad),
+          pct(cf.unaffected.badRateBps),
+        ],
+        [
+          'Unaffected honest applicants approved on usable terms',
+          count(cf.unaffectedApprovedUsable.plans),
+          count(cf.unaffectedApprovedUsable.bad),
+          pct(cf.unaffectedApprovedUsable.badRateBps),
+        ],
+      ],
+      ['left', 'right', 'right', 'right'],
+    ),
+    '',
+    ...(v2
+      ? [
+          '### Net effect against the policy without the checks',
+          '',
+          `\`v2_standard\` against \`${e.run.gated}\`, the same applicants, seeds pooled.`,
+          '',
+          markdownTable(['Metric', 'v2_standard', e.run.gated], effectRows, [
+            'left',
+            'right',
+            'right',
+          ]),
+          '',
+        ]
+      : []),
+  ];
+}
+
 export function renderMarkdown(e: Evaluation): string {
   const passed = e.gates.filter((g) => g.pass).length;
   const v1 = e.comparisons.find((c) => c.name === 'v1_baseline');
@@ -762,9 +965,10 @@ export function renderMarkdown(e: Evaluation): string {
     '',
     '## What underwriting bought and what servicing bought',
     '',
-    'The same applicants under four configurations. Reading left to right along the top:',
+    'The same applicants under five configurations. Reading left to right along the top:',
     'changing only servicing (`v1_baseline` to `v1_standard`), changing only the credit policy',
-    '(`v1_baseline` to `v2_baseline`), and both (`v2_standard`, the gated configuration).',
+    '(`v1_baseline` to `v2_baseline`), both (`v2_standard`), and the data veracity checks on',
+    `top (\`${e.run.gated}\`, the gated configuration).`,
     '',
     ...e.comparisons.map((c) => `- \`${c.name}\`: ${c.description}`),
     '',
@@ -789,6 +993,7 @@ export function renderMarkdown(e: Evaluation): string {
     segmentTable(e.base.byScoreBand, 'Score', true),
     '',
     ...throughTheDoorSection(e),
+    ...veracitySection(e),
     '## Calibration: expected against realized (base case)',
     '',
     'Expected bad rate is the PD the fee was priced on, from the table calibrated on separate',
@@ -800,7 +1005,9 @@ export function renderMarkdown(e: Evaluation): string {
     '',
     '## By archetype (base case)',
     '',
-    'The fraud archetypes are the rows `bust_out`, `inflated_revenue`, and `round_trip`.',
+    'The fraud archetypes are the rows `bust_out`, `inflated_revenue`, `round_trip`, and the five',
+    'the data veracity checks exist for: `unsettled_sales`, `borrowed_account`,',
+    '`fresh_pos_account`, `hidden_accounts`, and `rewritten_history`.',
     'Applicants counts everyone who applied. The money columns cover funded plans.',
     '',
     segmentTable(e.base.bySegment, 'Archetype'),
@@ -892,6 +1099,10 @@ export function renderMarkdown(e: Evaluation): string {
           'every scored honest applicant, funded in a counterfactual run at the rent requested with no pool or exposure limit',
         ],
         [
+          'Veracity gate',
+          `honest applicants knocked out or referred by a veracity finding, at most ${pct(GATE_THRESHOLDS.maxVeracityAdverseHonestBps, 0)}`,
+        ],
+        [
           'Monotonic gate tolerance',
           `${GATE_THRESHOLDS.monotonicToleranceBps} bps, grades under ${GATE_THRESHOLDS.monotonicMinPlans} plans skipped`,
         ],
@@ -910,10 +1121,10 @@ export function renderMarkdown(e: Evaluation): string {
     'hazard rates, the link between hidden health and what a bank statement shows, the fraud',
     'share, and the fraud behaviors are choices documented in `evals/README.md`, not',
     'measurements. Loss rates in this report are therefore conditional on those choices. The',
-    'fraud behaviors are three scripts, and an integrity check written after reading a script',
-    'will catch it: the fraud numbers show that the checks work as designed, not how much real',
-    'fraud they would stop. A passing gate means the policy is internally consistent under',
-    'these assumptions. It is not evidence that the policy is safe to fund with real capital,',
+    'fraud behaviors are eight scripts, and a check written after reading a script will catch',
+    'it: the fraud numbers show that the checks work as designed, not how much real fraud they',
+    'would stop. The honest messiness behind the false positive rates is a set of choices too.',
+    'A passing gate means the policy is internally consistent under these assumptions. It is not evidence that the policy is safe to fund with real capital,',
     'and nothing here should be read that way.',
     '',
   ];
@@ -1047,6 +1258,7 @@ export function renderJson(e: Evaluation): string {
     gates: e.gates,
     scenarios: { base: e.base, mild: e.mild, severe: e.severe },
     throughTheDoor: e.throughTheDoor,
+    veracityCounterfactual: e.veracityCounterfactual,
     bySeed: e.run.seeds.map((seed, i) => ({
       seed,
       base: headline(e.baseBySeed[i]!),
@@ -1078,6 +1290,32 @@ export function renderJson(e: Evaluation): string {
   });
 }
 
+function veracitySummary(e: Evaluation) {
+  const h = e.base.veracity.honest;
+  return {
+    honest: {
+      applicants: h.applicants,
+      knockout: h.knockout,
+      refer: h.refer,
+      needsInfo: h.needsInfo,
+      adverseRateBps: h.adverseRateBps,
+      needsInfoRateBps: h.needsInfoRateBps,
+      lostUsable: h.lostUsable,
+    },
+    fraud: Object.fromEntries(
+      Object.entries(e.base.veracity.fraud).map(([k, f]) => [
+        k,
+        { applicants: f.applicants, caught: f.caught, approved: f.approved },
+      ]),
+    ),
+    counterfactualBadRateBps: {
+      affected: e.veracityCounterfactual.pooled.affected.badRateBps,
+      unaffected: e.veracityCounterfactual.pooled.unaffected.badRateBps,
+      unaffectedApprovedUsable: e.veracityCounterfactual.pooled.unaffectedApprovedUsable.badRateBps,
+    },
+  };
+}
+
 /**
  * Headline numbers and gate results for every configuration: small enough to review as a
  * diff. Headlines pool the seeds into one book; gates carry the per seed mean and range.
@@ -1096,13 +1334,14 @@ export function renderBaseline(e: Evaluation): string {
       ...(c.gates ? { gates: gateSummary(c.gates) } : {}),
     };
   }
-  configurations.v2_standard = {
+  configurations[e.run.gated] = {
     policyVersion: e.run.policyVersion,
     servicingPolicy: e.run.servicingPolicy,
     gated: true,
     headline: { base: headline(e.base), mild: headline(e.mild), severe: headline(e.severe) },
     throughTheDoor: throughTheDoorSummary(e.throughTheDoor, e.run.seeds),
     gates: gateSummary(e.gates),
+    veracity: veracitySummary(e),
   };
   // The same decisions and servicing as the gated configuration, with one assumption of the
   // simulation changed. Recorded so a change to either shows up in the diff.

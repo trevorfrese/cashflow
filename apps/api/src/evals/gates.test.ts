@@ -120,6 +120,7 @@ describe('gates', () => {
       'pool_funding',
       'approval_floor',
       'refer_rate',
+      'veracity_honest_adverse',
     ]);
     expect(gates.filter((g) => !g.pass)).toEqual([]);
     expect(allGatesPass(gates)).toBe(true);

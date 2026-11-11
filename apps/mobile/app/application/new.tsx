@@ -8,7 +8,7 @@ import { useDevWalkthrough } from '@/dev/DevTools';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { centsToDollarsInput, dollarsToCents, monthsSince } from '@/lib/forms';
-import { useBankLinks, useSubmitApplication } from '@/lib/queries';
+import { useBankLinks, useConnections, useSubmitApplication } from '@/lib/queries';
 import { spacing } from '@/theme';
 
 /**
@@ -25,6 +25,10 @@ const draft: { businessId: string | null; revenue: string; months: string; rent:
 export default function NewApplication() {
   const { business } = useBusiness();
   const links = useBankLinks(business?.id);
+  const connections = useConnections(business?.id);
+  const platforms = (connections.data?.connections ?? []).filter(
+    (c) => c.kind === 'COMMERCE' && c.status !== 'DISCONNECTED',
+  );
   const submit = useSubmitApplication();
   const sameDraft = draft.businessId !== null && draft.businessId === business?.id;
   // Dev menu only: a fresh applicant persona fills in the months and rent of its preset.
@@ -174,6 +178,47 @@ export default function NewApplication() {
                 />
               }
               last={i === linked.length - 1}
+            />
+          ))
+        )}
+      </Card>
+
+      <Card>
+        <View style={styles.cardHeader}>
+          <Text variant="heading">Point of sale</Text>
+          <Link href={{ pathname: '/connections/pos', params: { next: 'application' } }}>
+            <Text variant="bodyStrong" tone="link">
+              {platforms.length > 0 ? 'Add another' : 'Connect'}
+            </Text>
+          </Link>
+        </View>
+        {platforms.length === 0 ? (
+          <Text variant="body" tone="muted">
+            Optional. Your sales at the source, matched to your bank deposits, count as a second
+            source.
+          </Text>
+        ) : (
+          platforms.map((c, i) => (
+            <ListRow
+              key={c.id}
+              title={c.name}
+              subtitle={c.methodDescription}
+              right={
+                <Pill
+                  label={c.status === 'PENDING' ? 'Waiting on you' : 'Connected'}
+                  tone={c.status === 'PENDING' ? 'due' : 'paid'}
+                />
+              }
+              onPress={
+                c.status === 'PENDING'
+                  ? () =>
+                      router.push({
+                        pathname: '/connections/seat',
+                        params: { connectionId: c.id, next: 'application' },
+                      })
+                  : undefined
+              }
+              last={i === platforms.length - 1}
             />
           ))
         )}

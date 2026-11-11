@@ -8,6 +8,7 @@ import {
   POLICIES,
   POLICY_V1,
   POLICY_V2,
+  POLICY_V3,
   POLICY_VERSION,
   type CreditPolicy,
 } from './policy.ts';
@@ -18,10 +19,17 @@ const flagCodes = (r: ReturnType<typeof decide>) => r.snapshot.integrityFlags.ma
 
 describe('policy versions', () => {
   it('names the current policy and keeps the launch policy available', () => {
-    expect(CURRENT_POLICY).toBe(POLICY_V2);
-    expect(POLICY_VERSION).toBe('cashflow-v2');
+    expect(CURRENT_POLICY).toBe(POLICY_V3);
+    expect(POLICY_VERSION).toBe('cashflow-v3');
     expect(POLICIES['cashflow-v1']).toBe(POLICY_V1);
     expect(POLICIES['cashflow-v2']).toBe(POLICY_V2);
+    expect(POLICIES['cashflow-v3']).toBe(POLICY_V3);
+    // Version 3 is version 2 plus the veracity checks and nothing else.
+    const { version: _v3, scorecard: _s3, veracity, ...rest3 } = POLICY_V3;
+    const { version: _v2, scorecard: _s2, veracity: none, ...rest2 } = POLICY_V2;
+    expect(rest3).toEqual(rest2);
+    expect(none).toBeNull();
+    expect(veracity).not.toBeNull();
   });
 
   it('stamps every outcome with the version that made it', () => {
@@ -32,11 +40,12 @@ describe('policy versions', () => {
     expect(needsInfo.outcome).toBe('NEEDS_INFO');
     expect(declined.outcome).toBe('DECLINED');
     for (const r of [approved, needsInfo, declined]) {
-      expect(r.policyVersion).toBe('cashflow-v2');
-      expect(r.snapshot.policyVersion).toBe('cashflow-v2');
-      expect(r.snapshot.thresholds.minScore).toBe(POLICY_V2.minScore);
+      expect(r.policyVersion).toBe('cashflow-v3');
+      expect(r.snapshot.policyVersion).toBe('cashflow-v3');
+      expect(r.snapshot.thresholds.minScore).toBe(POLICY_V3.minScore);
     }
     expect(decide(engineInput(account()), POLICY_V1).policyVersion).toBe('cashflow-v1');
+    expect(decide(engineInput(account()), POLICY_V2).policyVersion).toBe('cashflow-v2');
   });
 
   it('snapshots inputs, thresholds, flags, pricing, and exposure on an approval', () => {

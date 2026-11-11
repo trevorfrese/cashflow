@@ -1,57 +1,47 @@
-import type { CommercePlatform, DailySales } from '@cashflow/shared';
-
 import type { Config } from '../../config.ts';
-import type { CommerceDataProvider, LinkedCommerceAccount, SalesRange } from './types.ts';
+import { SkeletonCommerceProvider } from './skeleton.ts';
 
 /**
- * Skeleton for a Square sandbox adapter. It compiles against the interface and documents
- * the calls a real implementation makes, but carries no SDK dependency and refuses to run
- * without sandbox credentials. The same shape fits Toast, Shopify, Clover, and Stripe: an
- * OAuth connect, a merchant or shop id, and a daily sales report.
+ * Skeleton for a Square sandbox adapter. Compile only and NOT EXERCISED: it refuses to run
+ * without sandbox credentials and CONNECTION_TOKEN_KEY, and every call throws. What a real
+ * implementation calls (Square API, version pinned with the Square-Version header):
  *
- *   pnpm --filter @cashflow/api add square
- *   createLinkToken     -> build the OAuth authorize URL with MERCHANT_PROFILE_READ and PAYMENTS_READ
- *   exchangePublicToken -> oauth.obtainToken({ code }) then merchants.retrieve and locations.list
- *   getDailySales       -> orders.search by closed_at range, or payments.list, summed per day,
- *                          with refunds.list and disputes.list netted against gross
+ *   authorizationUrl   GET https://connect.squareupsandbox.com/oauth2/authorize
+ *                      ?client_id&scope=MERCHANT_PROFILE_READ+PAYMENTS_READ+ORDERS_READ+PAYOUTS_READ+BANK_ACCOUNTS_READ
+ *                      &session=false&state&code_challenge (PKCE is supported for the code flow)
+ *                      Read-only scopes only. Never PAYMENTS_WRITE or anything that moves money.
+ *   exchangeCode       POST /oauth2/token grant_type=authorization_code, code, code_verifier
+ *                      -> access_token (30 days), refresh_token, merchant_id, expires_at
+ *   refresh            POST /oauth2/token grant_type=refresh_token. Refresh before expires_at.
+ *   revoke             POST /oauth2/revoke (client_id, access_token)
+ *   getAccountIdentity GET /v2/merchants/me: business_name, country, created_at; the legal
+ *                      name and EIN last four are not on the merchant object and need the
+ *                      locations' business_name or a partnership data agreement. Treat as null.
+ *   getPayoutDestinations GET /v2/bank-accounts: holder name, bank name, account_number_suffix
+ *   getDailySales      POST /v2/orders/search by closed_at, or GET /v2/payments, summed per
+ *                      day with GET /v2/refunds netted; disputes from GET /v2/disputes
+ *   getPayouts         GET /v2/payouts (begin_time, end_time): id, arrival_date, amount_money,
+ *                      destination { type: BANK_ACCOUNT, id }. GET /v2/payouts/{id}/payout-entries
+ *                      itemizes fees, refunds, and holds inside one payout.
  *
- * Only ever read sales. CashFlow never charges or pays out through a commerce platform.
+ * Sandbox setup: create an application at developer.squareup.com, use its sandbox application
+ * id and secret, register the redirect URI (OAUTH_REDIRECT_URI), and create a sandbox seller
+ * test account in the developer dashboard. Set COMMERCE_PROVIDER=square, SQUARE_ENV=sandbox,
+ * SQUARE_APPLICATION_ID, SQUARE_APPLICATION_SECRET and CONNECTION_TOKEN_KEY.
+ *
+ * Only ever read. CashFlow never charges or pays out through a commerce platform.
  */
-export class SquareCommerceDataProvider implements CommerceDataProvider {
+export class SquareCommerceDataProvider extends SkeletonCommerceProvider {
   readonly name = 'square';
+  protected readonly platform = 'SQUARE' as const;
 
   constructor(config: Config) {
-    if (!config.SQUARE_APPLICATION_ID || !config.SQUARE_APPLICATION_SECRET) {
-      throw new Error(
-        'COMMERCE_PROVIDER=square requires SQUARE_APPLICATION_ID and SQUARE_APPLICATION_SECRET',
-      );
-    }
+    super(config, {
+      SQUARE_APPLICATION_ID: config.SQUARE_APPLICATION_ID,
+      SQUARE_APPLICATION_SECRET: config.SQUARE_APPLICATION_SECRET,
+    });
     if (config.SQUARE_ENV !== 'sandbox') {
       throw new Error('This project only supports SQUARE_ENV=sandbox. It never reads live sales.');
     }
-  }
-
-  async createLinkToken(
-    _businessId: string,
-    _platform: CommercePlatform,
-  ): Promise<{ linkToken: string }> {
-    throw new Error(
-      'SquareCommerceDataProvider.createLinkToken is not implemented. See the notes in square.ts.',
-    );
-  }
-
-  async exchangePublicToken(
-    _publicToken: string,
-    _platform: CommercePlatform,
-  ): Promise<LinkedCommerceAccount> {
-    throw new Error(
-      'SquareCommerceDataProvider.exchangePublicToken is not implemented. See the notes in square.ts.',
-    );
-  }
-
-  async getDailySales(_providerItemId: string, _range: SalesRange): Promise<DailySales[]> {
-    throw new Error(
-      'SquareCommerceDataProvider.getDailySales is not implemented. See the notes in square.ts.',
-    );
   }
 }

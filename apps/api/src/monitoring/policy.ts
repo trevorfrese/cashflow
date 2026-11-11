@@ -18,12 +18,28 @@ export interface RateThreshold {
   minEvents: number;
 }
 
+export interface VeracityMonitoringPolicy {
+  /** A settlement match this many bps below the one the plan was approved on is a drop... */
+  settlementDropBps: number;
+  /** ...when the latest is also under this. */
+  settlementWarnBelowBps: number;
+  /** Under this it is high severity. */
+  settlementHighBelowBps: number;
+  /** Fewest payouts in both assessments before a match rate is compared. */
+  settlementMinPayouts: number;
+  /** Businesses under different users on one platform account or payout destination. */
+  sharedAccountWarnBusinesses: number;
+  sharedAccountHighBusinesses: number;
+}
+
 export interface MonitoringPolicy {
   /**
    * A person who resolves an alert has looked at the condition. The same condition does not
    * open a new alert for this many days, so resolving is not undone by the next run.
    */
   reopenSuppressionDays: number;
+  /** Data connections and veracity (data veracity phase). New rules; nothing above changed. */
+  veracity: VeracityMonitoringPolicy;
   fraud: {
     /** A landlord change this close before a scheduled payout is the takeover pattern. */
     payoutProximityDays: number;
@@ -111,6 +127,20 @@ export const MONITORING_POLICY: MonitoringPolicy = {
   // Thirty days: long enough that a dismissed false positive stays dismissed for a month of
   // daily runs, short enough that a condition nobody fixed comes back.
   reopenSuppressionDays: 30,
+  veracity: {
+    // Origination needs 85% of payouts matched for platform sales to count (the credit
+    // policy's `excludeBelowBps`). A fall of 20 points from what the plan was approved on,
+    // to under that bar, means sales stopped reaching the account we debit: a warning.
+    // Under 50%, where an application would be referred, it is high.
+    settlementDropBps: 2000,
+    settlementWarnBelowBps: CURRENT_POLICY.veracity?.reconciliation.excludeBelowBps ?? 8500,
+    settlementHighBelowBps: CURRENT_POLICY.veracity?.reconciliation.referBelowBps ?? 5000,
+    settlementMinPayouts: CURRENT_POLICY.veracity?.reconciliation.minPayouts ?? 8,
+    // One platform account or payout account behind two unrelated businesses is already
+    // unusual (a franchise group applies as one business); three is a ring.
+    sharedAccountWarnBusinesses: 2,
+    sharedAccountHighBusinesses: 3,
+  },
   fraud: {
     // Ten days: the cooling-off period plus the payout release window. A change inside it
     // can still decide where the next rent payment goes.

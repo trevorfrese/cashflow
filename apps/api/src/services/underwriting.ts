@@ -1,12 +1,13 @@
 import type { IsoDate } from '@cashflow/shared';
-import { addDays } from '@cashflow/shared';
 
 import { effectiveAt, todayIso } from '../dates.ts';
 import type { Db } from '../db.ts';
 import type { BankLink, CommerceLink, Prisma } from '../generated/prisma/client.ts';
 import type { Providers } from '../providers/index.ts';
-import type { EngineInput } from '../underwriting/engine.ts';
-import { recordAudit } from './audit.ts';
+import type { EngineResult } from '../underwriting/engine.ts';
+import type { Tx } from '../db.ts';
+import { recordAudit, type AuditActor } from './audit.ts';
+import { gatherDecisionData, UNDERWRITING_LOOKBACK_DAYS } from './connections.ts';
 import { approvalsPaused } from './circuit-breaker.ts';
 import { supersedeCurrentDecision } from './decisions.ts';
 import { gatherIdentityFacts, runBusinessIdentity } from './identity.ts';
@@ -17,7 +18,7 @@ import { gatherExposureContext, gatherIntegrityContext } from './portfolio-state
  * How much bank history underwriting asks the bank provider for. A little over a year, so
  * the last four weeks can be compared with the same weeks a year earlier.
  */
-export const UNDERWRITING_LOOKBACK_DAYS = 400;
+export { UNDERWRITING_LOOKBACK_DAYS };
 
 export interface UnderwriteParams {
   db: Db;
@@ -58,28 +59,19 @@ export async function underwriteApplication({
     include: { business: true },
   });
 
-  let bankData: EngineInput['bankData'] = null;
-  if (bankLink) {
-    bankData = await gatherBankData(providers, bankLink, asOf);
-    if (bankData.currentBalanceCents !== bankLink.availableBalanceCents) {
-      await db.bankLink.update({
-        where: { id: bankLink.id },
-        data: { availableBalanceCents: bankData.currentBalanceCents },
-      });
-    }
-  }
-
-  let commerceData: EngineInput['commerceData'] = null;
-  if (commerceLink) {
-    commerceData = {
-      platform: commerceLink.platform,
-      connectedSince: commerceLink.connectedSince,
-      dailySales: await providers.commerce.getDailySales(commerceLink.providerItemId, {
-        from: addDays(asOf, -(UNDERWRITING_LOOKBACK_DAYS - 1)),
-        to: asOf,
-      }),
-    };
-  }
+  // Every source is read through a snapshot: re-pulled first when the newest one is older
+  // than the policy allows. The veracity checks read the same snapshots.
+  const { bankData, commerceData, veracity } = await gatherDecisionData(
+    { db, providers },
+    {
+      businessId: application.businessId,
+      bankLink,
+      commerceLink,
+      timeInBusinessMonths: application.timeInBusinessMonths,
+      asOf,
+      reason: 'APPLICATION',
+    },
+  );
 
   const now = effectiveAt(asOf);
   await runBusinessIdentity({ db, providers }, application.businessId, { at: now });
@@ -121,6 +113,7 @@ export async function underwriteApplication({
     integrityContext,
     exposureContext,
     controls: { approvalsPaused: paused },
+    veracity,
   });
 
   return db.$transaction(async (tx) => {
@@ -177,6 +170,14 @@ export async function underwriteApplication({
       },
       at: now,
     });
+    await recordVeracityAssessed(tx, result, {
+      actor: { type: 'system', id: providers.underwriting.name },
+      subjectType: 'application',
+      subjectId: applicationId,
+      decisionId: decision.id,
+      businessId: application.businessId,
+      at: now,
+    });
     if (result.outcome === 'REFER') {
       await recordAudit(tx, {
         actor: { type: 'system', id: providers.underwriting.name },
@@ -215,13 +216,47 @@ export async function underwriteApplication({
   });
 }
 
-export async function gatherBankData(providers: Providers, bankLink: BankLink, asOf: IsoDate) {
-  const [transactions, currentBalanceCents] = await Promise.all([
-    providers.bankLink.getTransactions(bankLink.providerItemId, {
-      from: addDays(asOf, -(UNDERWRITING_LOOKBACK_DAYS - 1)),
-      to: asOf,
-    }),
-    providers.bankLink.refreshBalance(bankLink.providerItemId),
-  ]);
-  return { transactions, currentBalanceCents, asOf };
+/**
+ * The veracity assessment of a decision, for the audit trail and for monitoring: outcome,
+ * finding codes and consequences, settlement match, and the snapshot ids and hashes read.
+ * Never the data, never a token.
+ */
+export async function recordVeracityAssessed(
+  tx: Tx,
+  result: EngineResult,
+  args: {
+    actor: AuditActor;
+    subjectType: 'application' | 'business';
+    subjectId: string;
+    decisionId: string | null;
+    businessId: string;
+    at: Date;
+  },
+) {
+  const v = result.snapshot.veracity;
+  if (!v) return;
+  const rec = v.reconciliation[0] ?? null;
+  await recordAudit(tx, {
+    actor: args.actor,
+    eventType: 'VERACITY_ASSESSED',
+    subjectType: args.subjectType,
+    subjectId: args.subjectId,
+    payload: {
+      businessId: args.businessId,
+      decisionId: args.decisionId,
+      outcome: v.overall.outcome,
+      trustTier: v.overall.trustTier,
+      independentlyVerifiedSources: v.overall.independentlyVerifiedSources,
+      findings: v.findings.map((f) => ({
+        code: f.code,
+        consequence: f.consequence,
+        connectionId: f.connectionId,
+      })),
+      matchedShareByAmountBps: rec?.matchedShareByAmountBps ?? null,
+      payoutsConsidered: rec?.payoutsConsidered ?? null,
+      snapshots: v.snapshots.map((s) => ({ id: s.id, kind: s.kind, contentHash: s.contentHash })),
+    },
+    ...(v.findings.some((f) => f.consequence === 'KNOCKOUT') ? { severity: 'high' as const } : {}),
+    at: args.at,
+  });
 }

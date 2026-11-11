@@ -148,10 +148,18 @@ describe('dev tools on', () => {
       'fresh-declined': 'Nothing created yet',
       'fresh-referred': 'Nothing created yet',
       'fresh-counter-offer': 'Nothing created yet',
+      'payout-account': 'Active plan, current',
+      'ownership-review': 'In review',
+      'toast-seat': 'Business set up, not applied',
+      'fresh-payout-elsewhere': 'Nothing created yet',
+      'fresh-ownership': 'Nothing created yet',
+      'fresh-toast': 'Nothing created yet',
     });
     for (const p of seeded.personas) {
       expect(p.state.exists).toBe(true);
-      expect(p.resettable).toBe(p.group === 'FRESH' || p.section === 'Decisions');
+      expect(p.resettable).toBe(
+        p.group === 'FRESH' || p.section === 'Decisions' || p.section === 'Data connections',
+      );
       expect(p.walkthrough === null).toBe(p.group !== 'FRESH');
     }
   });
@@ -246,12 +254,47 @@ describe('dev tools on', () => {
         publicToken: w.bankPublicToken,
       });
       expect(bank.status, JSON.stringify(bank.body)).toBe(201);
+      // The point of sale, the way the app connects it: a seat for Toast, OAuth otherwise.
+      let commerceLinkId: string | undefined;
+      if (w.pos) {
+        if (w.pos.platform === 'TOAST') {
+          const seat = await api.post<{ connection: { id: string } }>('/v1/connections/seats', {
+            businessId: business.body.id,
+            platform: w.pos.platform,
+            scenario: w.pos.scenario,
+          });
+          const checked = await api.post<{ id: string; status: string }>(
+            `/v1/connections/${seat.body.connection.id}/verify-seat`,
+          );
+          expect(checked.body.status, JSON.stringify(checked.body)).toBe('LINKED');
+          commerceLinkId = checked.body.id;
+        } else {
+          const started = await api.post<{ state: string }>('/v1/connections/oauth/start', {
+            businessId: business.body.id,
+            platform: w.pos.platform,
+          });
+          const approved = await api.post<{ code: string }>(
+            '/v1/connections/oauth/mock-authorize',
+            {
+              state: started.body.state,
+              scenario: w.pos.scenario,
+            },
+          );
+          const linked = await api.post<{ id: string }>('/v1/connections/oauth/callback', {
+            state: started.body.state,
+            code: approved.body.code,
+          });
+          expect(linked.status, JSON.stringify(linked.body)).toBe(201);
+          commerceLinkId = linked.body.id;
+        }
+      }
       const application = await api.post<{ id: string }>('/v1/underwriting/applications', {
         businessId: business.body.id,
         statedMonthlyRevenueCents: w.business.statedMonthlyRevenueCents,
         timeInBusinessMonths: w.timeInBusinessMonths,
         requestedMonthlyRentCents: w.requestedMonthlyRentCents,
         bankLinkId: bank.body.id,
+        ...(commerceLinkId ? { commerceLinkId } : {}),
       });
       const decided = await api.post<{
         id: string;
@@ -283,6 +326,27 @@ describe('dev tools on', () => {
     it('referred: the preset goes to manual review', async () => {
       const { application } = await walk('fresh-referred');
       expect(application.status).toBe('IN_REVIEW');
+    });
+
+    it('payout elsewhere: the preset is asked to connect the payout account', async () => {
+      const { application } = await walk('fresh-payout-elsewhere');
+      expect(application.status).toBe('NEEDS_INFO');
+      expect(application.decision!.reasons.map((r) => r.code)).toEqual([
+        'PAYOUT_ACCOUNT_NOT_CONNECTED',
+      ]);
+    });
+
+    it("ownership: the preset with another business's account goes to manual review", async () => {
+      const { application } = await walk('fresh-ownership');
+      expect(application.status).toBe('IN_REVIEW');
+    });
+
+    it('toast: the preset connects through a seat and is approved', async () => {
+      const { application, w } = await walk('fresh-toast');
+      expect(application.status).toBe('APPROVED');
+      expect(application.decision!.approvedMonthlyLimitCents).toBeGreaterThanOrEqual(
+        w.requestedMonthlyRentCents,
+      );
     });
 
     it('counter offer: the preset is approved for less than it asked for', async () => {
@@ -522,7 +586,7 @@ describe('dev tools on', () => {
       // Every job ran once for each day crossed.
       for (const day of [addDays(wall(), 1), addDays(wall(), 2)]) {
         const runs = await h.db.jobRun.findMany({ where: { asOf: day } });
-        expect(runs.length, day).toBe(10);
+        expect(runs.length, day).toBe(11);
         expect(runs.every((r) => r.ok)).toBe(true);
       }
 

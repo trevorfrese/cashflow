@@ -39,6 +39,9 @@ export function inputs(over: Partial<MonitoringInputs> = {}): MonitoringInputs {
     identities: [],
     retention: [],
     adverseActions: [],
+    connections: [],
+    veracityEvents: [],
+    payoutDestinationChanges: [],
     ...over,
   };
 }

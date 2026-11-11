@@ -35,6 +35,7 @@ import { CURRENT_POLICY, type ExposurePolicy } from '../underwriting/policy.ts';
 import { ASSUMPTIONS, poolSizeFor, type StressScenario } from './assumptions.ts';
 import type { Applicant, FraudType, Industry } from './population.ts';
 import { hash32 } from './random.ts';
+import { observe } from './veracity-sim.ts';
 
 /**
  * Portfolio simulator.
@@ -119,6 +120,11 @@ export interface PortfolioConfig {
    * declined applicant the engine never priced.
    */
   throughTheDoor: { fallbackFeeBps: number } | null;
+  /**
+   * Decide without the veracity facts (the same observed data otherwise). Used only for the
+   * counterfactual of applicants a veracity finding affected: how would they have done.
+   */
+  stripVeracity?: boolean;
 }
 
 export function defaultPortfolioConfig(n: number): PortfolioConfig {
@@ -232,6 +238,50 @@ export interface CustomerResult {
   bad: boolean;
   /** Date the business shut, if it did while observed. */
   closedOn: IsoDate | null;
+  /** Veracity finding codes on the decision. Empty without veracity facts or findings. */
+  veracityCodes: string[];
+  /**
+   * How a veracity finding changed the engine's outcome: knocked out, sent for information,
+   * or referred. Null when none did.
+   */
+  veracityEffect: 'KNOCKOUT' | 'NEEDS_INFO' | 'REFER' | null;
+  /**
+   * For an applicant a veracity finding affected: the engine's outcome on the same data
+   * without the veracity facts, and whether that would have been usable (approved, or
+   * referred and approved by the reviewer, at the rent requested).
+   */
+  outcomeWithoutVeracity: DecisionOutcome | null;
+  usableWithoutVeracity: boolean | null;
+  /** Honest messiness and connection events from the population (see veracity-sim.ts). */
+  veracityTags: string[];
+}
+
+const VERACITY_NEEDS_INFO_CODES = new Set([
+  'PAYOUT_ACCOUNT_NOT_CONNECTED',
+  'RECONNECT_REQUIRED',
+  'CONNECTION_ACTION_NEEDED',
+]);
+
+/** How a veracity finding changed this decision, if it did. */
+export function veracityEffect(decision: EngineResult): CustomerResult['veracityEffect'] {
+  const v = decision.snapshot.veracity;
+  if (!v || v.findings.length === 0) return null;
+  if (decision.outcome === 'DECLINED' && v.findings.some((f) => f.consequence === 'KNOCKOUT')) {
+    return 'KNOCKOUT';
+  }
+  if (
+    decision.outcome === 'NEEDS_INFO' &&
+    decision.reasons.some((r) => VERACITY_NEEDS_INFO_CODES.has(r.code))
+  ) {
+    return 'NEEDS_INFO';
+  }
+  if (
+    decision.outcome === 'REFER' &&
+    decision.snapshot.referTriggers.some((t) => t.startsWith('VERACITY:'))
+  ) {
+    return 'REFER';
+  }
+  return null;
 }
 
 export interface PoolMonth {
@@ -386,6 +436,16 @@ function emptyResult(applicant: Applicant, decision: EngineResult): CustomerResu
     firstPaymentDefault: false,
     bad: false,
     closedOn: null,
+    veracityCodes: decision.snapshot.veracity?.findings.map((f) => f.code) ?? [],
+    veracityEffect: veracityEffect(decision),
+    outcomeWithoutVeracity: null,
+    usableWithoutVeracity: null,
+    veracityTags: applicant.veracity
+      ? [
+          ...applicant.veracity.tags,
+          ...(applicant.veracity.fraud ? [applicant.veracity.fraud] : []),
+        ]
+      : [],
   };
 }
 
@@ -421,9 +481,13 @@ function stressedParams(
  */
 export function underwrite(
   applicant: Applicant,
-  config: Pick<PortfolioConfig, 'decide' | 'stress' | 'startDate'>,
+  config: Pick<PortfolioConfig, 'decide' | 'stress' | 'startDate' | 'stripVeracity'>,
   exposureContext: ExposureContext | null = null,
-): { decision: EngineResult; sim: BusinessSimulation | null } {
+): {
+  decision: EngineResult;
+  sim: BusinessSimulation | null;
+  withoutVeracity: EngineResult | null;
+} {
   const base = {
     statedMonthlyRevenueCents: applicant.statedMonthlyRevenueCents,
     timeInBusinessMonths: applicant.timeInBusinessMonths,
@@ -431,7 +495,11 @@ export function underwrite(
     exposureContext,
   };
   if (applicant.historyDays <= 0) {
-    return { decision: config.decide({ ...base, bankData: null }), sim: null };
+    return {
+      decision: config.decide({ ...base, bankData: null }),
+      sim: null,
+      withoutVeracity: null,
+    };
   }
   const start = addDays(applicant.applicationDate, -(applicant.historyDays - 1));
   const sim = createForwardSimulation(stressedParams(applicant, config), applicant.seedHex, start);
@@ -445,26 +513,57 @@ export function underwrite(
     }
   }
   const commerce = applicant.pos ? generateSalesFromPath(salesPath, applicant.seedHex) : null;
-  const decision = config.decide({
+  // What the connections show: the true account seen through each connection's quirks, and
+  // the facts the veracity checks read. Without veracity facts, exactly the simulation.
+  const observed = applicant.veracity
+    ? observe(
+        { ...applicant, veracity: applicant.veracity },
+        sim.transactions,
+        commerce?.dailySales ?? null,
+      )
+    : null;
+  const bankFailed = observed?.veracity.banks[0]?.current === null;
+  const posFailed = observed !== null && observed.veracity.commerce[0]?.current === null;
+  const dailySales = observed?.dailySales ?? commerce?.dailySales ?? null;
+  const input = {
     ...base,
-    bankData: {
-      transactions: sim.transactions,
-      currentBalanceCents: sim.balanceCents,
-      asOf: applicant.applicationDate,
-    },
+    bankData:
+      bankFailed && !config.stripVeracity
+        ? null
+        : {
+            transactions: observed?.transactions ?? sim.transactions,
+            currentBalanceCents: sim.balanceCents,
+            asOf: applicant.applicationDate,
+          },
     commerceData:
-      commerce && applicant.pos
+      dailySales && applicant.pos && (!posFailed || config.stripVeracity)
         ? {
             platform: applicant.pos.platform,
-            dailySales: commerce.dailySales,
-            connectedSince: commerce.connectedSince,
+            dailySales,
+            connectedSince: dailySales[0]?.date ?? commerce!.connectedSince,
           }
         : null,
+  };
+  const decision = config.decide({
+    ...input,
+    ...(observed && !config.stripVeracity ? { veracity: observed.veracity } : {}),
   });
+  // The counterfactual on the same data, for an applicant a veracity finding affected.
+  const withoutVeracity =
+    observed && veracityEffect(decision) !== null
+      ? config.decide({
+          ...input,
+          bankData: input.bankData ?? {
+            transactions: observed.transactions,
+            currentBalanceCents: sim.balanceCents,
+            asOf: applicant.applicationDate,
+          },
+        })
+      : null;
   // The history has done its job. Stop keeping transactions for the forward run.
   sim.record = false;
   sim.transactions = [];
-  return { decision, sim };
+  return { decision, sim, withoutVeracity };
 }
 
 export function runPortfolio(
@@ -922,8 +1021,19 @@ export function runPortfolio(
     // 3. Today's applications. An approved plan starts on the next first of the month.
     while (cursor < applicants.length && applicants[cursor]!.applicationDate === date) {
       const applicant = applicants[cursor++]!;
-      const { decision, sim } = underwrite(applicant, config, exposureFor(applicant.industry));
+      const { decision, sim, withoutVeracity } = underwrite(
+        applicant,
+        config,
+        exposureFor(applicant.industry),
+      );
       const result = emptyResult(applicant, decision);
+      if (withoutVeracity) {
+        result.outcomeWithoutVeracity = withoutVeracity.outcome;
+        const limit = withoutVeracity.approvedMonthlyLimitCents ?? 0;
+        result.usableWithoutVeracity =
+          (withoutVeracity.outcome === 'APPROVED' || withoutVeracity.outcome === 'REFER') &&
+          limit >= applicant.requestedRentCents;
+      }
       customers.push(result);
       if (decision.outcome === 'REFER') {
         // The reviewer catches a fixed share of fraud and declines it. Which applicants are

@@ -21,7 +21,7 @@ describe('evaluation and report', () => {
     expect(evaluation.base.servicingPolicy).toBe('standard');
     expect(evaluation.mild.stress).toBe('mild');
     expect(evaluation.severe.stress).toBe('severe');
-    expect(evaluation.gates).toHaveLength(9);
+    expect(evaluation.gates).toHaveLength(10);
     for (const g of evaluation.gates) expect(typeof g.pass).toBe('boolean');
   });
 
@@ -63,15 +63,17 @@ describe('evaluation and report', () => {
       [
         ['v1_baseline', 'cashflow-v1', 'baseline'],
         ['v1_standard', 'cashflow-v1', 'standard'],
-        ['v2_baseline', POLICY_VERSION, 'baseline'],
+        ['v2_baseline', 'cashflow-v2', 'baseline'],
+        ['v2_standard', 'cashflow-v2', 'standard'],
       ],
     );
+    expect(POLICY_VERSION).toBe('cashflow-v3');
     const [v1Baseline, v1Standard, v2Baseline] = evaluation.comparisons;
-    expect(v1Baseline!.gates).toHaveLength(9);
+    expect(v1Baseline!.gates).toHaveLength(10);
     expect(v1Baseline!.throughTheDoor!.bySeed).toHaveLength(2);
     expect(v1Standard!.throughTheDoor).toBeNull();
     expect(v1Standard!.gates).toBeNull();
-    expect(v2Baseline!.gates).toHaveLength(9);
+    expect(v2Baseline!.gates).toHaveLength(10);
     // Servicing does not change who the launch policy approves.
     expect(v1Standard!.base.overall.approved).toBe(v1Baseline!.base.overall.approved);
     // The launch policy never refers.
@@ -97,6 +99,7 @@ describe('evaluation and report', () => {
       '## Headline (gated configuration, base case, seeds pooled)',
       '## By grade (base case)',
       '## Rank ordering through the door (base case)',
+      '## Data veracity (base case)',
       '## Calibration: expected against realized (base case)',
       '## By archetype (base case)',
       '## By archetype, before and after',
@@ -107,7 +110,7 @@ describe('evaluation and report', () => {
     ]) {
       expect(md).toContain(heading);
     }
-    expect(md).toContain('v2_standard (gated)');
+    expect(md).toContain('v3_standard (gated)');
     expect(md).toContain('At most 5% of applicants referred to a reviewer');
     expect(md).toContain('all scored honest applicants');
     expect(md).toContain('Funded only AUC');
@@ -122,26 +125,29 @@ describe('evaluation and report', () => {
       'v1_standard',
       'v2_baseline',
       'v2_standard',
+      'v3_standard',
     ]);
-    expect(baseline.configurations.v2_standard.gated).toBe(true);
-    expect(baseline.configurations.v2_standard.gates).toHaveLength(9);
-    expect(baseline.configurations.v1_baseline.gates).toHaveLength(9);
-    expect(baseline.configurations.v2_standard.throughTheDoor.bySeed).toHaveLength(2);
-    expect(baseline.configurations.v2_standard.throughTheDoor.honest.auc).toBe(
+    expect(baseline.configurations.v3_standard.gated).toBe(true);
+    expect(baseline.configurations.v2_standard.gated).toBe(false);
+    expect(baseline.configurations.v3_standard.gates).toHaveLength(10);
+    expect(baseline.configurations.v1_baseline.gates).toHaveLength(10);
+    expect(baseline.configurations.v3_standard.veracity.honest.applicants).toBeGreaterThan(0);
+    expect(baseline.configurations.v3_standard.throughTheDoor.bySeed).toHaveLength(2);
+    expect(baseline.configurations.v3_standard.throughTheDoor.honest.auc).toBe(
       Math.round(evaluation.throughTheDoor.pooled.honest.auc! * 1000) / 1000,
     );
     // The funded only figure keeps its place in the headline, ungated.
     const fundedOnly = evaluation.base.rankOrdering.auc;
-    expect(baseline.configurations.v2_standard.headline.base.auc).toBe(
+    expect(baseline.configurations.v3_standard.headline.base.auc).toBe(
       fundedOnly === null ? null : Math.round(fundedOnly * 1000) / 1000,
     );
     expect(json.throughTheDoor.bySeed).toHaveLength(2);
-    expect(baseline.configurations.v2_standard.headline.base.netLossBps).toBe(
+    expect(baseline.configurations.v3_standard.headline.base.netLossBps).toBe(
       evaluation.base.overall.netLossBps,
     );
     for (const text of [md, renderJson(evaluation), renderBaseline(evaluation)])
       expect(text).not.toContain(String.fromCharCode(0x2014));
-  });
+  }, 30_000);
 
   it('a single seed run judges that seed alone', () => {
     const single = evaluate({ n: 80, seed: 'solo', horizonMonths: 3, comparisons: [] });

@@ -84,6 +84,30 @@ export const AUDIT_EVENTS = [
   'JOBS_RUN_REQUESTED',
   /** Too many failed sign ins in a row: the account is locked for a while. */
   'LOGIN_LOCKED',
+  // Data connections (data veracity phase). Written on the connection. Never a token, never
+  // pulled data: counts, hashes, ids, scopes, and reasons only.
+  /** A bank or platform connection was made. Payload: kind, method, provider, platform. */
+  'CONNECTION_CONNECTED',
+  /** What the owner consented to. Payload: scopes, expiry. */
+  'CONSENT_GRANTED',
+  /** A pull was stored as a snapshot. Payload: snapshot id, hash, counts, window, reason. */
+  'DATA_PULLED',
+  /** A pull failed and nothing was stored. Payload: reason. */
+  'DATA_PULL_FAILED',
+  /** An access token was refreshed before it expired. */
+  'TOKEN_REFRESHED',
+  /** A refresh was refused: the owner has to reconnect. */
+  'TOKEN_REFRESH_FAILED',
+  /** Disconnected: access revoked at the platform and tokens deleted. */
+  'CONNECTION_REVOKED',
+  /** A delegated seat invitation was issued. Payload: the service user. */
+  'SEAT_INVITED',
+  /** The seat was checked. Payload: active, reason. */
+  'SEAT_VERIFIED',
+  /** A decision's veracity assessment. Payload: outcome, finding codes, snapshot ids and hashes. */
+  'VERACITY_ASSESSED',
+  /** A pull found the platform paying out somewhere other than it did before. */
+  'PAYOUT_DESTINATION_CHANGED',
 ] as const;
 export type AuditEventType = (typeof AUDIT_EVENTS)[number];
 
@@ -110,6 +134,7 @@ export const AUDIT_SUBJECT_TYPES = [
   'circuit_breaker',
   'user',
   'system',
+  'connection',
 ] as const;
 export type AuditSubjectType = (typeof AUDIT_SUBJECT_TYPES)[number];
 

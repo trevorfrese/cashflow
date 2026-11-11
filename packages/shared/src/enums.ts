@@ -124,3 +124,43 @@ export type AlertCategory = z.infer<typeof AlertCategory>;
 /** Who is calling an operator route. `admin` can do everything a `reviewer` can. */
 export const AdminRole = z.enum(['reviewer', 'admin']);
 export type AdminRole = z.infer<typeof AdminRole>;
+
+/**
+ * Data connections and their provenance.
+ *
+ * Every connection records how its data is obtained, and that method is used everywhere
+ * downstream: in the trust tier, in what underwriting lets the source verify, and in what the
+ * owner and an operator are shown. There is no upload method on purpose: CashFlow pulls the
+ * data itself or does not use it. See `apps/api/DATA_CONNECTIONS.md`.
+ *
+ *   DIRECT_OAUTH    The owner approved read-only access on the platform's own site. CashFlow
+ *                   holds the platform-issued token and calls the platform API itself.
+ *   DELEGATED_SEAT  The owner invited CashFlow's own read-only service user onto the account.
+ *                   CashFlow's agent signs in with CashFlow's credentials for that seat. The
+ *                   owner's password is never shared.
+ *   AGGREGATOR      A bank data aggregator's connection, authorized at the bank.
+ */
+export const ConnectionAccessMethod = z.enum(['DIRECT_OAUTH', 'DELEGATED_SEAT', 'AGGREGATOR']);
+export type ConnectionAccessMethod = z.infer<typeof ConnectionAccessMethod>;
+
+/**
+ * How far a source can be trusted, derived from the access method and from what the veracity
+ * checks found. Never chosen by the applicant.
+ */
+export const TrustTier = z.enum(['HIGH', 'MEDIUM', 'LOW', 'NONE']);
+export type TrustTier = z.infer<typeof TrustTier>;
+
+/** Where a connection stands for pulling data. */
+export const ConnectionHealth = z.enum([
+  /** Pulls work. */
+  'HEALTHY',
+  /** Waiting on the owner: an OAuth approval or a seat invitation that is not active yet. */
+  'PENDING',
+  /** The token expired and could not be refreshed, or consent lapsed: the owner reconnects. */
+  'REAUTH_REQUIRED',
+  /** The last pull failed. Nothing partial was stored. */
+  'ERROR',
+  /** Disconnected by the owner, or revoked at the platform. */
+  'REVOKED',
+]);
+export type ConnectionHealth = z.infer<typeof ConnectionHealth>;

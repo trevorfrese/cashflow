@@ -1,4 +1,4 @@
-import { addDays, daysBetween, type IsoDate } from '@cashflow/shared';
+import { daysBetween, type IsoDate } from '@cashflow/shared';
 
 import type { AppContext } from '../context.ts';
 import { effectiveAt } from '../dates.ts';
@@ -7,7 +7,8 @@ import type { EngineInput, EngineResult } from '../underwriting/engine.ts';
 import { CURRENT_POLICY, type CreditPolicy } from '../underwriting/policy.ts';
 import { recordAudit } from './audit.ts';
 import { gatherExposureContext } from './portfolio-state.ts';
-import { gatherBankData, UNDERWRITING_LOOKBACK_DAYS } from './underwriting.ts';
+import { gatherDecisionData } from './connections.ts';
+import { recordVeracityAssessed } from './underwriting.ts';
 
 export type ReunderwriteOutcome =
   /** A periodic review already exists for this plan and month. Nothing was done. */
@@ -104,11 +105,20 @@ export async function reunderwritePlan(
 
   const bankLink = plan.business.bankLinks[0] ?? null;
   const commerceLink = plan.business.commerceLinks[0] ?? null;
-  const bankData: EngineInput['bankData'] = bankLink
-    ? await gatherBankData(providers, bankLink, asOf)
-    : null;
-  // No link, or a feed that has not caught up: nothing is stored, so the next run of the
-  // job tries again, and the plan is left exactly as it is.
+  // The same path as an application: snapshots, the freshness rule, and the veracity facts.
+  const { bankData, commerceData, veracity } = bankLink
+    ? await gatherDecisionData(ctx, {
+        businessId: plan.businessId,
+        bankLink,
+        commerceLink,
+        timeInBusinessMonths: plan.application.timeInBusinessMonths,
+        asOf,
+        reason: 'REUNDERWRITE',
+        periodicReview: true,
+      })
+    : { bankData: null, commerceData: null, veracity: null };
+  // No link, a pull that failed, or a feed that has not caught up: nothing is stored, so the
+  // next run of the job tries again, and the plan is left exactly as it is.
   const age = dataAgeDays(bankData, asOf);
   if (age === null || age > MAX_DATA_AGE_DAYS) {
     ctx.log.warn(
@@ -117,16 +127,6 @@ export async function reunderwritePlan(
     );
     return 'unscored';
   }
-  const commerceData: EngineInput['commerceData'] = commerceLink
-    ? {
-        platform: commerceLink.platform,
-        connectedSince: commerceLink.connectedSince,
-        dailySales: await providers.commerce.getDailySales(commerceLink.providerItemId, {
-          from: addDays(asOf, -(UNDERWRITING_LOOKBACK_DAYS - 1)),
-          to: asOf,
-        }),
-      }
-    : null;
   // The plan under review is left out of the exposure totals: the question is whether we
   // would carry this rent today, not whether we would add it on top of itself.
   const exposureContext = await gatherExposureContext(db, providers, {
@@ -147,6 +147,7 @@ export async function reunderwritePlan(
     integrityContext: { leaseVerified: true },
     exposureContext,
     periodicReview: true,
+    veracity,
   });
 
   const reason = watchReason(result, policy);
@@ -194,6 +195,14 @@ export async function reunderwritePlan(
         grade: result.grade,
         watchReason: reason,
       },
+      at: effectiveAt(asOf),
+    });
+    await recordVeracityAssessed(tx, result, {
+      actor,
+      subjectType: 'application',
+      subjectId: plan.applicationId,
+      decisionId: decision.id,
+      businessId: plan.businessId,
       at: effectiveAt(asOf),
     });
     if (freeze && !wasFrozen) {

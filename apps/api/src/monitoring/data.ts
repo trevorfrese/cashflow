@@ -11,6 +11,9 @@ import { ACTIVE_SERVICING_POLICY } from '../servicing/policy.ts';
 import type { MonitoringPolicy } from './policy.ts';
 import { ALERTED_EVENT_TYPES } from './rules/events.ts';
 import type {
+  ConnectionFact,
+  PayoutDestinationChangeFact,
+  VeracityEventFact,
   ApplicationFact,
   BooksFact,
   ExhaustedFact,
@@ -439,6 +442,135 @@ async function retentionFacts(
   }));
 }
 
+/** Veracity assessments are read back this far, for the settlement baseline. */
+export const VERACITY_LOOKBACK_DAYS = 400;
+
+async function connectionFacts(tx: Tx): Promise<{
+  connections: ConnectionFact[];
+  veracityEvents: VeracityEventFact[];
+  payoutDestinationChanges: PayoutDestinationChangeFact[];
+  activeBusinesses: Map<string, string>;
+}> {
+  const business = {
+    select: {
+      legalName: true,
+      ownerUserId: true,
+      rentPlans: { where: { status: 'ACTIVE' as const }, select: { id: true }, take: 1 },
+    },
+  };
+  const [banks, platforms] = await Promise.all([
+    tx.bankLink.findMany({ where: { status: { not: 'DISCONNECTED' } }, include: { business } }),
+    tx.commerceLink.findMany({ where: { status: { not: 'DISCONNECTED' } }, include: { business } }),
+  ]);
+  const activeBusinesses = new Map<string, string>();
+  const connections: ConnectionFact[] = [];
+  for (const b of banks) {
+    if (b.business.rentPlans.length > 0) activeBusinesses.set(b.businessId, b.business.legalName);
+    connections.push({
+      connectionId: b.id,
+      kind: 'BANK',
+      businessId: b.businessId,
+      businessName: b.business.legalName,
+      ownerUserId: b.business.ownerUserId,
+      name: b.institutionName,
+      accessMethod: b.accessMethod,
+      health: b.health,
+      status: b.status,
+      lastPulledOn: dayOrNull(b.lastPulledAt),
+      lastPullError: b.lastPullError,
+      tokenExpiresOn: dayOrNull(b.consentExpiresAt),
+      platformAccountId: null,
+      payoutDestinations: [],
+      hasActivePlan: b.business.rentPlans.length > 0,
+    });
+  }
+  for (const c of platforms) {
+    if (c.business.rentPlans.length > 0) activeBusinesses.set(c.businessId, c.business.legalName);
+    const destinations = (
+      Array.isArray(c.payoutDestinations) ? c.payoutDestinations : []
+    ) as Array<{
+      institutionName: string | null;
+      mask: string | null;
+    }>;
+    connections.push({
+      connectionId: c.id,
+      kind: 'COMMERCE',
+      businessId: c.businessId,
+      businessName: c.business.legalName,
+      ownerUserId: c.business.ownerUserId,
+      name: c.platform,
+      accessMethod: c.accessMethod,
+      health: c.health,
+      status: c.status,
+      lastPulledOn: dayOrNull(c.lastPulledAt),
+      lastPullError: c.lastPullError,
+      tokenExpiresOn: dayOrNull(c.tokenExpiresAt),
+      platformAccountId: c.platformAccountId,
+      payoutDestinations: destinations
+        .filter((d) => d.mask !== null)
+        .map((d) => `${d.institutionName ?? ''}|${d.mask}`),
+      hasActivePlan: c.business.rentPlans.length > 0,
+    });
+  }
+  return { connections, veracityEvents: [], payoutDestinationChanges: [], activeBusinesses };
+}
+
+async function veracityFacts(
+  tx: Tx,
+  asOf: IsoDate,
+  active: Map<string, string>,
+  names: Map<string, string>,
+): Promise<{
+  veracityEvents: VeracityEventFact[];
+  payoutDestinationChanges: PayoutDestinationChangeFact[];
+}> {
+  const events = await tx.auditEvent.findMany({
+    where: {
+      eventType: { in: ['VERACITY_ASSESSED', 'PAYOUT_DESTINATION_CHANGED'] },
+      at: {
+        gte: startOf(addDays(asOf, -VERACITY_LOOKBACK_DAYS)),
+        lte: new Date(`${asOf}T23:59:59.999Z`),
+      },
+    },
+    orderBy: [{ at: 'asc' }, { id: 'asc' }],
+  });
+  const veracityEvents: VeracityEventFact[] = [];
+  const payoutDestinationChanges: PayoutDestinationChangeFact[] = [];
+  for (const e of events) {
+    const p = (e.payload ?? {}) as Record<string, unknown>;
+    const businessId = typeof p.businessId === 'string' ? p.businessId : null;
+    if (!businessId) continue;
+    const businessName = names.get(businessId) ?? businessId;
+    if (e.eventType === 'VERACITY_ASSESSED') {
+      const findings = Array.isArray(p.findings) ? (p.findings as Array<{ code: string }>) : [];
+      veracityEvents.push({
+        id: e.id,
+        businessId,
+        businessName,
+        on: day(e.at),
+        source: p.decisionId ? 'DECISION' : 'REFRESH',
+        findingCodes: findings.map((f) => f.code),
+        matchedShareByAmountBps:
+          typeof p.matchedShareByAmountBps === 'number' ? p.matchedShareByAmountBps : null,
+        payoutsConsidered: typeof p.payoutsConsidered === 'number' ? p.payoutsConsidered : null,
+        hasActivePlan: active.has(businessId),
+      });
+    } else {
+      payoutDestinationChanges.push({
+        eventId: e.id,
+        connectionId: e.subjectId,
+        businessId,
+        businessName,
+        on: day(e.at),
+        fromMasks: (p.fromMasks as string[] | undefined) ?? [],
+        toMasks: (p.toMasks as string[] | undefined) ?? [],
+        hasActivePlan: active.has(businessId),
+      });
+    }
+  }
+  return { veracityEvents, payoutDestinationChanges };
+}
+
 export interface GatherArgs {
   asOf: IsoDate;
   policy: MonitoringPolicy;
@@ -506,8 +638,15 @@ export async function gatherMonitoringInputs(tx: Tx, args: GatherArgs): Promise<
     },
   });
 
+  const links = await connectionFacts(tx);
+  const names = new Map(businesses.map((b) => [b.id, b.legalName]));
+  const veracity = await veracityFacts(tx, asOf, links.activeBusinesses, names);
+
   return {
     asOf,
+    connections: links.connections,
+    veracityEvents: veracity.veracityEvents,
+    payoutDestinationChanges: veracity.payoutDestinationChanges,
     leaseChanges,
     landlordAccounts: leases.map((l) => ({
       leaseId: l.id,

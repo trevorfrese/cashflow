@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { BankTransaction, IsoDate } from '@cashflow/shared';
-import { addDays } from '@cashflow/shared';
+import { addDays, daysBetween } from '@cashflow/shared';
 
 import {
   BusinessSimulation,
@@ -70,26 +70,78 @@ export function parseScenario(token: string): ScenarioSpec {
   return { scenario, monthlyRevenueCents, rentCents };
 }
 
-/** Encode a spec into a provider item id so later calls can regenerate the same history. */
-export function encodeItemId(spec: ScenarioSpec, seedHex: string): string {
-  return `mock_item_${spec.scenario}_r${spec.monthlyRevenueCents}_l${spec.rentCents}_${seedHex}`;
+/**
+ * Sandbox keywords that change what the aggregator reports about the account, not the
+ * history's cash flows. See `apps/api/README.md`.
+ */
+export const BANK_FLAGS = [
+  /** A personal account in the owner's name (a sole proprietor's account). */
+  'personal',
+  /** The account belongs to a different business. */
+  'borrowed',
+  /** Opened recently: 60 days before it was linked. */
+  'new_account',
+  /** Two more accounts on the same login that were not shared. */
+  'hidden',
+  /** A legacy connection, not authorized through the bank's own OAuth. */
+  'legacy',
+  /** Pulls after the link date leave out overdraft fees and debt payments: rewritten history. */
+  'rewrites',
+  /** Consent expires after the link date: later pulls need the owner to reconnect. */
+  'expired',
+] as const;
+export type BankFlag = (typeof BANK_FLAGS)[number];
+
+export function parseBankFlags(token: string): BankFlag[] {
+  const lower = token.toLowerCase();
+  return BANK_FLAGS.filter((f) => lower.includes(f));
 }
 
-export function decodeItemId(itemId: string): { spec: ScenarioSpec; seedHex: string } {
-  const m = /^mock_item_([a-z_]+)_r(\d+)_l(\d+)_([0-9a-f]+)$/.exec(itemId);
+/** Encode a spec into a provider item id so later calls can regenerate the same history. */
+export function encodeItemId(
+  spec: ScenarioSpec,
+  seedHex: string,
+  anchor?: IsoDate,
+  flags: readonly BankFlag[] = [],
+): string {
+  const base = `mock_item_${spec.scenario}_r${spec.monthlyRevenueCents}_l${spec.rentCents}_${seedHex}`;
+  const a = anchor ? `_a${anchor.replaceAll('-', '')}` : '';
+  const x = flags.length > 0 ? `_x${flags.join('-')}` : '';
+  return `${base}${a}${x}`;
+}
+
+export interface DecodedItem {
+  spec: ScenarioSpec;
+  seedHex: string;
+  /** The date the link was made: the history is anchored there and continues forward. */
+  anchor: IsoDate | null;
+  flags: BankFlag[];
+}
+
+export function decodeItemId(itemId: string): DecodedItem {
+  const m = /^mock_item_([a-z_]+)_r(\d+)_l(\d+)_([0-9a-f]+)(?:_a(\d{8}))?(?:_x([a-z_-]+))?$/.exec(
+    itemId,
+  );
   if (!m) {
     // Legacy or foreign id: fall back to a healthy history seeded from the id itself.
     return {
       spec: parseScenario('healthy'),
       seedHex: createHash('sha256').update(itemId).digest('hex').slice(0, 12),
+      anchor: null,
+      flags: [],
     };
   }
   const scenario = (SCENARIOS as readonly string[]).includes(m[1]!)
     ? (m[1] as Scenario)
     : 'healthy';
+  const a = m[5];
   return {
     spec: { scenario, monthlyRevenueCents: Number(m[2]), rentCents: Number(m[3]) },
     seedHex: m[4]!,
+    anchor: a ? `${a.slice(0, 4)}-${a.slice(4, 6)}-${a.slice(6, 8)}` : null,
+    flags: (m[6]?.split('-') ?? []).filter((f): f is BankFlag =>
+      (BANK_FLAGS as readonly string[]).includes(f),
+    ),
   };
 }
 
@@ -186,8 +238,39 @@ export function generateHistory(
   seedHex: string,
   asOf: IsoDate,
 ): SyntheticHistory {
+  const sim = windowSimulation(spec, seedHex, asOf);
+  if (!sim) return { transactions: [], currentBalanceCents: null };
+  return { transactions: sim.transactions, currentBalanceCents: sim.balanceCents };
+}
+
+/**
+ * The history as it stands on `asOf` for an account linked on `anchor`. Up to the anchor it is
+ * exactly `generateHistory(spec, seedHex, anchor)`. After it the same account keeps going one
+ * day at a time at the level it had reached, so a pull made later sees the earlier pull's
+ * history unchanged, plus the days since. That is what a real account does, and what the
+ * consistency check compares. Before this existed, the sandbox regenerated a whole new year
+ * on every date.
+ */
+export function generateHistoryAt(
+  spec: ScenarioSpec,
+  seedHex: string,
+  anchor: IsoDate,
+  asOf: IsoDate,
+): SyntheticHistory {
+  const extra = daysBetween(anchor, asOf);
+  const sim = windowSimulation(spec, seedHex, anchor, Math.max(0, extra));
+  if (!sim) return { transactions: [], currentBalanceCents: null };
+  return { transactions: sim.transactions, currentBalanceCents: sim.balanceCents };
+}
+
+function windowSimulation(
+  spec: ScenarioSpec,
+  seedHex: string,
+  asOf: IsoDate,
+  extraDays = 0,
+): BusinessSimulation | null {
   const p = PARAMS[spec.scenario];
-  if (p.days === 0) return { transactions: [], currentBalanceCents: null };
+  if (p.days === 0) return null;
 
   const rand = mulberry32(seedFromHex(seedHex));
   const start = addDays(asOf, -(p.days - 1));
@@ -201,11 +284,12 @@ export function generateHistory(
   }));
 
   // The sandbox trend is defined relative to the window, so the as-of date always sits at the
-  // same point of the story whatever day the token is linked.
+  // same point of the story whatever day the token is linked. After the window the level
+  // holds where it ended.
   const span = Math.max(p.days - 1, 1);
   const collapse = p.collapse;
   const trendFactor = (i: number): number => {
-    const progress = i / span;
+    const progress = Math.min(1, i / span);
     let factor = 1 + p.trend * (progress - 0.5);
     if (collapse && progress > collapse.at) {
       factor *= 1 - (collapse.depth * (progress - collapse.at)) / (1 - collapse.at);
@@ -221,6 +305,6 @@ export function generateHistory(
     trendFactor,
     events,
   });
-  for (let i = 0; i < p.days; i++) sim.step();
-  return { transactions: sim.transactions, currentBalanceCents: sim.balanceCents };
+  for (let i = 0; i < p.days + extraDays; i++) sim.step();
+  return sim;
 }

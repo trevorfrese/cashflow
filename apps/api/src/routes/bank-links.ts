@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { unprocessable } from '../errors.ts';
 import { toBankLink } from '../serializers.ts';
+import { connectBank } from '../services/connections.ts';
 import { currentUserId, getOwnedBusiness } from './helpers.ts';
 
 export async function bankLinkRoutes(app: FastifyInstance) {
@@ -36,27 +37,22 @@ export async function bankLinkRoutes(app: FastifyInstance) {
     },
     async (request, reply) => {
       await getOwnedBusiness(db, request.body.businessId, currentUserId(request));
-      let linked;
+      let row;
       try {
-        linked = await providers.bankLink.exchangePublicToken(request.body.publicToken);
+        row = await connectBank(
+          { db, providers },
+          {
+            businessId: request.body.businessId,
+            publicToken: request.body.publicToken,
+            actor: { type: 'user', id: currentUserId(request) },
+          },
+        );
       } catch (err) {
         throw unprocessable(
           'BANK_LINK_FAILED',
           err instanceof Error ? err.message : 'Bank link failed',
         );
       }
-      const row = await db.bankLink.create({
-        data: {
-          businessId: request.body.businessId,
-          provider: providers.bankLink.name,
-          providerItemId: linked.providerItemId,
-          providerAccountToken: linked.providerAccountToken,
-          institutionName: linked.institutionName,
-          accountMask: linked.accountMask,
-          availableBalanceCents: linked.availableBalanceCents,
-          status: 'LINKED',
-        },
-      });
       return reply.code(201).send(toBankLink(row));
     },
   );

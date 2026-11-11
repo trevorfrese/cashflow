@@ -88,6 +88,11 @@ export function makeCustomer(overrides: Partial<CustomerResult> = {}): CustomerR
     firstPaymentDefault: false,
     bad: false,
     closedOn: null,
+    veracityCodes: [],
+    veracityEffect: null,
+    outcomeWithoutVeracity: null,
+    usableWithoutVeracity: null,
+    veracityTags: [],
     ...overrides,
   };
 }

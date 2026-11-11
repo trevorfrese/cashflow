@@ -4,7 +4,7 @@ import {
   type ServicingPolicy,
 } from '../servicing/policy.ts';
 import { decide } from '../underwriting/engine.ts';
-import { CURRENT_POLICY, POLICY_V1, type CreditPolicy } from '../underwriting/policy.ts';
+import { CURRENT_POLICY, POLICY_V1, POLICY_V2, type CreditPolicy } from '../underwriting/policy.ts';
 import { ASSUMPTIONS, STRESS, poolSizeFor } from './assumptions.ts';
 import { evaluateGates, type GateResult } from './gates.ts';
 import {
@@ -19,10 +19,13 @@ import {
 import { drawPopulation, type Applicant } from './population.ts';
 import {
   runPortfolio,
+  runThroughTheDoor,
   throughTheDoorCustomers,
+  type CustomerResult,
   type PortfolioConfig,
   type PortfolioResult,
 } from './portfolio.ts';
+import { counterfactualCell, type CounterfactualCell } from './veracity-metrics.ts';
 
 /**
  * One full evaluation.
@@ -56,7 +59,7 @@ export interface PolicyConfig {
 }
 
 export const GATED_CONFIG: PolicyConfig = {
-  name: 'v2_standard',
+  name: 'v3_standard',
   description: `${CURRENT_POLICY.version} decisions, standard servicing. The gated configuration.`,
   policy: CURRENT_POLICY,
   servicing: STANDARD_SERVICING_POLICY,
@@ -80,9 +83,16 @@ export const COMPARISON_CONFIGS: readonly PolicyConfig[] = [
   },
   {
     name: 'v2_baseline',
-    description: `${CURRENT_POLICY.version} decisions, baseline servicing: what the credit policy buys on its own.`,
-    policy: CURRENT_POLICY,
+    description: `${POLICY_V2.version} decisions, baseline servicing: what the credit policy buys on its own.`,
+    policy: POLICY_V2,
     servicing: BASELINE_SERVICING_POLICY,
+    withMild: true,
+  },
+  {
+    name: 'v2_standard',
+    description: `${POLICY_V2.version} decisions, standard servicing: the policy before the data veracity checks, on the same applicants. What the checks buy and cost.`,
+    policy: POLICY_V2,
+    servicing: STANDARD_SERVICING_POLICY,
     withMild: true,
   },
 ];
@@ -154,6 +164,18 @@ export interface ThroughTheDoorOutcome {
   bySeed: ThroughTheDoorMetrics[];
 }
 
+/**
+ * Honest applicants a veracity finding knocked out, referred or sent for information, each
+ * funded in a counterfactual run that decides without the veracity facts, against honest
+ * applicants the checks left alone, from the gated configuration's through the door run.
+ */
+export interface VeracityCounterfactual {
+  affected: CounterfactualCell;
+  unaffected: CounterfactualCell;
+  /** Unaffected honest applicants the policy approved on usable terms. */
+  unaffectedApprovedUsable: CounterfactualCell;
+}
+
 export interface ConfigOutcome {
   name: string;
   description: string;
@@ -192,6 +214,8 @@ export interface Evaluation {
     policyVersion: string;
     servicingPolicy: string;
     reviewFraudCatchRateBps: number;
+    /** The gated configuration's name. */
+    gated: string;
   };
   /** The gated configuration with all seeds pooled into one book. */
   base: PortfolioMetrics;
@@ -205,6 +229,7 @@ export interface Evaluation {
    * AUC gate. Not part of `base` and not a portfolio result.
    */
   throughTheDoor: ThroughTheDoorOutcome;
+  veracityCounterfactual: { pooled: VeracityCounterfactual; bySeed: VeracityCounterfactual[] };
   gates: GateResult[];
   comparisons: ConfigOutcome[];
   challengers: ChallengerOutcome[];
@@ -268,11 +293,13 @@ export function evaluate(options: EvaluationOptions): Evaluation {
    * played again. A declined applicant the engine never priced pays the grade D floor, the
    * highest floor of any grade the policy funds.
    */
+  const doorCustomers: CustomerResult[][] = [];
   const runThroughDoor = (
     policy: CreditPolicy,
     servicing: ServicingPolicy,
     label: string,
     funded: readonly PortfolioResult[],
+    keep = false,
   ): ThroughTheDoorOutcome => {
     const bySeed = populations.map((population, i) =>
       throughTheDoorCustomers(
@@ -286,6 +313,7 @@ export function evaluate(options: EvaluationOptions): Evaluation {
         funded[i]!,
       ),
     );
+    if (keep) doorCustomers.push(...bySeed);
     return {
       pooled: throughTheDoorMetrics(bySeed.flat()),
       bySeed: bySeed.map((customers) => throughTheDoorMetrics(customers)),
@@ -302,7 +330,47 @@ export function evaluate(options: EvaluationOptions): Evaluation {
     gated.servicing,
     'through_the_door',
     baseResults,
+    true,
   );
+
+  // The honest applicants a veracity finding affected, funded without the finding.
+  const veracityBySeed: VeracityCounterfactual[] = [];
+  const pooledAffected: CustomerResult[] = [];
+  const pooledUnaffected: CustomerResult[] = [];
+  const pooledUsable: CustomerResult[] = [];
+  populations.forEach((population, i) => {
+    const ordinary = new Map(baseResults[i]!.customers.map((c) => [c.applicantId, c]));
+    const affectedIds = new Set(
+      [...ordinary.values()]
+        .filter((c) => c.fraud === null && c.veracityEffect !== null)
+        .map((c) => c.applicantId),
+    );
+    const affected = runThroughTheDoor(
+      population.filter((a) => affectedIds.has(a.id)),
+      {
+        ...portfolioConfig(gated.policy, gated.servicing, options.horizonMonths),
+        label: 'veracity_counterfactual',
+        stress: null,
+        stripVeracity: true,
+        fallbackFeeBps: gated.policy.pricing.D.feeBps,
+      },
+    ).customers;
+    const unaffected = doorCustomers[i]!.filter(
+      (c) => c.fraud === null && !affectedIds.has(c.applicantId),
+    );
+    const usable = unaffected.filter((c) => {
+      const o = ordinary.get(c.applicantId);
+      return o !== undefined && o.outcome === 'APPROVED' && !o.counterOffer;
+    });
+    pooledAffected.push(...affected);
+    pooledUnaffected.push(...unaffected);
+    pooledUsable.push(...usable);
+    veracityBySeed.push({
+      affected: counterfactualCell(affected),
+      unaffected: counterfactualCell(unaffected),
+      unaffectedApprovedUsable: counterfactualCell(usable),
+    });
+  });
 
   const comparisonOutcomes = comparisons.map((c): ConfigOutcome => {
     const results = runAll(c.policy, c.servicing, c.name);
@@ -363,6 +431,7 @@ export function evaluate(options: EvaluationOptions): Evaluation {
       policyVersion: gated.policy.version,
       servicingPolicy: gated.servicing.name,
       reviewFraudCatchRateBps: ASSUMPTIONS.reviewFraudCatchRateBps,
+      gated: gated.name,
     },
     base: base.pooled,
     mild: mild.pooled,
@@ -371,6 +440,14 @@ export function evaluate(options: EvaluationOptions): Evaluation {
     mildBySeed: mild.bySeed,
     severeBySeed: severe.bySeed,
     throughTheDoor,
+    veracityCounterfactual: {
+      pooled: {
+        affected: counterfactualCell(pooledAffected),
+        unaffected: counterfactualCell(pooledUnaffected),
+        unaffectedApprovedUsable: counterfactualCell(pooledUsable),
+      },
+      bySeed: veracityBySeed,
+    },
     gates: evaluateGates({
       base: base.bySeed,
       mild: mild.bySeed,

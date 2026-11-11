@@ -170,17 +170,45 @@ export async function runSmoke({
       return `${link.institutionName} ending ${link.accountMask}`;
     });
 
-    await step('Healthy sandbox point of sale connected', async () => {
+    await step('Square connected through OAuth (sandbox consent page)', async () => {
       const dollars = Math.round(walk.business.statedMonthlyRevenueCents / 100);
-      const link = await call('pos', 'POST', '/v1/commerce-links', {
+      // The app's flow: ask where to send the owner, approve read-only access on the
+      // platform's (here, the sandbox's) consent page, then hand the redirect back.
+      const started = await call('pos', 'POST', '/v1/connections/oauth/start', {
+        body: { businessId: ids.businessId, platform: 'SQUARE' },
+      });
+      check(
+        'pos',
+        started.accessMethod === 'DIRECT_OAUTH' &&
+          started.authorizationUrl.includes('code_challenge'),
+        'the authorization did not start as a direct OAuth connection with PKCE',
+        started,
+      );
+      const approved = await call('pos', 'POST', '/v1/connections/oauth/mock-authorize', {
+        body: { state: started.state, scenario: `healthy_sales_${dollars}_dev_walk` },
+      });
+      const redirect = new URL(approved.redirectUrl);
+      const link = await call('pos', 'POST', '/v1/connections/oauth/callback', {
         body: {
-          businessId: ids.businessId,
-          platform: 'SQUARE',
-          publicToken: `mock_square_healthy_sales_${dollars}_dev_walk`,
+          state: redirect.searchParams.get('state'),
+          code: redirect.searchParams.get('code'),
         },
       });
+      check(
+        'pos',
+        link.accessMethod === 'DIRECT_OAUTH' && link.health === 'HEALTHY',
+        'the connection is not a healthy direct OAuth connection',
+        link,
+      );
+      const list = await call('pos', 'GET', `/v1/businesses/${ids.businessId}/connections`);
+      check(
+        'pos',
+        !JSON.stringify(list).includes('mock_cat.') && !JSON.stringify(link).includes('mock_cat.'),
+        'a platform token appeared in a response',
+        list,
+      );
       ids.commerceLinkId = link.id;
-      return link.locationName;
+      return `${link.name}, ${link.detail}`;
     });
 
     let decision = null;

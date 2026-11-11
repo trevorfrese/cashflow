@@ -24,6 +24,7 @@ import { authRoutes } from './routes/auth.ts';
 import { bankLinkRoutes } from './routes/bank-links.ts';
 import { businessRoutes } from './routes/businesses.ts';
 import { commerceLinkRoutes } from './routes/commerce-links.ts';
+import { connectionRoutes } from './routes/connections.ts';
 import { devRoutes, installDevClock } from './routes/dev.ts';
 import { healthRoutes } from './routes/health.ts';
 import { leaseRoutes } from './routes/leases.ts';
@@ -155,6 +156,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
       await v1.register(businessRoutes);
       await v1.register(bankLinkRoutes);
       await v1.register(commerceLinkRoutes);
+      await v1.register(connectionRoutes);
       await v1.register(underwritingRoutes);
       await v1.register(leaseRoutes);
       await v1.register(rentPlanRoutes);

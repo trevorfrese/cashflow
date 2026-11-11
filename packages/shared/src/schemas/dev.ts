@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { AuthResponse } from './auth';
 import { CreateBusinessRequest } from './business';
+import { CommercePlatform } from './commerce';
 import { Cents, Id, IsoDateSchema, IsoDateTimeSchema } from './common';
 
 /**
@@ -21,11 +22,23 @@ export const DEV_PERSONA_GROUP_LABELS: Record<DevPersonaGroup, string> = {
 };
 
 /** The screen the app opens on after signing in as a persona. */
-export const DevLandingScreen = z.enum(['HOME', 'APPLICATION', 'HISTORY', 'BUSINESS_NEW']);
+export const DevLandingScreen = z.enum([
+  'HOME',
+  'APPLICATION',
+  'HISTORY',
+  'BUSINESS_NEW',
+  'CONNECTIONS',
+]);
 export type DevLandingScreen = z.infer<typeof DevLandingScreen>;
 
 /** What a fresh applicant's preset inputs are meant to end in. */
-export const DevWalkthroughOutcome = z.enum(['APPROVED', 'DECLINED', 'IN_REVIEW', 'COUNTER_OFFER']);
+export const DevWalkthroughOutcome = z.enum([
+  'APPROVED',
+  'DECLINED',
+  'IN_REVIEW',
+  'COUNTER_OFFER',
+  'NEEDS_INFO',
+]);
 export type DevWalkthroughOutcome = z.infer<typeof DevWalkthroughOutcome>;
 
 /**
@@ -45,6 +58,11 @@ export const DevWalkthrough = z.object({
   bankPublicToken: z.string(),
   timeInBusinessMonths: z.number().int().min(0).max(1200),
   requestedMonthlyRentCents: Cents,
+  /**
+   * A point of sale to connect before applying: the platform, and the keywords the sandbox
+   * consent page (or seat) is given. Null when the preset connects only a bank.
+   */
+  pos: z.object({ platform: CommercePlatform, scenario: z.string() }).nullable().default(null),
 });
 export type DevWalkthrough = z.infer<typeof DevWalkthrough>;
 

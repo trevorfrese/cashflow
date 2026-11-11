@@ -33,7 +33,14 @@ const ConfigSchema = z.object({
 
   UNDERWRITING_PROVIDER: z.enum(['cashflow', 'mock']).default('cashflow'),
   BANK_LINK_PROVIDER: z.enum(['mock', 'plaid']).default('mock'),
-  COMMERCE_PROVIDER: z.enum(['mock', 'square']).default('mock'),
+  /**
+   * Point of sale and commerce platforms. `mock` serves every platform from the sandbox. A
+   * platform name puts that platform on its real adapter (a compile-only skeleton that refuses
+   * to run without its credentials) and leaves the others on the sandbox.
+   */
+  COMMERCE_PROVIDER: z.enum(['mock', 'square', 'shopify', 'stripe', 'clover']).default('mock'),
+  /** Platforms without an API (Toast): a read-only seat for CashFlow's own service user. */
+  DELEGATED_SEAT_PROVIDER: z.enum(['mock', 'toast']).default('mock'),
   PAYMENTS_PROVIDER: z.enum(['mock', 'stripe']).default('mock'),
   CAPITAL_PROVIDER: z.enum(['mock']).default('mock'),
   IDENTITY_PROVIDER: z.enum(['mock']).default('mock'),
@@ -74,6 +81,29 @@ const ConfigSchema = z.object({
   SQUARE_APPLICATION_ID: z.string().optional(),
   SQUARE_APPLICATION_SECRET: z.string().optional(),
   SQUARE_ENV: z.enum(['sandbox', 'production']).default('sandbox'),
+  SHOPIFY_API_KEY: z.string().optional(),
+  SHOPIFY_API_SECRET: z.string().optional(),
+  STRIPE_CONNECT_CLIENT_ID: z.string().optional(),
+  CLOVER_APP_ID: z.string().optional(),
+  CLOVER_APP_SECRET: z.string().optional(),
+  CLOVER_ENV: z.enum(['sandbox', 'production']).default('sandbox'),
+  /** CashFlow's own Toast service user, and where its credentials live (a secret store ref). */
+  TOAST_SEAT_SERVICE_USER: z.string().optional(),
+  TOAST_SEAT_CREDENTIALS_REF: z.string().optional(),
+  /**
+   * Key for encrypting platform and aggregator tokens at rest (AES-256-GCM, HKDF derived). The
+   * mocks work without it on a public sandbox key; every real adapter refuses to start
+   * without it. Generate with: openssl rand -hex 32
+   */
+  CONNECTION_TOKEN_KEY: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v.trim() === '' ? undefined : v.trim()))
+    .refine((v) => v === undefined || v.length >= 32, {
+      message: 'must be at least 32 characters. Generate one with: openssl rand -hex 32',
+    }),
+  /** Where platforms redirect the owner after approving access. */
+  OAUTH_REDIRECT_URI: z.string().default('http://localhost:8099/connect/callback'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -99,6 +129,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     );
   }
 
+  // A real data adapter receives platform tokens, which are encrypted at rest. The sandbox key
+  // is public, so a real adapter without a key of its own is a refusal to start.
+  const realAdapters = [
+    config.BANK_LINK_PROVIDER !== 'mock' ? `BANK_LINK_PROVIDER=${config.BANK_LINK_PROVIDER}` : null,
+    config.COMMERCE_PROVIDER !== 'mock' ? `COMMERCE_PROVIDER=${config.COMMERCE_PROVIDER}` : null,
+    config.DELEGATED_SEAT_PROVIDER !== 'mock'
+      ? `DELEGATED_SEAT_PROVIDER=${config.DELEGATED_SEAT_PROVIDER}`
+      : null,
+  ].filter((v): v is string => v !== null);
+  if (realAdapters.length > 0 && !config.CONNECTION_TOKEN_KEY) {
+    throw new Error(
+      `Refusing to start: ${realAdapters.join(', ')} needs CONNECTION_TOKEN_KEY to encrypt the tokens it receives. Generate one with: openssl rand -hex 32`,
+    );
+  }
+
   // Safety rails. A production build must never run with a live key by accident.
   if (config.NODE_ENV === 'production') {
     // Dev tools hand out sessions without a password and can wipe the database.
@@ -115,6 +160,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (config.PLAID_ENV === 'production') {
       throw new Error(
         'Refusing to start: PLAID_ENV=production. This project only runs against sandbox data.',
+      );
+    }
+    if (config.CLOVER_ENV === 'production') {
+      throw new Error(
+        'Refusing to start: CLOVER_ENV=production. This project only reads sandbox sales data.',
       );
     }
     if (config.SQUARE_ENV === 'production') {

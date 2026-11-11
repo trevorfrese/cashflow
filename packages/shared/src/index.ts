@@ -8,6 +8,7 @@ export * from './schemas/business';
 export * from './schemas/bank-link';
 export * from './schemas/bank-data';
 export * from './schemas/commerce';
+export * from './schemas/connections';
 export * from './schemas/underwriting';
 export * from './schemas/lease';
 export * from './schemas/rent-plan';

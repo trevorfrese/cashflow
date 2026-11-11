@@ -9,16 +9,18 @@ It draws a synthetic population, runs every applicant through the real `decide()
 by day against simulated bank accounts and a finite capital pool. Nothing touches the
 database, the network, or a clock. The same seeds always give the same report.
 
-**Current state: 9 of 9 gates pass.** The AUC gate is now judged on every scored honest
-applicant, through a counterfactual run that funds the declined ones too (0.875 against
-0.70). Measured the old way, on funded plans only, it is still 0.669, and that figure is
+**Current state: 10 of 10 gates pass** under `cashflow-v3` (version 2 plus the data veracity
+checks) on a population extended with connection data, honest messiness, and five more fraud
+archetypes. See "Data veracity" below for what changed and what it cost. The AUC gate is
+judged on every scored honest applicant, through a counterfactual run that funds the declined
+ones too (0.873 against 0.70). Measured the old way, on funded plans only, it is still 0.669, and that figure is
 still in the report, ungated. Read "Where the gates stand" and "The AUC gate: through the
 door" below before relying on any number here.
 
 ## Run it
 
 ```sh
-pnpm --filter @cashflow/api eval:portfolio                    # default run: 5 seeds, about 2.5 minutes
+pnpm --filter @cashflow/api eval:portfolio                    # default run: 5 seeds, about 4 minutes
 pnpm --filter @cashflow/api eval:portfolio --seeds 1          # one seed, about 35 seconds
 pnpm --filter @cashflow/api eval:portfolio --n 10000 --seeds 1,2   # tighter estimates
 pnpm --filter @cashflow/api eval:portfolio --n 500 --seeds 7,8 --horizon 6 --out /tmp/evals
@@ -75,12 +77,13 @@ in the order the jobs run, and models the product as built:
 
 The same applicants are also run under three comparison configurations:
 
-| Configuration | Decisions     | Servicing | Why it is there                           |
-| ------------- | ------------- | --------- | ----------------------------------------- |
-| `v1_baseline` | `cashflow-v1` | baseline  | The launch policy as first measured       |
-| `v1_standard` | `cashflow-v1` | standard  | What the servicing change buys on its own |
-| `v2_baseline` | current       | baseline  | What the credit policy buys on its own    |
-| `v2_standard` | current       | standard  | Both. This is the one the gates decide on |
+| Configuration | Decisions     | Servicing | Why it is there                                        |
+| ------------- | ------------- | --------- | ------------------------------------------------------ |
+| `v1_baseline` | `cashflow-v1` | baseline  | The launch policy as first measured                    |
+| `v1_standard` | `cashflow-v1` | standard  | What the servicing change buys on its own              |
+| `v2_baseline` | `cashflow-v2` | baseline  | What the credit policy buys on its own                 |
+| `v2_standard` | `cashflow-v2` | standard  | Both, before the veracity checks                       |
+| `v3_standard` | current       | standard  | Plus the veracity checks. The gates decide on this one |
 
 A single run of 2,000 applicants funds about 28 bad plans, and rank ordering among funded
 plans in particular moves several points from seed to seed. So the default run uses five seeds, each a separate population with
@@ -98,9 +101,9 @@ already fund, and takes the rest from the run that did. The whole thing takes ab
 runs alone.
 `--seeds 1` runs a single seed when a quick look is enough.
 
-## Where the gates stand
+## Where the gates stood after Phase R3 (cashflow-v2)
 
-| Gate                     | Before Phase R3 (committed report) |                                     Now | Result |
+| Gate                     | Before Phase R3 (committed report) |                          After Phase R3 | Result |
 | ------------------------ | ---------------------------------: | --------------------------------------: | ------ |
 | `net_loss_base`          |                  22 bps (20 to 24) |                       18 bps (11 to 21) | PASS   |
 | `net_margin_base`        |           $522,874 a seed (92 bps) |                    $269,553 a seed (79) | PASS   |
@@ -197,17 +200,18 @@ default run. No threshold has been loosened since the first evaluation; `refer_r
 added with the manual review path, and `approval_floor` was tightened in Phase R3 to count
 only approvals that can be used.
 
-| Gate                     | Threshold                             | Why                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `net_loss_base`          | At or under 75 bps of rent volume     | Fees are 150 to 300 bps of rent. After funding and servicing about 90 bps is left, so losses above 75 bps consume the margin.                                                                                                                                                                                                                                |
-| `net_margin_base`        | Above zero                            | Fees collected less cost of funds, servicing, and net losses.                                                                                                                                                                                                                                                                                                |
-| `net_margin_mild_stress` | Above zero                            | The same, with revenue down 15% for six months across the book.                                                                                                                                                                                                                                                                                              |
-| `bad_rate_monotonic`     | No inversions from A to D             | Pricing and limits step by grade, so worse grades must be riskier. Grades with fewer than 30 plans are skipped, and a better grade may sit up to 100 bps (one percentage point) above the next. Counted on bad rates pooled across seeds.                                                                                                                    |
-| `auc`                    | At or above 0.70                      | The score must separate applicants who would go bad from applicants who would not. Judged on every honest applicant the engine scored, each funded in a counterfactual run. See "The AUC gate: through the door".                                                                                                                                            |
-| `fraud_approval`         | Under 5% of fraud applicants approved | Covers all three fraud archetypes together, and counts the final outcome: a fraud applicant who is referred and then approved by the reviewer counts as approved.                                                                                                                                                                                            |
-| `pool_funding`           | No payout unfunded on its due date    | At the planned growth rate, with the planned pool. Summed across seeds.                                                                                                                                                                                                                                                                                      |
-| `approval_floor`         | At or above 30% of all applicants     | Stops the other gates being passed by declining everyone. Counts approvals the applicant can use: an approval for less than the rent requested opens no plan in the product, so it does not count. 55% of the default population comes from archetypes that are creditworthy by construction, so approving under 30% means turning away about half of those. |
-| `refer_rate`             | At most 5% of applicants referred     | The product promises a decision in the same request. Nineteen applicants in twenty must get one, and a policy must not pass the fraud gate by handing its hard cases to a queue.                                                                                                                                                                             |
+| Gate                      | Threshold                                                                     | Why                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `net_loss_base`           | At or under 75 bps of rent volume                                             | Fees are 150 to 300 bps of rent. After funding and servicing about 90 bps is left, so losses above 75 bps consume the margin.                                                                                                                                                                                                                                |
+| `net_margin_base`         | Above zero                                                                    | Fees collected less cost of funds, servicing, and net losses.                                                                                                                                                                                                                                                                                                |
+| `net_margin_mild_stress`  | Above zero                                                                    | The same, with revenue down 15% for six months across the book.                                                                                                                                                                                                                                                                                              |
+| `bad_rate_monotonic`      | No inversions from A to D                                                     | Pricing and limits step by grade, so worse grades must be riskier. Grades with fewer than 30 plans are skipped, and a better grade may sit up to 100 bps (one percentage point) above the next. Counted on bad rates pooled across seeds.                                                                                                                    |
+| `auc`                     | At or above 0.70                                                              | The score must separate applicants who would go bad from applicants who would not. Judged on every honest applicant the engine scored, each funded in a counterfactual run. See "The AUC gate: through the door".                                                                                                                                            |
+| `fraud_approval`          | Under 5% of fraud applicants approved                                         | Covers all three fraud archetypes together, and counts the final outcome: a fraud applicant who is referred and then approved by the reviewer counts as approved.                                                                                                                                                                                            |
+| `pool_funding`            | No payout unfunded on its due date                                            | At the planned growth rate, with the planned pool. Summed across seeds.                                                                                                                                                                                                                                                                                      |
+| `approval_floor`          | At or above 30% of all applicants                                             | Stops the other gates being passed by declining everyone. Counts approvals the applicant can use: an approval for less than the rent requested opens no plan in the product, so it does not count. 55% of the default population comes from archetypes that are creditworthy by construction, so approving under 30% means turning away about half of those. |
+| `refer_rate`              | At most 5% of applicants referred                                             | The product promises a decision in the same request. Nineteen applicants in twenty must get one, and a policy must not pass the fraud gate by handing its hard cases to a queue.                                                                                                                                                                             |
+| `veracity_honest_adverse` | At most 3% of honest applicants knocked out or referred by a veracity finding | The checks must not pass the fraud gate by flagging everyone. Before the checks the policy referred 1.7% against the 5% ceiling: 3.3 points of headroom, of which the checks get at most 3, for referrals and knockouts together. Set before the first measurement. Requests for information are reported beside it, and the approval floor bounds them.     |
 
 ### The AUC gate: through the door
 
@@ -258,7 +262,7 @@ bad, which pulls AUC down for a reason that has nothing to do with how the score
 business. The figure for all applicants is reported beside it and is slightly lower (0.867
 against 0.875).
 
-**What it shows today** (five default seeds):
+**What it showed after Phase R3** (five default seeds, `cashflow-v2` on the original population; the current figures are in `report.md`):
 
 | Measure                                   | Mean of seeds | Lowest to highest seed | Seeds pooled |
 | ----------------------------------------- | ------------: | ---------------------: | -----------: |
@@ -312,6 +316,67 @@ Definitions used by the gates and the report:
 - **First payment default**: an installment of the first period reached 30 days past due.
 - **Net profitable customer**: fees collected exceed that customer's cost of funds,
   servicing, and net loss.
+
+## Data veracity
+
+Phase V added connection data to every applicant (`src/evals/veracity-sim.ts`) and the
+veracity checks to the policy (`cashflow-v3`). What a connection shows is drawn from its own
+random stream, after the original draw, so the businesses, their cash flows and their hazards
+are the original population's. What changed:
+
+- **Every applicant has connections.** Names (legal, trading, owners), a bank connection
+  (holder, account type, opened, accounts on the login, OAuth or legacy), and for the 35% with
+  a point of sale, the platform account (legal name, tax id, created, payout destination,
+  direct OAuth or, for Toast, a delegated seat) and its payouts: the card settlement deposits
+  the bank simulation made, as the platform would report them. 60% have an earlier pull 1 to
+  20 days before the decision.
+- **Honest messiness, measured for false positives.** Rates, all choices: sole proprietor on a
+  personal account 6%, holder name a nickname 4%, holder a spouse or unlisted holding company
+  1%, legacy bank connection 20%, an unshared savings account 25%, profit swept to that
+  savings account (owner draws become transfers out) 12%, a recently opened account at an
+  established business 2% (history cut to 150 to 300 days), late posting between pulls 30% of
+  those with an earlier pull, aggregator re-syncs that change one or two old items 1.5% or
+  duplicate several 0.5%, a bank pull that fails at decision time 0.5%; for point of sale
+  applicants: platform account in the trading name 20%, in the owner's name 3%, in a former or
+  parent company name 2%, tax id typo 2% (of the 70% where the platform reports one), sales
+  paid to a second account connected 3% or not connected 3% (swept weekly into the main
+  account), two locations paid separately 8%, processor holds 6%, split deposits 4%, small
+  payout differences 10%, token expired and refresh refused 2% (direct), seat pull fails 8%
+  (Toast).
+- **Five fraud archetypes the checks exist for**, 2.5% of all applicants, converted from honest
+  draws: `unsettled_sales` (platform sales 1.4 to 2.2 times real in the last 120 to 180 days,
+  half paid out to an unseen account, half never paid out; stated revenue and lease sized to
+  the platform figure), `borrowed_account` (someone else's healthy account, the platform too in
+  60%; the real owner pulls access 20 to 75 days after the decision), `fresh_pos_account` (a
+  platform account 30 to 75 days old with volume 1.6 to 2.4 times real, settled and cycled back
+  out), `hidden_accounts` (heavy debt paid from an account that was not shared, funded by weekly
+  transfers; that account visible on the login in half), `rewritten_history` (a struggling
+  account whose later pull drops its overdraft fees, repair bills and debt payments). The
+  original three archetypes are unchanged.
+- **The measurement**: detection by archetype and check, false positives on honest applicants
+  by check and by situation, whether the affected honest applicants were riskier (a
+  counterfactual through the door run that decides without the veracity facts), and the net
+  effect against `v2_standard` on the same applicants. All in `report.md`, "Data veracity".
+
+| Gate                      | Committed baseline (`cashflow-v2`, original population) | Now (`cashflow-v3`, extended population) |
+| ------------------------- | ------------------------------------------------------: | ---------------------------------------: |
+| `net_loss_base`           |                                       18 bps (11 to 21) |                        19 bps (13 to 23) |
+| `net_margin_base`         |                                $269,553 a seed (79 bps) |                 $264,570 a seed (79 bps) |
+| `net_margin_mild_stress`  |                                                $221,098 |                                 $219,187 |
+| `bad_rate_monotonic`      |                                                       0 |                                        0 |
+| `auc`                     |                                  0.875 (0.863 to 0.898) |                   0.873 (0.858 to 0.896) |
+| `fraud_approval`          |                                                    0.8% |                      1.6% (1.0% to 2.6%) |
+| `pool_funding`            |                                                       0 |                                        0 |
+| `approval_floor`          |                                                   40.7% |                   39.9% (38.4% to 41.5%) |
+| `refer_rate`              |                                                    1.7% |                      3.7% (3.5% to 3.9%) |
+| `veracity_honest_adverse` |                                                     n/a |                      1.5% (1.4% to 1.8%) |
+
+The extended population costs `cashflow-v2` the fraud gate (17.0% of fraud applicants
+approved) and the monotonic gate (one inversion), so it would not ship on it; `cashflow-v3`
+passes every gate. The first full run is the one reported: before it, a one seed diagnostic
+found a simulation artifact (deposits before a platform account existed carried the
+platform's name) and led to two consequence changes and one condition change, described in
+`UNDERWRITING.md`, "Findings and what they do". No threshold was changed.
 
 ## Assumptions
 
@@ -461,12 +526,14 @@ Reported in their own table, never gated.
   on seeds other than the five the gates use, which guards against fitting to sampling noise.
   It does not guard against fitting to the simulator itself: the gate seeds come from the
   same generator.
-- **Fraud is three scripts, and the checks were written after reading them.** A request 2.5
+- **Fraud is eight scripts, and the checks were written after reading them.** A request 2.5
   to 4 times observed rent, credits that leave two days later as same sized transfers, and
   an inflated stated revenue are each caught by a check aimed at exactly that. The fraud
   numbers show the checks work as designed. They say nothing about fraud that behaves
-  differently, and nothing about false positives: every honest applicant here asks for the
-  rent it already pays and never moves a deposit out again.
+  differently. The integrity checks' false positives are still unmeasured: every honest
+  applicant here asks for the rent it already pays and never moves a deposit out again. The
+  veracity checks' false positives are measured, on honest messiness that is itself a set of
+  choices.
 - **Review is an assumption.** Reviewers catch 70% of referred fraud and add nothing on
   honest applicants. Review time, reviewer error on honest applicants, and applicants who
   walk away while waiting are not modeled.

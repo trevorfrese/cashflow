@@ -72,6 +72,23 @@ underwriting outcome can be demoed: healthy, growing, seasonal, thin margins, ex
 debt, volatile, low balance, overdrafts, declining, new business. See
 `apps/api/UNDERWRITING.md` for what each one does to the decision.
 
+## Connected data
+
+`Settings, Connected data` (and the dev landing for the data connection personas) lists every
+connection: how it was made ("You approved read-only access on Square's site. We never see
+your password."), its health, what it verified, and any action the owner needs to take, which
+also shows on Home. Connecting a point of sale:
+
+- Square, Shopify, Stripe, Clover: `Connect a point of sale` starts the OAuth connection and
+  opens the sandbox stand-in for the platform's consent page, where you pick what the sandbox
+  account looks like (healthy, pays out elsewhere, another business, new account, sales not
+  paid out) and approve or decline. It mirrors a real redirect: the page hands back a code
+  and the app finishes the connection.
+- Toast: the seat instructions screen shows CashFlow's own reports user and the steps, then
+  `Check connection`.
+
+The keywords behind the sandbox choices are in `apps/api/README.md`, "Sandbox data connections".
+
 ## Sandbox identity keywords
 
 The business profile asks for the last four digits of the tax id and one owner (name, title,

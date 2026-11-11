@@ -184,6 +184,28 @@ enum BankLinkStatus {
   DISCONNECTED
 }
 
+/// How a connection's data is obtained. See `apps/api/DATA_CONNECTIONS.md`. There is no upload
+/// method: CashFlow pulls the data itself or does not use it.
+enum ConnectionAccessMethod {
+  DIRECT_OAUTH
+  DELEGATED_SEAT
+  AGGREGATOR
+}
+
+/// Where a connection stands for pulling data.
+enum ConnectionHealth {
+  HEALTHY
+  PENDING
+  REAUTH_REQUIRED
+  ERROR
+  REVOKED
+}
+
+enum ConnectionKind {
+  BANK
+  COMMERCE
+}
+
 enum CommercePlatform {
   SQUARE
   TOAST
@@ -207,6 +229,32 @@ model BankLink {
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
 
+  // Provenance (data veracity phase). Everything below comes from the aggregator, never from
+  // the applicant.
+  accessMethod          ConnectionAccessMethod @default(AGGREGATOR)
+  /// The bank authorized the connection through its own OAuth, rather than a legacy one.
+  /// Null when the aggregator did not say.
+  institutionAuthorized Boolean?
+  /// The aggregator's id for the account within the item.
+  platformAccountId     String?
+  /// Account holder names as the bank reports them.
+  accountOwnerNames     String[]               @default([])
+  /// BUSINESS or PERSONAL, as the bank reports it.
+  accountType           String?
+  /// YYYY-MM-DD the account was opened, where the aggregator provides it.
+  accountOpenedOn       String?
+  /// Every account visible on the same login: [{ mask, name, type, shared }].
+  visibleAccounts       Json?
+  /// The aggregator's access token, AES-256-GCM encrypted (`src/crypto/token-vault.ts`).
+  /// Never returned by any response, never logged.
+  accessTokenEnc        String?
+  consentScopes         String[]               @default([])
+  consentExpiresAt      DateTime?
+  health                ConnectionHealth       @default(HEALTHY)
+  lastPulledAt          DateTime?
+  lastPullError         String?
+  revokedAt             DateTime?
+
   applications UnderwritingApplication[]
 
   @@index([businessId])
@@ -228,8 +276,80 @@ model CommerceLink {
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
+  // Provenance (data veracity phase). Identity fields come from the platform, never from the
+  // applicant.
+  accessMethod       ConnectionAccessMethod @default(DIRECT_OAUTH)
+  legalName          String?
+  platformAccountId  String?
+  country            String?
+  /// YYYY-MM-DD the platform account was created.
+  accountCreatedOn   String?
+  taxIdLast4         String?
+  /// Where the platform pays out: [{ institutionName, mask, ref }].
+  payoutDestinations Json?
+  scopes             String[]               @default([])
+  /// Platform-issued tokens, AES-256-GCM encrypted. Never returned, never logged.
+  accessTokenEnc     String?
+  refreshTokenEnc    String?
+  tokenExpiresAt     DateTime?
+  /// DELEGATED_SEAT: CashFlow's own service user the merchant invited. Never a merchant login.
+  seatServiceUser    String?
+  seatVerifiedAt     DateTime?
+  health             ConnectionHealth       @default(HEALTHY)
+  lastPulledAt       DateTime?
+  lastPullError      String?
+  revokedAt          DateTime?
+
   applications UnderwritingApplication[]
 
+  @@index([businessId])
+}
+
+/// An OAuth authorization in flight: the state CashFlow sent the owner to the platform with,
+/// and the PKCE verifier (encrypted). Consumed once by the callback.
+model ConnectionAuthorization {
+  id               String           @id @default(cuid())
+  state            String           @unique
+  businessId       String
+  userId           String
+  platform         CommercePlatform
+  provider         String
+  redirectUri      String
+  codeVerifierEnc  String
+  scopes           String[]
+  createdAt        DateTime         @default(now())
+  expiresAt        DateTime
+  consumedAt       DateTime?
+  commerceLinkId   String?
+
+  @@index([businessId])
+}
+
+/// One pull of a connection's data, stored as it was normalized. Append only: a database
+/// trigger rejects UPDATE and DELETE, and a re-pull adds a row. The ids are plain columns, as
+/// on `AuditEvent`, so that deleting a business never has to delete its evidence. The sandbox
+/// keeps the payload here; production would keep it in object storage and store the key.
+model DataSnapshot {
+  id             String         @id @default(cuid())
+  kind           ConnectionKind
+  businessId     String
+  bankLinkId     String?
+  commerceLinkId String?
+  provider       String
+  /// CONNECT, APPLICATION, REFRESH, REUNDERWRITE.
+  reason         String
+  pulledAt       DateTime
+  windowFrom     String
+  windowTo       String
+  /// sha256 over the canonical serialization of `payload`.
+  contentHash    String
+  recordCounts   Json
+  payloadBytes   Int
+  payload        Json
+  createdAt      DateTime       @default(now())
+
+  @@index([bankLinkId, pulledAt])
+  @@index([commerceLinkId, pulledAt])
   @@index([businessId])
 }
 

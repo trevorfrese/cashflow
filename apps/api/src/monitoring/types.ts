@@ -228,6 +228,53 @@ export interface AdverseActionFact {
   noticeSentOn: IsoDate | null;
 }
 
+/** A data connection as monitoring sees it. No token. */
+export interface ConnectionFact {
+  connectionId: string;
+  kind: 'BANK' | 'COMMERCE';
+  businessId: string;
+  businessName: string;
+  ownerUserId: string;
+  /** "Square", or the bank's name. */
+  name: string;
+  accessMethod: string;
+  health: string;
+  status: string;
+  lastPulledOn: IsoDate | null;
+  lastPullError: string | null;
+  tokenExpiresOn: IsoDate | null;
+  /** The platform's id for the merchant account. Commerce only. */
+  platformAccountId: string | null;
+  /** Where the platform pays out, as "institution|mask". Commerce only. */
+  payoutDestinations: string[];
+  hasActivePlan: boolean;
+}
+
+/** One veracity assessment, from the audit log. */
+export interface VeracityEventFact {
+  id: string;
+  businessId: string;
+  businessName: string;
+  on: IsoDate;
+  /** A decision's assessment, or the refresh job's. */
+  source: 'DECISION' | 'REFRESH';
+  findingCodes: string[];
+  matchedShareByAmountBps: number | null;
+  payoutsConsidered: number | null;
+  hasActivePlan: boolean;
+}
+
+export interface PayoutDestinationChangeFact {
+  eventId: string;
+  connectionId: string;
+  businessId: string;
+  businessName: string;
+  on: IsoDate;
+  fromMasks: string[];
+  toMasks: string[];
+  hasActivePlan: boolean;
+}
+
 export interface MonitoringInputs {
   asOf: IsoDate;
   leaseChanges: LeaseChangeFact[];
@@ -245,4 +292,8 @@ export interface MonitoringInputs {
   identities: IdentityFact[];
   retention: RetentionFact[];
   adverseActions: AdverseActionFact[];
+  connections: ConnectionFact[];
+  /** Veracity assessments in the lookback, oldest first. */
+  veracityEvents: VeracityEventFact[];
+  payoutDestinationChanges: PayoutDestinationChangeFact[];
 }

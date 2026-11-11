@@ -34,7 +34,12 @@ export default function Home() {
           Buy now, pay later for small business rent. Now an open source project.
         </p>
         <div className="actions">
-          <a className="button button-primary" href={GITHUB} target="_blank" rel="noopener noreferrer">
+          <a
+            className="button button-primary"
+            href={GITHUB}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             <GitHubIcon />
             View on GitHub
           </a>

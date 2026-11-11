@@ -45,16 +45,23 @@ export function statusPill(status: string): { label: string; tone: PillTone } {
       return { label: title(status), tone: 'paid' };
     case 'SCHEDULED':
       return { label: title(status), tone: 'info' };
-    case 'COLLECTING':
-    case 'PROCESSING':
     case 'PENDING':
     case 'SUBMITTED':
       return { label: title(status), tone: 'due' };
+    case 'HELD':
+      return { label: 'On hold', tone: 'due' };
     case 'LATE':
     case 'FAILED':
     case 'DECLINED':
     case 'ERROR':
+    case 'RETURNED':
       return { label: title(status), tone: 'late' };
+    case 'CHARGED_OFF':
+      return { label: 'Written off', tone: 'late' };
+    case 'CANCELLED':
+      return { label: 'Cancelled', tone: 'neutral' };
+    case 'VOIDED':
+      return { label: 'Not owed', tone: 'neutral' };
     case 'NEEDS_INFO':
       return { label: 'Needs info', tone: 'gold' };
     case 'IN_REVIEW':

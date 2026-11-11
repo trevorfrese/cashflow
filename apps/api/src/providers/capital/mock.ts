@@ -1,3 +1,6 @@
+import type { IsoDate } from '@cashflow/shared';
+
+import { todayIso } from '../../dates.ts';
 import type { Tx } from '../../db.ts';
 import { ACCOUNTS } from '../../ledger/accounts.ts';
 import { accountBalance, postTransaction } from '../../ledger/service.ts';
@@ -22,9 +25,15 @@ export class MockCapitalProvider implements CapitalProvider {
     }
   }
 
-  async fund(tx: Tx, amountCents: number, description: string): Promise<void> {
+  async fund(
+    tx: Tx,
+    amountCents: number,
+    description: string,
+    effectiveDate: IsoDate = todayIso(),
+  ): Promise<void> {
     await postTransaction(tx, {
       description,
+      effectiveDate,
       referenceType: 'capital_funding',
       entries: [
         { accountCode: ACCOUNTS.CAPITAL_POOL, direction: 'DEBIT', amountCents },

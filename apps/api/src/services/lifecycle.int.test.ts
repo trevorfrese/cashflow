@@ -176,6 +176,7 @@ describe('rent payment lifecycle', () => {
     await h.db.$transaction((tx) =>
       postTransaction(tx, {
         description: 'Test: capital withdrawn',
+        effectiveDate: '2026-01-01',
         referenceType: 'capital_withdrawal',
         entries: [
           { accountCode: ACCOUNTS.POOL_EQUITY, direction: 'DEBIT', amountCents: 24_900_000 },

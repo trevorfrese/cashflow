@@ -35,14 +35,55 @@ export type LeaseStatus = z.infer<typeof LeaseStatus>;
 export const RentPlanStatus = z.enum(['ACTIVE', 'PAUSED', 'CLOSED']);
 export type RentPlanStatus = z.infer<typeof RentPlanStatus>;
 
-export const PayoutStatus = z.enum(['SCHEDULED', 'PROCESSING', 'PAID', 'FAILED']);
+/**
+ * `HELD`: due, but not paid while something holds it (a past due balance, a frozen or paused
+ * plan). `CANCELLED`: never paid and never will be; its installments are voided.
+ */
+export const PayoutStatus = z.enum(['SCHEDULED', 'HELD', 'PAID', 'FAILED', 'CANCELLED']);
 export type PayoutStatus = z.infer<typeof PayoutStatus>;
 
-export const InstallmentStatus = z.enum(['SCHEDULED', 'COLLECTING', 'PAID', 'FAILED', 'LATE']);
+/**
+ * `CHARGED_OFF`: written off as a loss, still owed and still payable. `VOIDED`: never owed,
+ * because the landlord payout it belonged to was cancelled or came back.
+ */
+export const InstallmentStatus = z.enum([
+  'SCHEDULED',
+  'PAID',
+  'FAILED',
+  'LATE',
+  'CHARGED_OFF',
+  'VOIDED',
+]);
 export type InstallmentStatus = z.infer<typeof InstallmentStatus>;
 
-export const RepaymentStatus = z.enum(['PENDING', 'SUCCEEDED', 'FAILED']);
+/** `RETURNED`: the debit went through and the bank later sent it back. */
+export const RepaymentStatus = z.enum(['SUCCEEDED', 'FAILED', 'RETURNED']);
 export type RepaymentStatus = z.infer<typeof RepaymentStatus>;
+
+/** Where a plan stands, from the age of its oldest unpaid installment. */
+export const DelinquencyStatus = z.enum([
+  'CURRENT',
+  'GRACE',
+  'DELINQUENT',
+  'DEFAULT',
+  'CHARGED_OFF',
+]);
+export type DelinquencyStatus = z.infer<typeof DelinquencyStatus>;
+
+/** Why a landlord payout is, or was, held. */
+export const PayoutHoldReason = z.enum([
+  /** An earlier installment is past the grace period. */
+  'PAST_DUE',
+  /** The plan is frozen: a periodic review, an unauthorized return, or a returned payout. */
+  'ADVANCE_FROZEN',
+  /** The owner paused the plan. */
+  'PLAN_PAUSED',
+  /** The plan was closed before the payout fell due. */
+  'PLAN_CLOSED',
+  /** Not held by anything, but not paid within the release window (no capital, provider down). */
+  'NOT_PAID_IN_TIME',
+]);
+export type PayoutHoldReason = z.infer<typeof PayoutHoldReason>;
 
 export const LedgerAccountType = z.enum(['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE']);
 export type LedgerAccountType = z.infer<typeof LedgerAccountType>;

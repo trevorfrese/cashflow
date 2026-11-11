@@ -28,7 +28,9 @@ export const GATE_THRESHOLDS = {
   /** Under 5% of fraud archetype applicants may end up approved, after any review. */
   maxFraudApprovalBps: 500,
   /**
-   * Approval floor: at least 30% of all applicants. 55% of the default population is drawn
+   * Approval floor: at least 30% of all applicants approved on terms they can use. An
+   * approval for less than the rent requested opens no plan in the product as built, so it
+   * does not count toward the floor. 55% of the default population is drawn
    * from archetypes that are creditworthy by construction (healthy, growing, seasonal,
    * volatile, batched), so a policy that approves fewer than about half of those is passing
    * the loss gates by not lending. 30% is also the low end of what an instant decision
@@ -205,8 +207,8 @@ export function evaluateGates(runs: { base: OneOrMany; mild: OneOrMany }): GateR
     ),
     gate(
       'approval_floor',
-      'Approval rate at or above 30% of applicants (base)',
-      base.map((m) => (m.overall.applicants > 0 ? m.overall.approvalRateBps : null)),
+      'Usable approval rate at or above 30% of applicants (base)',
+      base.map((m) => (m.overall.applicants > 0 ? m.overall.usableApprovalRateBps : null)),
       '>=',
       t.minApprovalRateBps,
       'bps of applicants',

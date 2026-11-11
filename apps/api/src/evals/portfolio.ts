@@ -15,13 +15,18 @@ import {
 } from '../providers/bank-link/business-sim.ts';
 import { generateSalesFromPath } from '../providers/commerce/synthetic.ts';
 import {
+  balanceCoversDebit,
   BASELINE_SERVICING_POLICY,
   daysPastDue,
+  delinquencyBucket,
   expectedRecoveryCents,
   isLate,
+  OPEN_BUCKETS,
+  payoutAction,
   shouldAttemptCollection,
   shouldChargeOff,
   shouldHoldPayout,
+  type OpenBucket,
   type ServicingPolicy,
 } from '../servicing/policy.ts';
 import { decide, type EngineInput, type EngineResult } from '../underwriting/engine.ts';
@@ -39,8 +44,13 @@ import { hash32 } from './random.ts';
  * approval opens a plan: on every rent due date the landlord is paid in full from a finite
  * capital pool, and installments are then debited from the same simulated bank account the
  * history came from. A debit fails when the balance cannot cover it, so delinquency and loss
- * emerge from the business's cash, not from a label. Retries, lateness, payout holds, and
- * write offs follow the `ServicingPolicy` passed in.
+ * emerge from the business's cash, not from a label.
+ *
+ * Servicing follows the `ServicingPolicy` passed in, through the same functions the services
+ * call, and in the order the jobs run each day: returns are reconciled, payouts are paid,
+ * held, released, or cancelled, installments are debited (after the balance check, when the
+ * policy has one), and then plans are aged and written off. A plan fronts the whole rent or
+ * nothing, as `createRentPlan` does, unless `partialAdvance` is set.
  *
  * Pure and in memory: no database, no network, no clock.
  */
@@ -80,6 +90,24 @@ export interface PortfolioConfig {
    */
   exposure: ExposurePolicy | null;
   maxWaitMonths: number;
+  /**
+   * What happens when the approved limit is below the rent requested. False is the product
+   * as built: `createRentPlan` refuses a lease above the limit, so a counter offer cannot be
+   * used and no plan opens. True fronts the limit while the business pays the rest of its
+   * rent itself, which the product does not do. Reported both ways; the gated run is false.
+   */
+  partialAdvance: boolean;
+  /**
+   * Days until the bank returns a debit the account could not cover. Until then the debit
+   * is booked as collected and the plan is treated as paid up, as in the services. 0 books
+   * the failure on the day, which is how the services behaved before they handled returns.
+   */
+  returnDelayDays: number;
+  /**
+   * Manual payment after automatic collection has failed, or null for none (the gated
+   * assumption). See `manualPaymentShareBps` in `assumptions.ts`.
+   */
+  manualPayment: { shareBps: number; firstDay: number; lastDay: number } | null;
 }
 
 export function defaultPortfolioConfig(n: number): PortfolioConfig {
@@ -97,6 +125,9 @@ export function defaultPortfolioConfig(n: number): PortfolioConfig {
     reviewFraudCatchRateBps: ASSUMPTIONS.reviewFraudCatchRateBps,
     exposure: CURRENT_POLICY.exposure,
     maxWaitMonths: ASSUMPTIONS.maxFundingWaitMonths,
+    partialAdvance: false,
+    returnDelayDays: 0,
+    manualPayment: null,
   };
 }
 
@@ -127,15 +158,26 @@ export interface CustomerResult {
   expectedLossBps: number | null;
   approvedLimitCents: number | null;
   requestedRentCents: number;
-  /** Rent fronted each period: the lower of the request and the approved limit. */
+  /** Approved for less than the rent requested. */
+  counterOffer: boolean;
+  /**
+   * A counter offer that could not be used: the product fronts a whole lease rent or
+   * nothing. Approved on paper, but no plan was opened. Never set under `partialAdvance`.
+   */
+  unusableCounterOffer: boolean;
+  /** Rent fronted each period. The request, or the limit under `partialAdvance`. */
   planRentCents: number;
   installmentsPerMonth: number;
   /** Landlord payouts made. Each one is a plan-month. */
   payoutCount: number;
   /** Total rent paid to the landlord. */
   payoutCents: number;
-  /** Payouts skipped because the servicing policy held them. */
+  /** Payouts the servicing policy held for at least a day. Each was then released or cancelled. */
   heldPayouts: number;
+  /** Held payouts paid after the business cured inside the release window. */
+  releasedPayouts: number;
+  /** Payouts never made: still held, or still unfunded, when the release window closed. */
+  cancelledPayouts: number;
   principalCollectedCents: number;
   feesCollectedCents: number;
   /** Principal written off, by the policy during the run or by measurement at the end. */
@@ -145,7 +187,12 @@ export interface CustomerResult {
   outstandingCents: number;
   /** Sum over days of principal outstanding, in cent-days. Drives cost of funds. */
   outstandingCentDays: number;
+  /** Debits presented and returned for insufficient funds. */
   failedDebits: number;
+  /** Scheduled debits put off by the balance check. Not attempts. */
+  deferredDebits: number;
+  /** Installments paid by hand under the manual payment sensitivity. */
+  manualPayments: number;
   lateInstallments: number;
   maxDaysPastDue: number;
   /** An installment of the first period reached the bad threshold. */
@@ -189,6 +236,27 @@ export interface PortfolioResult {
   plansNeverFunded: number;
   pool: PoolMonth[];
   customers: CustomerResult[];
+  /**
+   * Roll to charge-off by delinquency bucket. On the evening of the first of every month,
+   * which is when the provision job sets the allowance, each unpaid installment is recorded
+   * under the bucket its plan is in. `chargedOffCents` is the part of that principal that
+   * was later written off. The servicing policy's reserve rates are read off this table.
+   */
+  bucketRoll: BucketRoll;
+  /**
+   * The same, measured on entry: each unpaid installment is recorded once under every
+   * bucket its plan moves into. All rent here is due on the first, so no plan is ever in
+   * the grace bucket on a provision date, and this is the only measure of that bucket.
+   */
+  bucketEntryRoll: BucketRoll;
+}
+
+export type BucketRoll = Record<OpenBucket, { observedCents: number; chargedOffCents: number }>;
+
+export function emptyBucketRoll(): BucketRoll {
+  return Object.fromEntries(
+    OPEN_BUCKETS.map((b) => [b, { observedCents: 0, chargedOffCents: 0 }]),
+  ) as BucketRoll;
 }
 
 interface Installment {
@@ -200,6 +268,24 @@ interface Installment {
   attempts: number;
   lastAttemptDate: IsoDate | null;
   late: boolean;
+  paid: boolean;
+  /**
+   * A debit the account could not cover is booked as collected until the bank's return
+   * arrives on this date. Until then the installment is believed paid.
+   */
+  returnOn: IsoDate | null;
+  /** The bucket of the plan at each provision snapshot while this was unpaid. */
+  seen: OpenBucket[];
+  /** Every bucket the plan has moved into while this was unpaid, once each. */
+  entered: OpenBucket[];
+  /** Days past due on which the owner pays by hand, under the manual payment sensitivity. */
+  manualPayDay: number | null;
+}
+
+interface DuePayout {
+  dueDate: IsoDate;
+  held: boolean;
+  unfundedCounted: boolean;
 }
 
 interface ActivePlan {
@@ -209,8 +295,10 @@ interface ActivePlan {
   feeBps: number;
   nextDueDate: IsoDate;
   periodsLeft: number;
-  /** Due dates of payouts that are due but waiting for pool cash, oldest first. */
-  pendingPayouts: IsoDate[];
+  /** Payouts that are due and not yet paid or cancelled, oldest first. */
+  duePayouts: DuePayout[];
+  /** The plan's balance has been written off. Anything that reopens is written off too. */
+  chargedOff: boolean;
   unpaid: Installment[];
   outstandingCents: number;
   /** Last day this plan is observed. Set once the final period is known. */
@@ -242,11 +330,17 @@ function emptyResult(applicant: Applicant, decision: EngineResult): CustomerResu
     expectedLossBps: decision.snapshot.pricing?.expectedLossBps ?? null,
     approvedLimitCents: decision.approvedMonthlyLimitCents,
     requestedRentCents: applicant.requestedRentCents,
+    counterOffer:
+      decision.approvedMonthlyLimitCents !== null &&
+      decision.approvedMonthlyLimitCents < applicant.requestedRentCents,
+    unusableCounterOffer: false,
     planRentCents: 0,
     installmentsPerMonth: 0,
     payoutCount: 0,
     payoutCents: 0,
     heldPayouts: 0,
+    releasedPayouts: 0,
+    cancelledPayouts: 0,
     principalCollectedCents: 0,
     feesCollectedCents: 0,
     chargedOffCents: 0,
@@ -254,6 +348,8 @@ function emptyResult(applicant: Applicant, decision: EngineResult): CustomerResu
     outstandingCents: 0,
     outstandingCentDays: 0,
     failedDebits: 0,
+    deferredDebits: 0,
+    manualPayments: 0,
     lateInstallments: 0,
     maxDaysPastDue: 0,
     firstPaymentDefault: false,
@@ -387,6 +483,40 @@ export function runPortfolio(
     pool: { cashCents: poolCents, receivableCents, committedCents },
   });
 
+  const bucketRoll = emptyBucketRoll();
+  const bucketEntryRoll = emptyBucketRoll();
+  /** An installment is settled one way or the other: close out its roll observations. */
+  const resolveRoll = (inst: Installment, lost: boolean) => {
+    for (const bucket of inst.seen) {
+      bucketRoll[bucket].observedCents += inst.principalCents;
+      if (lost) bucketRoll[bucket].chargedOffCents += inst.principalCents;
+    }
+    inst.seen = [];
+    for (const bucket of inst.entered) {
+      bucketEntryRoll[bucket].observedCents += inst.principalCents;
+      if (lost) bucketEntryRoll[bucket].chargedOffCents += inst.principalCents;
+    }
+    inst.entered = [];
+  };
+
+  /** Undo the booking of a debit the bank has now returned. */
+  const landReturn = (inst: Installment) => {
+    poolCents -= inst.totalCents;
+    receivableCents += inst.principalCents;
+    inst.returnOn = null;
+  };
+
+  const collect = (plan: ActivePlan, inst: Installment) => {
+    poolCents += inst.totalCents;
+    receivableCents -= inst.principalCents;
+    plan.outstandingCents -= inst.principalCents;
+    plan.result.principalCollectedCents += inst.principalCents;
+    plan.result.feesCollectedCents += inst.feeCents;
+    if (month) month.collectedCents += inst.totalCents;
+    inst.paid = true;
+    resolveRoll(inst, false);
+  };
+
   const chargeOff = (plan: ActivePlan, inst: Installment) => {
     const recovery = expectedRecoveryCents(policy, inst.principalCents);
     plan.result.chargedOffCents += inst.principalCents;
@@ -395,18 +525,35 @@ export function runPortfolio(
     plan.outstandingCents -= inst.principalCents;
     receivableCents -= inst.principalCents;
     poolCents += recovery;
+    resolveRoll(inst, true);
   };
 
   /** Close out a plan whose observation window has ended. */
   const finish = (plan: ActivePlan, asOf: IsoDate) => {
     const stillOwed: Installment[] = [];
     for (const inst of plan.unpaid) {
+      if (inst.returnOn !== null) landReturn(inst);
       if (daysPastDue(inst.dueDate, asOf) >= config.measurementChargeOffDays) chargeOff(plan, inst);
       else stillOwed.push(inst);
     }
     plan.unpaid = stillOwed;
     plan.result.outstandingCents = plan.outstandingCents;
     plan.result.closedOn = plan.sim.closedOn;
+  };
+
+  /** Due date of the oldest installment the books show as unpaid. This is what a hold reads. */
+  const oldestUnpaid = (plan: ActivePlan): IsoDate | null => {
+    for (const inst of plan.unpaid) if (inst.returnOn === null) return inst.dueDate;
+    return null;
+  };
+
+  /** On which day past due, if any, the owner pays this installment by hand. */
+  const manualPayDay = (applicant: Applicant, dueDate: IsoDate): number | null => {
+    const m = config.manualPayment;
+    if (!m) return null;
+    const h = hash32(`manual/${applicant.seedHex}/${dueDate}`);
+    if (h % 10_000 >= m.shareBps) return null;
+    return m.firstDay + ((h >>> 14) % (m.lastDay - m.firstDay + 1));
   };
 
   if (applicants.length === 0) {
@@ -424,6 +571,8 @@ export function runPortfolio(
       plansNeverFunded,
       pool,
       customers,
+      bucketRoll,
+      bucketEntryRoll,
     };
   }
 
@@ -443,6 +592,16 @@ export function runPortfolio(
         activePlans: 0,
       };
       pool.push(month);
+    }
+
+    // 0. Returns that arrive today are reversed before anything reads who is paid up, as
+    //    the reconcile job does.
+    if (config.returnDelayDays > 0) {
+      for (const plan of active) {
+        for (const inst of plan.unpaid) {
+          if (inst.returnOn !== null && inst.returnOn <= date) landReturn(inst);
+        }
+      }
     }
 
     // 1. Landlord payouts, before any collection, as the jobs run in production.
@@ -484,31 +643,55 @@ export function runPortfolio(
       }
       if (plan.started && plan.periodsLeft > 0 && plan.nextDueDate === date) {
         plan.periodsLeft -= 1;
-        const oldest = plan.unpaid.length > 0 ? plan.unpaid[0]!.dueDate : null;
-        if (shouldHoldPayout(policy, oldest, date)) {
-          // Held: CashFlow does not pay this month, so the business owes its landlord itself.
-          plan.result.heldPayouts += 1;
-          plan.sim.setExternalRent(0);
-        } else {
-          plan.pendingPayouts.push(date);
-          plan.sim.setExternalRent(plan.result.planRentCents);
-        }
+        // A payout falls due. The business leaves this month's rent to CashFlow, whether or
+        // not the payout goes out today: a held payout can still be released.
+        plan.duePayouts.push({ dueDate: date, held: false, unfundedCounted: false });
+        plan.sim.setExternalRent(plan.result.planRentCents);
         plan.nextDueDate = followingDueDate(date, 1);
         if (plan.periodsLeft === 0) {
           plan.endDate = addDays(date, 28 + config.runoffDays);
         }
       }
-      // Fund what is due, oldest first. A payout the pool cannot cover waits and is tried
-      // again every day, as the payout job does.
-      while (plan.pendingPayouts.length > 0) {
-        const dueDate = plan.pendingPayouts[0]!;
+      // Decide what is due, oldest first, with the rule the payout service uses: pay it,
+      // hold it while the business is past due, or cancel it once the release window has
+      // passed. A payout the pool cannot cover waits and is tried again every day, inside
+      // the same window.
+      while (plan.duePayouts.length > 0) {
+        const payout = plan.duePayouts[0]!;
         const rent = plan.result.planRentCents;
-        if (poolCents < rent) {
-          if (plan.pendingPayouts[plan.pendingPayouts.length - 1] === date) unfundedPayouts += 1;
-          unfundedPayoutDays += plan.pendingPayouts.length;
+        const action = payoutAction(
+          policy,
+          payout.dueDate,
+          shouldHoldPayout(policy, oldestUnpaid(plan), date),
+          date,
+        );
+        if (action === 'cancel') {
+          // Never paid. The business has to pay its landlord for the month itself, late.
+          plan.duePayouts.shift();
+          plan.result.cancelledPayouts += 1;
+          plan.sim.payRentLate(rent);
+          continue;
+        }
+        if (action === 'hold') {
+          if (!payout.held) {
+            payout.held = true;
+            plan.result.heldPayouts += 1;
+          }
           break;
         }
-        plan.pendingPayouts.shift();
+        if (poolCents < rent) {
+          // Every payout waiting behind this one is unfunded too, each counted once.
+          for (const waiting of plan.duePayouts) {
+            if (!waiting.unfundedCounted) {
+              waiting.unfundedCounted = true;
+              unfundedPayouts += 1;
+            }
+          }
+          unfundedPayoutDays += plan.duePayouts.length;
+          break;
+        }
+        plan.duePayouts.shift();
+        if (payout.held) plan.result.releasedPayouts += 1;
         poolCents -= rent;
         receivableCents += rent;
         plan.outstandingCents += rent;
@@ -518,13 +701,16 @@ export function runPortfolio(
         const schedule = buildInstallmentSchedule({
           rentCents: rent,
           feeBps: plan.feeBps,
-          dueDate,
+          dueDate: payout.dueDate,
           installmentsPerMonth: plan.result.installmentsPerMonth,
         });
+        // A payout made late moves its installments out by the same number of days.
+        const delayDays = daysPastDue(payout.dueDate, date);
         const firstPeriod = plan.result.payoutCount === 1;
         for (const s of schedule.installments) {
+          const dueDate = delayDays > 0 ? addDays(s.dueDate, delayDays) : s.dueDate;
           plan.unpaid.push({
-            dueDate: s.dueDate,
+            dueDate,
             principalCents: s.principalCents,
             feeCents: s.feeCents,
             totalCents: s.totalCents,
@@ -532,6 +718,11 @@ export function runPortfolio(
             attempts: 0,
             lastAttemptDate: null,
             late: false,
+            paid: false,
+            returnOn: null,
+            seen: [],
+            entered: [],
+            manualPayDay: manualPayDay(plan.applicant, dueDate),
           });
         }
       }
@@ -548,39 +739,61 @@ export function runPortfolio(
 
     // 2. Collections against each business's simulated balance, then aging.
     let anyFinished = false;
+    const provisionDay = date.endsWith('-01');
     for (const plan of active) {
       const due: Installment[] = [];
       const debits: ExternalDebit[] = [];
+      // The balance check reads the account before the day's deposits arrive.
+      const openingBalance = plan.sim.balanceCents;
       for (const inst of plan.unpaid) {
+        if (inst.returnOn !== null) continue;
         if (shouldAttemptCollection(policy, inst, date)) {
           due.push(inst);
-          debits.push({ amountCents: inst.totalCents, description: 'CASHFLOW RENT INSTALLMENT' });
+          debits.push({
+            amountCents: inst.totalCents,
+            description: 'CASHFLOW RENT INSTALLMENT',
+            noticeOnly: !balanceCoversDebit(policy, openingBalance, inst.totalCents),
+          });
         }
       }
       const results = plan.sim.step(debits);
-      if (due.length > 0) {
-        for (let k = 0; k < due.length; k++) {
-          const inst = due[k]!;
-          inst.attempts += 1;
-          inst.lastAttemptDate = date;
-          if (results[k]) {
+      for (let k = 0; k < due.length; k++) {
+        const inst = due[k]!;
+        if (debits[k]!.noticeOnly) {
+          // Put off by the balance check: not an attempt, and looked at again tomorrow.
+          plan.result.deferredDebits += 1;
+          continue;
+        }
+        inst.attempts += 1;
+        inst.lastAttemptDate = date;
+        if (results[k]) {
+          collect(plan, inst);
+        } else {
+          plan.result.failedDebits += 1;
+          if (config.returnDelayDays > 0) {
+            // Booked as collected today. The bank's return undoes it in a couple of days.
+            inst.returnOn = addDays(date, config.returnDelayDays);
             poolCents += inst.totalCents;
             receivableCents -= inst.principalCents;
-            plan.outstandingCents -= inst.principalCents;
-            plan.result.principalCollectedCents += inst.principalCents;
-            plan.result.feesCollectedCents += inst.feeCents;
-            month.collectedCents += inst.totalCents;
-            inst.totalCents = 0; // marks it paid for the filter below
-          } else {
-            plan.result.failedDebits += 1;
           }
         }
       }
       if (plan.unpaid.length > 0) {
         const remaining: Installment[] = [];
         for (const inst of plan.unpaid) {
-          if (inst.totalCents === 0) continue;
+          if (inst.paid) continue;
           const dpd = daysPastDue(inst.dueDate, date);
+          if (
+            inst.manualPayDay !== null &&
+            dpd === inst.manualPayDay &&
+            inst.returnOn === null &&
+            !plan.sim.closed
+          ) {
+            // Sensitivity only: the owner pays by hand from money outside the account.
+            plan.result.manualPayments += 1;
+            collect(plan, inst);
+            continue;
+          }
           if (dpd > plan.result.maxDaysPastDue) plan.result.maxDaysPastDue = dpd;
           if (!inst.late && isLate(policy, inst.dueDate, date)) {
             inst.late = true;
@@ -590,34 +803,54 @@ export function runPortfolio(
             plan.result.bad = true;
             if (inst.firstPeriod) plan.result.firstPaymentDefault = true;
           }
-          if (shouldChargeOff(policy, inst.dueDate, date)) {
-            chargeOff(plan, inst);
-            // A written off plan is closed: no further landlord payouts.
-            plan.pendingPayouts = [];
-            if (plan.committed) {
-              plan.committed = false;
-              commit(plan, -1);
-            }
-            if (plan.periodsLeft > 0) {
-              plan.periodsLeft = 0;
-              plan.sim.setExternalRent(0);
-            }
-            plan.endDate ??= addDays(date, config.runoffDays);
-          } else {
-            remaining.push(inst);
-          }
+          remaining.push(inst);
         }
         plan.unpaid = remaining;
+        // Write off the whole unpaid balance once the oldest installment reaches the write
+        // off age, as `chargeOffPlan` does, and anything that reopens on a written off plan.
+        const oldest = oldestUnpaid(plan);
+        if (oldest !== null && (plan.chargedOff || shouldChargeOff(policy, oldest, date))) {
+          plan.chargedOff = true;
+          const provisional: Installment[] = [];
+          for (const inst of plan.unpaid) {
+            if (inst.returnOn !== null) provisional.push(inst);
+            else chargeOff(plan, inst);
+          }
+          plan.unpaid = provisional;
+          // A written off plan is closed: no further landlord payouts. A payout that was
+          // due and not made is cancelled, and the business pays that rent itself.
+          for (let k = 0; k < plan.duePayouts.length; k++) {
+            plan.result.cancelledPayouts += 1;
+            plan.sim.payRentLate(plan.result.planRentCents);
+          }
+          plan.duePayouts = [];
+          if (plan.committed) {
+            plan.committed = false;
+            commit(plan, -1);
+          }
+          plan.sim.setExternalRent(0);
+          plan.periodsLeft = 0;
+          plan.endDate ??= addDays(date, config.runoffDays);
+        }
+        // Roll observations: the bucket the plan is in tonight, recorded on every unpaid
+        // installment the first time the plan is in it, and again on the evening of the
+        // first of the month, when the allowance is set.
+        const first = plan.chargedOff ? null : oldestUnpaid(plan);
+        if (first !== null) {
+          const bucket = delinquencyBucket(policy, daysPastDue(first, date)) as OpenBucket;
+          for (const inst of plan.unpaid) {
+            if (inst.returnOn !== null) continue;
+            if (provisionDay) inst.seen.push(bucket);
+            if (!inst.entered.includes(bucket)) inst.entered.push(bucket);
+          }
+        }
       }
       plan.result.outstandingCentDays += plan.outstandingCents;
 
       if (plan.endDate !== null) {
-        // A payout the pool never managed to fund is dropped when observation ends.
-        if (date >= plan.endDate) plan.pendingPayouts = [];
-        if (
-          plan.pendingPayouts.length === 0 &&
-          (date >= plan.endDate || plan.unpaid.length === 0)
-        ) {
+        // A payout that was never made is dropped when observation ends.
+        if (date >= plan.endDate) plan.duePayouts = [];
+        if (plan.duePayouts.length === 0 && (date >= plan.endDate || plan.unpaid.length === 0)) {
           if (plan.committed) {
             plan.committed = false;
             commit(plan, -1);
@@ -645,6 +878,12 @@ export function runPortfolio(
         result.outcome = caught ? 'DECLINED' : 'APPROVED';
       }
       if (result.outcome !== 'APPROVED' || !sim) continue;
+      if (result.counterOffer && !config.partialAdvance) {
+        // The product fronts a whole lease rent or nothing. A limit below the rent cannot be
+        // used, so the approval opens no plan.
+        result.unusableCounterOffer = true;
+        continue;
+      }
       result.planRentCents = Math.min(
         applicant.requestedRentCents,
         decision.approvedMonthlyLimitCents ?? 0,
@@ -658,7 +897,8 @@ export function runPortfolio(
         feeBps: decision.feeBps ?? 0,
         nextDueDate: nextRentDueDate(1, addDays(date, 1)),
         periodsLeft: config.horizonMonths,
-        pendingPayouts: [],
+        duePayouts: [],
+        chargedOff: false,
         unpaid: [],
         outstandingCents: 0,
         endDate: null,
@@ -689,5 +929,7 @@ export function runPortfolio(
     plansNeverFunded,
     pool,
     customers,
+    bucketRoll,
+    bucketEntryRoll,
   };
 }

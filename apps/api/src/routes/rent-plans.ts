@@ -18,6 +18,7 @@ import { forbidden, notFound, unprocessable } from '../errors.ts';
 import { toInstallment, toPayout, toRentPlan, toRepayment } from '../serializers.ts';
 import { recordAudit } from '../services/audit.ts';
 import { collectInstallment } from '../services/collections.ts';
+import { planStandings } from '../services/delinquency.ts';
 import { createRentPlan } from '../services/rent-plan.ts';
 import { currentUserId, getOwnedBusiness, getOwnedRentPlan } from './helpers.ts';
 
@@ -57,7 +58,8 @@ export async function rentPlanRoutes(app: FastifyInstance) {
         where: { businessId: request.params.id },
         orderBy: { createdAt: 'desc' },
       });
-      return rows.map(toRentPlan);
+      const standings = await planStandings(db, rows, todayIso());
+      return rows.map((row) => toRentPlan(row, standings.get(row.id)));
     },
   );
 
@@ -80,21 +82,33 @@ export async function rentPlanRoutes(app: FastifyInstance) {
           orderBy: { scheduledFor: 'asc' },
         }),
       ]);
-      const upcoming = installments.filter((i) => i.status !== 'PAID');
+      // What is still owed, oldest first. A voided installment was never owed. A written
+      // off one still is, so it stays in the list and can be paid.
+      const upcoming = installments.filter((i) => i.status !== 'PAID' && i.status !== 'VOIDED');
       const nextInstallment = upcoming[0] ?? null;
       const nextPayout =
-        payouts.find((p) => p.status !== 'PAID' && p.scheduledFor >= today) ?? null;
+        payouts.find(
+          (p) => (p.status === 'SCHEDULED' || p.status === 'HELD') && p.scheduledFor >= today,
+        ) ?? null;
+      const heldPayout = payouts.find((p) => p.status === 'HELD') ?? null;
+      const standings = await planStandings(db, [plan], today);
       return {
-        ...toRentPlan(plan),
+        ...toRentPlan(plan, standings.get(plan.id)),
         nextInstallment: nextInstallment ? toInstallment(nextInstallment) : null,
         nextPayout: nextPayout ? toPayout(nextPayout) : null,
         upcomingInstallments: upcoming.map(toInstallment),
         payouts: payouts.map(toPayout),
+        heldPayout: heldPayout ? toPayout(heldPayout) : null,
       };
     },
   );
 
-  /** Change the repayment cadence or pause and resume the plan. Closed plans are final. */
+  /**
+   * Change the repayment cadence or pause and resume the plan. Closed plans are final.
+   * Pausing stops new rent periods: no payout is generated, and one that falls due while the
+   * plan is paused is held and then cancelled. Rent already paid to the landlord is still
+   * collected on schedule.
+   */
   r.patch(
     '/rent-plans/:id',
     {
@@ -129,7 +143,8 @@ export async function rentPlanRoutes(app: FastifyInstance) {
         }
         return row;
       });
-      return toRentPlan(updated);
+      const standings = await planStandings(db, [updated], todayIso());
+      return toRentPlan(updated, standings.get(updated.id));
     },
   );
 
@@ -182,7 +197,11 @@ export async function rentPlanRoutes(app: FastifyInstance) {
     },
   );
 
-  /** Pay an installment now, ahead of its due date or to retry a failed one. */
+  /**
+   * Pay an installment now: ahead of its due date, after a failed debit, after the automatic
+   * attempts have run out, or after it was written off (booked as a recovery). This is the
+   * only way an installment is collected once the retry cap is reached.
+   */
   r.post(
     '/repayments',
     {
@@ -198,17 +217,23 @@ export async function rentPlanRoutes(app: FastifyInstance) {
       if (installment.rentPlan.business.ownerUserId !== currentUserId(request)) throw forbidden();
       if (installment.status === 'PAID')
         throw unprocessable('ALREADY_PAID', 'This installment is already paid');
+      if (installment.status === 'VOIDED') {
+        throw unprocessable(
+          'NOT_OWED',
+          'This installment is not owed: the landlord was not paid for this period',
+        );
+      }
       if (installment.payout.status !== 'PAID') {
         throw unprocessable('PAYOUT_PENDING', 'The landlord has not been paid for this period yet');
       }
       const outcome = await collectInstallment(app.ctx, installment.id, todayIso(), {
-        allowEarly: true,
+        manual: true,
       });
       const updated = await db.installment.findUniqueOrThrow({ where: { id: installment.id } });
       if (outcome !== 'paid') {
         const last = await db.repayment.findFirst({
           where: { installmentId: installment.id },
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         });
         throw unprocessable(
           'PAYMENT_FAILED',

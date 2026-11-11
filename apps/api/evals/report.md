@@ -6,20 +6,20 @@ Run: 2,000 synthetic applicants per seed, seeds `1`, `2`, `3`, `4`, `5`, arrivin
 
 Gated configuration: credit policy `cashflow-v2` under the `standard` servicing policy. The gates are judged on the mean of the 5 seeds; tables of counts pool the seeds into one book.
 
-Gates passed: 9 of 9.
+Gates passed: 8 of 9.
 
 ## Gates (Balanced risk appetite)
 
 | Gate                                                                                    |     Mean | Lowest to highest seed | Threshold | Result |
 | --------------------------------------------------------------------------------------- | -------: | ---------------------: | --------: | ------ |
-| Net loss at or under 75 bps of rent volume (base)                                       |       22 |               20 to 24 |     <= 75 | PASS   |
-| Net margin above zero (base)                                                            | $522,874 |   $507,293 to $558,442 |      > $0 | PASS   |
-| Net margin above zero (mild stress)                                                     | $431,207 |   $392,208 to $477,311 |      > $0 | PASS   |
+| Net loss at or under 75 bps of rent volume (base)                                       |       18 |               11 to 21 |     <= 75 | PASS   |
+| Net margin above zero (base)                                                            | $269,553 |   $254,356 to $309,095 |      > $0 | PASS   |
+| Net margin above zero (mild stress)                                                     | $221,098 |   $186,794 to $271,154 |      > $0 | PASS   |
 | Bad rate does not fall from grade A to D (cells of 30 or more plans, 100 bps tolerance) |        0 |                 0 to 1 |       = 0 | PASS   |
-| AUC of score against the bad flag at or above 0.70 (base)                               |    0.706 |         0.668 to 0.752 |   >= 0.70 | PASS   |
+| AUC of score against the bad flag at or above 0.70 (base)                               |    0.669 |         0.569 to 0.714 |   >= 0.70 | FAIL   |
 | Under 5% of fraud archetype applicants approved, after review (base)                    |     0.8% |           0.0% to 2.1% |      < 5% | PASS   |
 | Pool always able to fund a payout at the planned growth rate (base)                     |        0 |                      0 |       = 0 | PASS   |
-| Approval rate at or above 30% of applicants (base)                                      |    60.8% |         59.0% to 62.8% |    >= 30% | PASS   |
+| Usable approval rate at or above 30% of applicants (base)                               |    40.7% |         39.0% to 42.5% |    >= 30% | PASS   |
 | At most 5% of applicants referred to a reviewer (base)                                  |     1.7% |           1.4% to 2.0% |     <= 5% | PASS   |
 
 Grade inversions are counted on bad rates pooled across seeds, and unfunded payouts are
@@ -41,34 +41,34 @@ changing only servicing (`v1_baseline` to `v1_standard`), changing only the cred
 | Refer rate                            |                      0.0% (0.0% to 0.0%) |                      0.0% (0.0% to 0.0%) |                      1.7% (1.4% to 2.0%) |                      1.7% (1.4% to 2.0%) |
 | Decline rate                          |                   24.9% (23.9% to 27.6%) |                   24.9% (23.9% to 27.6%) |                   31.7% (30.0% to 33.9%) |                   31.7% (30.0% to 33.9%) |
 | Needs info rate                       |                      7.5% (7.1% to 8.0%) |                      7.5% (7.1% to 8.0%) |                      7.5% (7.1% to 8.0%) |                      7.5% (7.1% to 8.0%) |
-| Rent volume                           | $68,866,560 ($66,880,200 to $70,682,400) | $65,709,500 ($64,019,700 to $68,028,700) | $57,734,760 ($56,420,400 to $60,611,400) | $56,621,070 ($55,207,000 to $59,573,100) |
-| Bad rate                              |                      7.6% (6.8% to 8.6%) |                      8.8% (7.7% to 9.6%) |                      4.4% (3.7% to 5.0%) |                      4.8% (4.3% to 5.4%) |
-| First payment default rate            |                      1.1% (0.9% to 1.5%) |                      1.2% (0.9% to 1.6%) |                      0.2% (0.0% to 0.5%) |                      0.2% (0.0% to 0.5%) |
-| Fee income, bps of volume             |                         171 (169 to 173) |                         177 (176 to 179) |                         168 (167 to 170) |                         171 (170 to 173) |
-| Net loss, bps of volume               |                         369 (306 to 482) |                            44 (35 to 50) |                         173 (149 to 196) |                            22 (20 to 24) |
-| Net margin, bps of volume             |                      -284 (-409 to -215) |                            77 (72 to 86) |                        -74 (-100 to -48) |                            92 (91 to 94) |
-| Net margin                            | -$1,953,978 (-$2,786,544 to -$1,436,250) |          $509,538 ($461,169 to $584,331) |       -$425,813 (-$562,185 to -$291,316) |          $522,874 ($507,293 to $558,442) |
-| Net margin, mild stress               | -$1,775,000 (-$2,133,564 to -$1,365,134) |                                  not run |       -$350,691 (-$555,564 to -$231,163) |          $431,207 ($392,208 to $477,311) |
-| Profitable customers                  |                   89.1% (88.1% to 89.8%) |                   87.8% (86.5% to 88.8%) |                   95.7% (95.1% to 96.3%) |                   95.2% (94.6% to 95.8%) |
-| AUC                                   |                   0.716 (0.694 to 0.769) |                   0.743 (0.718 to 0.787) |                   0.677 (0.647 to 0.715) |                   0.706 (0.668 to 0.752) |
+| Rent volume                           | $43,791,600 ($42,211,800 to $46,362,000) | $42,885,880 ($41,292,850 to $45,616,800) | $34,528,680 ($33,687,600 to $36,487,800) | $34,044,150 ($33,271,900 to $36,124,200) |
+| Bad rate                              |                      4.7% (3.5% to 5.3%) |                      4.8% (3.7% to 5.2%) |                      3.5% (2.5% to 4.0%) |                      3.5% (2.5% to 4.0%) |
+| First payment default rate            |                      0.4% (0.1% to 0.8%) |                      0.4% (0.1% to 0.8%) |                      0.2% (0.0% to 0.5%) |                      0.2% (0.0% to 0.5%) |
+| Fee income, bps of volume             |                         151 (150 to 152) |                         153 (153 to 154) |                         154 (153 to 154) |                         156 (155 to 157) |
+| Net loss, bps of volume               |                         200 (150 to 235) |                            27 (20 to 31) |                         142 (101 to 170) |                            18 (11 to 21) |
+| Net margin, bps of volume             |                       -120 (-159 to -65) |                            71 (66 to 79) |                         -58 (-89 to -13) |                            79 (76 to 86) |
+| Net margin                            |       -$520,283 (-$680,800 to -$299,911) |          $306,855 ($274,520 to $359,339) |        -$199,966 (-$303,231 to -$49,127) |          $269,553 ($254,356 to $309,095) |
+| Net margin, mild stress               |        -$495,167 (-$887,203 to -$38,642) |                                  not run |        -$135,856 (-$264,412 to $144,975) |          $221,098 ($186,794 to $271,154) |
+| Profitable customers                  |                   90.6% (89.4% to 91.8%) |                   90.6% (89.3% to 91.8%) |                   96.5% (96.1% to 97.5%) |                   96.6% (96.0% to 97.5%) |
+| AUC                                   |                   0.671 (0.600 to 0.735) |                   0.673 (0.590 to 0.737) |                   0.672 (0.584 to 0.714) |                   0.669 (0.569 to 0.714) |
 | Fraud applicants approved             |                   45.7% (44.2% to 47.5%) |                   45.7% (44.2% to 47.5%) |                      0.8% (0.0% to 2.1%) |                      0.8% (0.0% to 2.1%) |
-| Peak pool utilization                 |                   80.4% (76.6% to 83.2%) |                   71.0% (69.3% to 73.2%) |                   64.2% (62.9% to 66.4%) |                   60.8% (59.6% to 63.8%) |
+| Peak pool utilization                 |                   49.2% (48.1% to 50.8%) |                   46.8% (45.0% to 49.7%) |                   38.8% (37.8% to 40.2%) |                   37.2% (36.3% to 39.4%) |
 | Unfunded payouts                      |                               0 (0 to 0) |                               0 (0 to 0) |                               0 (0 to 0) |                               0 (0 to 0) |
 
 The gates, applied to each configuration that was also run under mild stress. Only the
 last column decides whether the policy ships.
 
-| Gate                   | Threshold |      v1_baseline |    v2_baseline | v2_standard (gated) |
-| ---------------------- | --------: | ---------------: | -------------: | ------------------: |
-| net_loss_base          |     <= 75 |         369 FAIL |       173 FAIL |             22 PASS |
-| net_margin_base        |      > $0 | -$1,953,978 FAIL | -$425,813 FAIL |       $522,874 PASS |
-| net_margin_mild_stress |      > $0 | -$1,775,000 FAIL | -$350,690 FAIL |       $431,207 PASS |
-| bad_rate_monotonic     |       = 0 |           0 PASS |         0 PASS |              0 PASS |
-| auc                    |   >= 0.70 |       0.716 PASS |     0.677 FAIL |          0.706 PASS |
-| fraud_approval         |      < 5% |       45.7% FAIL |      0.8% PASS |           0.8% PASS |
-| pool_funding           |       = 0 |           0 PASS |         0 PASS |              0 PASS |
-| approval_floor         |    >= 30% |       67.6% PASS |     60.8% PASS |          60.8% PASS |
-| refer_rate             |     <= 5% |        0.0% PASS |      1.7% PASS |           1.7% PASS |
+| Gate                   | Threshold |    v1_baseline |    v2_baseline | v2_standard (gated) |
+| ---------------------- | --------: | -------------: | -------------: | ------------------: |
+| net_loss_base          |     <= 75 |       200 FAIL |       142 FAIL |             18 PASS |
+| net_margin_base        |      > $0 | -$520,283 FAIL | -$199,966 FAIL |       $269,553 PASS |
+| net_margin_mild_stress |      > $0 | -$495,167 FAIL | -$135,856 FAIL |       $221,098 PASS |
+| bad_rate_monotonic     |       = 0 |         0 PASS |         0 PASS |              0 PASS |
+| auc                    |   >= 0.70 |     0.671 FAIL |     0.672 FAIL |          0.669 FAIL |
+| fraud_approval         |      < 5% |     45.7% FAIL |      0.8% PASS |           0.8% PASS |
+| pool_funding           |       = 0 |         0 PASS |         0 PASS |              0 PASS |
+| approval_floor         |    >= 30% |     44.7% PASS |     40.7% PASS |          40.7% PASS |
+| refer_rate             |     <= 5% |      0.0% PASS |      1.7% PASS |           1.7% PASS |
 
 ## Swap sets against the earlier configurations
 
@@ -79,56 +79,62 @@ that lost money and swaps in few or none.
 
 | Comparison                 | Swap in | Swap in bad rate | Swap in net margin | Swap out | Swap out bad rate | Swap out net margin |
 | -------------------------- | ------: | ---------------: | -----------------: | -------: | ----------------: | ------------------: |
-| v1_baseline to v2_standard |       7 |             0.0% |             $9,751 |      685 |             36.6% |         -$7,615,501 |
-| v1_standard to v2_standard |       7 |             0.0% |             $9,751 |      685 |             43.5% |           -$236,535 |
+| v1_baseline to v2_standard |       7 |              n/a |                 $0 |      685 |             32.5% |         -$1,370,343 |
+| v1_standard to v2_standard |       7 |              n/a |                 $0 |      685 |             35.0% |            -$98,792 |
 | v2_baseline to v2_standard |       0 |              n/a |                 $0 |        0 |               n/a |                  $0 |
 
 ## Headline (gated configuration, base case, seeds pooled)
 
-| Metric                                      |                         Value |
-| ------------------------------------------- | ----------------------------: |
-| Applicants                                  |                        10,000 |
-| Approved                                    |                 6,084 (60.8%) |
-| Approved by the engine alone                |                         5,918 |
-| Referred to a reviewer                      |                    166 (1.7%) |
-| Declined                                    |                 3,168 (31.7%) |
-| Needs info                                  |                    748 (7.5%) |
-| Plans funded                                |                         6,084 |
-| Plans whose start waited for pool capacity  |                             0 |
-| Approved but never funded                   |                             0 |
-| Plan-months                                 |                        71,479 |
-| Rent volume advanced                        |                  $283,105,350 |
-| Gross fee income                            |          $4,842,497 (171 bps) |
-| Cost of funds                               |             $742,132 (26 bps) |
-| Servicing cost                              |             $857,748 (30 bps) |
-| Charge-offs                                 |                      $698,050 |
-| Recoveries                                  |                       $69,805 |
-| Net loss                                    |   $628,245 (22 bps of volume) |
-| Net margin                                  | $2,614,372 (92 bps of volume) |
-| Bad rate (30+ days past due or written off) |                          4.8% |
-| First payment default rate                  |                          0.3% |
-| Customers who were net profitable           |                         95.2% |
-| Fraud archetype applicants approved         |               2 of 258 (0.8%) |
-| Largest industry by volume                  | restaurant (39.4%, HHI 2,506) |
+| Metric                                                    |                         Value |
+| --------------------------------------------------------- | ----------------------------: |
+| Applicants                                                |                        10,000 |
+| Approved                                                  |                 6,084 (60.8%) |
+| Approved for less than the rent requested (counter offer) |                         2,013 |
+| Counter offers that could not be used (no plan opened)    |                         2,013 |
+| Approved on usable terms                                  |                 4,071 (40.7%) |
+| Approved by the engine alone                              |                         5,918 |
+| Referred to a reviewer                                    |                    166 (1.7%) |
+| Declined                                                  |                 3,168 (31.7%) |
+| Needs info                                                |                    748 (7.5%) |
+| Plans funded                                              |                         4,071 |
+| Plans whose start waited for pool capacity                |                             0 |
+| Approved but never funded                                 |                             0 |
+| Plan-months                                               |                        48,069 |
+| Rent volume advanced                                      |                  $170,220,750 |
+| Gross fee income                                          |          $2,653,008 (156 bps) |
+| Cost of funds                                             |             $424,396 (25 bps) |
+| Servicing cost                                            |             $576,828 (34 bps) |
+| Charge-offs                                               |                      $337,800 |
+| Recoveries                                                |                       $33,780 |
+| Net loss                                                  |   $304,020 (18 bps of volume) |
+| Net margin                                                | $1,347,764 (79 bps of volume) |
+| Landlord payouts held                                     |                           328 |
+| Held payouts released and paid                            |                             5 |
+| Payouts cancelled (never paid)                            |                           323 |
+| Debits put off by the balance check                       |                        20,445 |
+| Debits returned for insufficient funds                    |                            16 |
+| Bad rate (30+ days past due or written off)               |                          3.5% |
+| First payment default rate                                |                          0.3% |
+| Customers who were net profitable                         |                         96.6% |
+| Fraud archetype applicants approved                       |               2 of 258 (0.8%) |
+| Largest industry by volume                                | restaurant (39.1%, HHI 2,512) |
 
 ## By grade (base case)
 
 | Grade | Applicants | Plans |       Volume | Bad rate | Net loss bps | Net margin | Margin bps | Profitable |
 | ----- | ---------: | ----: | -----------: | -------: | -----------: | ---------: | ---------: | ---------: |
-| A     |      4,417 | 4,417 | $204,188,650 |     3.0% |           15 | $1,679,698 |         82 |        97% |
-| B     |        998 |   998 |  $51,187,800 |     7.3% |           38 |   $541,657 |        106 |        93% |
-| C     |        524 |   524 |  $23,049,600 |    11.3% |           41 |   $328,270 |        142 |        89% |
-| D     |        145 |   145 |   $4,679,300 |    20.7% |           81 |    $64,748 |        138 |        81% |
+| A     |      3,805 | 3,805 | $158,521,250 |     3.1% |           16 | $1,233,749 |         78 |        97% |
+| B     |        249 |   249 |  $11,274,700 |     8.8% |           39 |   $110,844 |         98 |        92% |
+| C     |         17 |    17 |     $424,800 |     5.9% |           83 |     $3,170 |         75 |        94% |
 
 ## By score band (base case)
 
 | Score  | Applicants | Plans |       Volume | Bad rate | Net loss bps | Net margin | Margin bps | Profitable |
 | ------ | ---------: | ----: | -----------: | -------: | -----------: | ---------: | ---------: | ---------: |
-| 45-54  |        145 |   145 |   $4,679,300 |    20.7% |           81 |    $64,748 |        138 |        81% |
-| 55-64  |        373 |   373 |  $15,990,100 |    12.3% |           43 |   $224,080 |        140 |        88% |
-| 65-74  |        667 |   667 |  $33,067,150 |     9.3% |           49 |   $338,691 |        102 |        91% |
-| 75-84  |      1,109 | 1,109 |  $56,462,150 |     5.0% |           23 |   $545,802 |         97 |        95% |
-| 85-100 |      3,790 | 3,790 | $172,906,650 |     2.6% |           13 | $1,441,052 |         83 |        97% |
+| 55-64  |          8 |     8 |     $212,400 |    12.5% |          165 |      -$121 |         -6 |        88% |
+| 65-74  |         98 |    98 |   $4,160,450 |    10.2% |           37 |    $41,313 |         99 |        91% |
+| 75-84  |        512 |   512 |  $21,910,050 |     7.4% |           35 |   $158,074 |         72 |        93% |
+| 85-100 |      3,453 | 3,453 | $143,937,850 |     2.7% |           14 | $1,148,498 |         80 |        97% |
 
 ## Calibration: expected against realized (base case)
 
@@ -139,39 +145,38 @@ fee floor, not the loss estimate, is what is keeping that band profitable.
 
 | Score  | Plans | Expected bad rate | Realized bad rate | Expected loss bps | Realized loss bps |
 | ------ | ----: | ----------------: | ----------------: | ----------------: | ----------------: |
-| 50-54  |   145 |             20.9% |             20.7% |               108 |                81 |
-| 55-59  |   171 |             20.7% |             15.2% |               107 |                55 |
-| 60-64  |   202 |             12.3% |              9.9% |                64 |                32 |
-| 65-69  |   282 |              8.3% |              8.2% |                43 |                38 |
-| 70-74  |   385 |              7.8% |             10.1% |                40 |                56 |
-| 75-79  |   482 |              6.0% |              5.0% |                31 |                24 |
-| 80-84  |   627 |              5.1% |              5.1% |                27 |                22 |
-| 85-89  |   827 |              4.2% |              3.9% |                22 |                15 |
-| 90-94  | 1,179 |              3.1% |              3.3% |                17 |                16 |
-| 95-100 | 1,784 |              1.7% |              1.6% |                 9 |                11 |
+| 55-59  |     4 |             20.7% |              0.0% |               107 |                 0 |
+| 60-64  |     4 |             12.3% |             25.0% |                64 |               311 |
+| 65-69  |    21 |              8.3% |              4.8% |                43 |                29 |
+| 70-74  |    77 |              7.8% |             11.7% |                40 |                40 |
+| 75-79  |   160 |              6.0% |              7.5% |                31 |                39 |
+| 80-84  |   352 |              5.1% |              7.4% |                27 |                34 |
+| 85-89  |   634 |              4.2% |              4.6% |                22 |                21 |
+| 90-94  | 1,100 |              3.1% |              3.1% |                17 |                14 |
+| 95-100 | 1,719 |              1.7% |              1.7% |                 9 |                12 |
 
 ## By archetype (base case)
 
 The fraud archetypes are the rows `bust_out`, `inflated_revenue`, and `round_trip`.
 Applicants counts everyone who applied. The money columns cover funded plans.
 
-| Archetype        | Applicants | Plans |       Volume | Bad rate | Net loss bps | Net margin | Margin bps | Profitable |
-| ---------------- | ---------: | ----: | -----------: | -------: | -----------: | ---------: | ---------: | ---------: |
-| batched          |        305 |   242 |  $10,930,450 |     3.7% |           19 |    $98,831 |         90 |        96% |
-| bust_out         |         79 |     0 |           $0 |     0.0% |            0 |         $0 |          0 |         0% |
-| declining        |        400 |    25 |     $775,700 |    56.0% |          472 |   -$29,152 |       -376 |        44% |
-| growing          |        793 |   669 |  $32,065,250 |     3.4% |           18 |   $304,418 |         95 |        97% |
-| healthy          |      3,125 | 2,761 | $130,131,550 |     3.7% |           19 | $1,176,070 |         90 |        96% |
-| heavy_debt       |        666 |   351 |  $13,948,100 |     7.4% |           22 |   $163,060 |        117 |        93% |
-| inflated_revenue |         87 |     2 |     $120,000 |     0.0% |            0 |     $2,112 |        176 |       100% |
-| low_balance      |        569 |   320 |  $14,331,950 |     4.4% |           17 |   $154,364 |        108 |        96% |
-| new_business     |        590 |   177 |   $7,784,350 |    11.9% |           38 |    $69,331 |         89 |        88% |
-| no_balance       |        116 |     0 |           $0 |     0.0% |            0 |         $0 |          0 |         0% |
-| overdrafts       |        436 |    34 |   $1,101,000 |     8.8% |           29 |    $10,310 |         94 |        91% |
-| round_trip       |         92 |     0 |           $0 |     0.0% |            0 |         $0 |          0 |         0% |
-| seasonal         |        711 |   421 |  $20,365,050 |     5.0% |           19 |   $204,686 |        101 |        95% |
-| thin_margin      |      1,296 |   525 |  $22,011,100 |     5.9% |           22 |   $245,981 |        112 |        94% |
-| volatile         |        735 |   557 |  $29,540,850 |     5.6% |           32 |   $214,363 |         73 |        94% |
+| Archetype        | Applicants | Plans |      Volume | Bad rate | Net loss bps | Net margin | Margin bps | Profitable |
+| ---------------- | ---------: | ----: | ----------: | -------: | -----------: | ---------: | ---------: | ---------: |
+| batched          |        305 |   167 |  $6,743,250 |     1.8% |           12 |    $56,086 |         83 |        98% |
+| bust_out         |         79 |     0 |          $0 |     0.0% |            0 |         $0 |          0 |         0% |
+| declining        |        400 |    18 |    $567,800 |    44.4% |          300 |   -$11,810 |       -208 |        56% |
+| growing          |        793 |   438 | $18,249,550 |     2.3% |           18 |   $140,922 |         77 |        98% |
+| healthy          |      3,125 | 1,871 | $78,808,750 |     2.5% |           13 |   $645,819 |         82 |        97% |
+| heavy_debt       |        666 |   169 |  $6,495,200 |     4.1% |           16 |    $56,000 |         86 |        96% |
+| inflated_revenue |         87 |     0 |          $0 |     0.0% |            0 |         $0 |          0 |         0% |
+| low_balance      |        569 |   238 |  $9,536,950 |     2.9% |           12 |    $88,933 |         93 |        97% |
+| new_business     |        590 |    95 |  $3,752,150 |    10.5% |           54 |    $17,192 |         46 |        89% |
+| no_balance       |        116 |     0 |          $0 |     0.0% |            0 |         $0 |          0 |         0% |
+| overdrafts       |        436 |    23 |    $727,800 |     8.7% |            5 |     $6,629 |         91 |        96% |
+| round_trip       |         92 |     0 |          $0 |     0.0% |            0 |         $0 |          0 |         0% |
+| seasonal         |        711 |   272 | $11,234,250 |     3.3% |           16 |    $89,549 |         80 |        97% |
+| thin_margin      |      1,296 |   303 | $11,816,300 |     5.0% |           20 |   $101,967 |         86 |        95% |
+| volatile         |        735 |   477 | $22,288,750 |     4.8% |           26 |   $156,478 |         70 |        95% |
 
 ## By archetype, before and after
 
@@ -180,32 +185,32 @@ check that earlier decline detection does not punish a normal seasonal trough.
 
 | Archetype        | Applicants | Approved before | Approved after | Plans before | Plans after | Bad rate before | Bad rate after | Margin bps before | Margin bps after |
 | ---------------- | ---------: | --------------: | -------------: | -----------: | ----------: | --------------: | -------------: | ----------------: | ---------------: |
-| batched          |        305 |             83% |            79% |          253 |         242 |            3.6% |           3.7% |               -10 |               90 |
-| bust_out         |         79 |             76% |             0% |           60 |           0 |          100.0% |              0 |             -9801 |                0 |
-| declining        |        400 |             35% |             6% |          139 |          25 |           77.0% |          56.0% |             -3479 |             -376 |
-| growing          |        793 |             87% |            84% |          689 |         669 |            3.2% |           3.4% |               -23 |               95 |
-| healthy          |      3,125 |             91% |            88% |        2,839 |       2,761 |            3.8% |           3.7% |               -63 |               90 |
-| heavy_debt       |        666 |             61% |            53% |          406 |         351 |            8.6% |           7.4% |               -83 |              117 |
-| inflated_revenue |         87 |              3% |             2% |            3 |           2 |           33.3% |           0.0% |              -461 |              176 |
-| low_balance      |        569 |             66% |            56% |          373 |         320 |            4.0% |           4.4% |               -98 |              108 |
-| new_business     |        590 |             32% |            30% |          188 |         177 |           11.2% |          11.9% |              -153 |               89 |
+| batched          |        305 |             83% |            79% |          178 |         167 |            2.3% |           1.8% |               -15 |               83 |
+| bust_out         |         79 |             76% |             0% |            6 |           0 |          100.0% |              0 |             -9859 |                0 |
+| declining        |        400 |             35% |             6% |           64 |          18 |           57.8% |          44.4% |             -1843 |             -208 |
+| growing          |        793 |             87% |            84% |          466 |         438 |            2.1% |           2.3% |               -57 |               77 |
+| healthy          |      3,125 |             91% |            88% |        1,985 |       1,871 |            2.6% |           2.5% |               -24 |               82 |
+| heavy_debt       |        666 |             61% |            53% |          180 |         169 |            3.3% |           4.1% |                31 |               86 |
+| inflated_revenue |         87 |              3% |             2% |            0 |           0 |               0 |              0 |                 0 |                0 |
+| low_balance      |        569 |             66% |            56% |          255 |         238 |            3.5% |           2.9% |               -98 |               93 |
+| new_business     |        590 |             32% |            30% |          100 |          95 |           11.0% |          10.5% |              -205 |               46 |
 | no_balance       |        116 |              0% |             0% |            0 |           0 |               0 |              0 |                 0 |                0 |
-| overdrafts       |        436 |             11% |             8% |           50 |          34 |            8.0% |           8.8% |              -281 |               94 |
-| round_trip       |         92 |             60% |             0% |           55 |           0 |           47.3% |              0 |             -1381 |                0 |
-| seasonal         |        711 |             63% |            59% |          449 |         421 |            5.1% |           5.0% |              -107 |              101 |
-| thin_margin      |      1,296 |             51% |            41% |          661 |         525 |            7.9% |           5.9% |              -114 |              112 |
-| volatile         |        735 |             81% |            76% |          597 |         557 |            5.7% |           5.6% |              -121 |               73 |
+| overdrafts       |        436 |             11% |             8% |           24 |          23 |            8.3% |           8.7% |                40 |               91 |
+| round_trip       |         92 |             60% |             0% |           46 |           0 |           43.5% |              0 |              -816 |                0 |
+| seasonal         |        711 |             63% |            59% |          302 |         272 |            3.3% |           3.3% |               -87 |               80 |
+| thin_margin      |      1,296 |             51% |            41% |          323 |         303 |            5.0% |           5.0% |              -110 |               86 |
+| volatile         |        735 |             81% |            76% |          543 |         477 |            5.2% |           4.8% |              -130 |               70 |
 
 ## By industry (base case)
 
-| Industry              | Applicants | Plans |       Volume | Bad rate | Net loss bps | Net margin | Margin bps | Profitable |
-| --------------------- | ---------: | ----: | -----------: | -------: | -----------: | ---------: | ---------: | ---------: |
-| auto_services         |        760 |   466 |  $27,974,650 |     4.5% |           17 |   $283,496 |        101 |        96% |
-| fitness               |        806 |   493 |  $19,205,200 |     5.5% |           26 |   $173,069 |         90 |        95% |
-| personal_services     |      1,534 |   945 |  $27,107,550 |     4.7% |           20 |   $224,901 |         83 |        95% |
-| professional_services |        950 |   587 |  $26,067,850 |     4.3% |           21 |   $238,785 |         92 |        96% |
-| restaurant            |      3,457 | 2,086 | $111,584,400 |     5.4% |           25 | $1,017,146 |         91 |        95% |
-| retail                |      2,493 | 1,507 |  $71,165,700 |     4.3% |           20 |   $676,975 |         95 |        96% |
+| Industry              | Applicants | Plans |      Volume | Bad rate | Net loss bps | Net margin | Margin bps | Profitable |
+| --------------------- | ---------: | ----: | ----------: | -------: | -----------: | ---------: | ---------: | ---------: |
+| auto_services         |        760 |   306 | $15,787,750 |     3.6% |           15 |   $136,651 |         87 |        96% |
+| fitness               |        806 |   315 | $11,073,300 |     2.5% |           13 |    $86,203 |         78 |        97% |
+| personal_services     |      1,534 |   617 | $16,947,150 |     3.2% |           14 |   $121,888 |         72 |        97% |
+| professional_services |        950 |   402 | $15,812,250 |     2.7% |           19 |   $120,786 |         76 |        97% |
+| restaurant            |      3,457 | 1,413 | $66,564,900 |     4.6% |           25 |   $496,733 |         75 |        95% |
+| retail                |      2,493 | 1,018 | $44,035,400 |     2.5% |           11 |   $385,503 |         88 |        97% |
 
 ## Stress
 
@@ -214,17 +219,17 @@ Mild: revenue down 15% for 180 days across the whole book, starting in month 7. 
 | Metric                     |         Base |  Mild stress | Severe stress |
 | -------------------------- | -----------: | -----------: | ------------: |
 | Approval rate              |        60.8% |        52.0% |         36.4% |
-| Plans funded               |        6,084 |        5,198 |         3,641 |
-| Rent volume                | $283,105,350 | $237,230,950 |  $157,044,600 |
-| Bad rate                   |         4.8% |         6.1% |         18.8% |
-| First payment default rate |         0.3% |         0.1% |          0.2% |
-| Net loss                   |     $628,245 |     $616,703 |    $1,289,959 |
-| Net loss, bps of volume    |           22 |           26 |            82 |
-| Net margin                 |   $2,614,372 |   $2,156,036 |      $448,589 |
-| Net margin, bps of volume  |           92 |           91 |            29 |
-| Profitable customers       |        95.2% |        93.9% |         81.2% |
-| AUC                        |        0.705 |        0.776 |         0.868 |
-| Minimum pool cash          |   $2,844,049 |   $3,550,916 |    $4,969,456 |
+| Plans funded               |        4,071 |        3,299 |         2,359 |
+| Rent volume                | $170,220,750 | $135,474,850 |   $95,800,250 |
+| Bad rate                   |         3.5% |         3.2% |          7.2% |
+| First payment default rate |         0.3% |         0.2% |          0.2% |
+| Net loss                   |     $304,020 |     $210,263 |      $281,250 |
+| Net loss, bps of volume    |           18 |           16 |            29 |
+| Net margin                 |   $1,347,764 |   $1,105,489 |      $640,290 |
+| Net margin, bps of volume  |           79 |           82 |            67 |
+| Profitable customers       |        96.6% |        96.9% |         94.6% |
+| AUC                        |        0.670 |        0.689 |         0.785 |
+| Minimum pool cash          |   $4,662,104 |   $5,225,037 |    $5,936,869 |
 | Unfunded payouts           |            0 |            0 |             0 |
 
 ## Capital pool by month (base case, seed `1`)
@@ -234,31 +239,63 @@ installment is collected. Peak use is receivables as a share of pool cash plus r
 
 | Month   | Active plans |    Payouts |  Collected | Min pool cash | End pool cash | Receivable | Peak use |
 | ------- | -----------: | ---------: | ---------: | ------------: | ------------: | ---------: | -------: |
-| 2026-01 |           54 |         $0 |         $0 |    $7,500,000 |    $7,500,000 |         $0 |       0% |
-| 2026-02 |          110 |   $236,700 |   $240,834 |    $7,263,300 |    $7,504,134 |         $0 |       3% |
-| 2026-03 |          172 |   $432,700 |   $440,165 |    $7,071,434 |    $7,511,599 |         $0 |       6% |
-| 2026-04 |          256 |   $707,950 |   $720,175 |    $6,803,649 |    $7,523,824 |         $0 |       9% |
-| 2026-05 |          348 | $1,045,750 | $1,060,096 |    $6,478,074 |    $7,538,170 |     $3,850 |      14% |
-| 2026-06 |          428 | $1,422,150 | $1,443,277 |    $6,116,020 |    $7,559,297 |     $7,400 |      19% |
-| 2026-07 |          528 | $1,740,650 | $1,763,075 |    $5,818,647 |    $7,581,915 |    $12,950 |      23% |
-| 2026-08 |          660 | $2,115,400 | $2,150,575 |    $5,466,515 |    $7,617,407 |    $10,900 |      28% |
-| 2026-09 |          800 | $2,632,000 | $2,675,128 |    $4,985,407 |    $7,661,020 |     $7,825 |      35% |
-| 2026-10 |          932 | $3,182,650 | $3,234,093 |    $4,478,370 |    $7,712,956 |     $5,775 |      42% |
-| 2026-11 |        1,079 | $3,756,350 | $3,813,093 |    $3,956,606 |    $7,769,811 |    $11,850 |      49% |
-| 2026-12 |        1,247 | $4,339,250 | $4,408,011 |    $3,430,561 |    $7,838,749 |    $15,025 |      56% |
-| 2027-01 |        1,190 | $4,994,700 | $5,069,997 |    $2,844,049 |    $7,914,539 |    $19,575 |      64% |
-| 2027-02 |        1,134 | $4,740,950 | $4,808,663 |    $3,173,589 |    $7,982,767 |    $26,975 |      60% |
-| 2027-03 |        1,073 | $4,537,000 | $4,605,616 |    $3,445,767 |    $8,051,878 |    $30,275 |      57% |
-| 2027-04 |          991 | $4,256,150 | $4,317,748 |    $3,795,728 |    $8,114,423 |    $31,175 |      53% |
-| 2027-05 |          897 | $3,927,400 | $3,989,672 |    $4,187,023 |    $8,178,320 |    $18,988 |      49% |
-| 2027-06 |          814 | $3,551,600 | $3,601,059 |    $4,626,720 |    $8,228,375 |    $23,338 |      44% |
-| 2027-07 |          716 | $3,204,800 | $3,248,803 |    $5,023,575 |    $8,273,327 |    $23,663 |      39% |
-| 2027-08 |          585 | $2,825,850 | $2,867,281 |    $5,447,477 |    $8,315,112 |    $26,150 |      34% |
-| 2027-09 |          443 | $2,312,650 | $2,339,810 |    $6,002,462 |    $8,343,757 |    $22,900 |      28% |
-| 2027-10 |          313 | $1,757,950 | $1,769,204 |    $6,585,807 |    $8,355,824 |    $32,675 |      21% |
-| 2027-11 |          170 | $1,204,600 | $1,224,838 |    $7,151,224 |    $8,376,670 |    $26,600 |      15% |
-| 2027-12 |            3 |   $647,900 |   $658,918 |    $7,728,770 |    $8,389,250 |    $10,975 |       8% |
-| 2028-01 |            0 |         $0 |         $0 |    $8,389,250 |    $8,390,348 |         $0 |       0% |
+| 2026-01 |           35 |         $0 |         $0 |    $7,500,000 |    $7,500,000 |         $0 |       0% |
+| 2026-02 |           75 |   $137,600 |   $139,745 |    $7,362,400 |    $7,502,145 |         $0 |       2% |
+| 2026-03 |          118 |   $271,100 |   $275,284 |    $7,231,045 |    $7,506,330 |         $0 |       4% |
+| 2026-04 |          168 |   $429,350 |   $436,051 |    $7,076,980 |    $7,513,030 |         $0 |       6% |
+| 2026-05 |          230 |   $595,850 |   $601,255 |    $6,917,180 |    $7,518,435 |     $3,850 |       8% |
+| 2026-06 |          283 |   $818,350 |   $831,131 |    $6,700,085 |    $7,531,216 |     $3,850 |      11% |
+| 2026-07 |          350 | $1,012,750 | $1,028,545 |    $6,518,466 |    $7,547,396 |         $0 |      13% |
+| 2026-08 |          439 | $1,253,400 | $1,271,767 |    $6,293,996 |    $7,565,763 |     $1,125 |      17% |
+| 2026-09 |          537 | $1,567,800 | $1,592,200 |    $5,997,963 |    $7,590,163 |     $1,125 |      21% |
+| 2026-10 |          629 | $1,897,850 | $1,926,465 |    $5,692,313 |    $7,618,778 |     $2,075 |      25% |
+| 2026-11 |          733 | $2,252,350 | $2,286,477 |    $5,366,428 |    $7,653,017 |     $1,950 |      30% |
+| 2026-12 |          847 | $2,617,950 | $2,653,737 |    $5,035,067 |    $7,688,804 |     $6,900 |      34% |
+| 2027-01 |          810 | $3,026,700 | $3,072,281 |    $4,662,104 |    $7,734,580 |     $6,425 |      39% |
+| 2027-02 |          770 | $2,885,050 | $2,924,737 |    $4,849,530 |    $7,774,267 |    $11,525 |      37% |
+| 2027-03 |          727 | $2,748,100 | $2,781,122 |    $5,026,167 |    $7,807,784 |    $16,175 |      35% |
+| 2027-04 |          677 | $2,581,250 | $2,618,534 |    $5,226,534 |    $7,845,160 |    $18,050 |      33% |
+| 2027-05 |          611 | $2,415,800 | $2,451,840 |    $5,429,360 |    $7,882,726 |     $4,263 |      31% |
+| 2027-06 |          557 | $2,187,500 | $2,215,379 |    $5,695,226 |    $7,910,885 |     $7,413 |      28% |
+| 2027-07 |          490 | $1,981,200 | $2,011,600 |    $5,929,685 |    $7,941,285 |     $7,688 |      25% |
+| 2027-08 |          403 | $1,744,950 | $1,769,083 |    $6,196,335 |    $7,965,564 |     $9,075 |      22% |
+| 2027-09 |          303 | $1,434,250 | $1,456,452 |    $6,531,314 |    $7,988,360 |     $3,125 |      18% |
+| 2027-10 |          211 | $1,106,750 | $1,119,914 |    $6,881,610 |    $8,001,837 |     $3,850 |      14% |
+| 2027-11 |          111 |   $757,100 |   $767,835 |    $7,244,737 |    $8,012,572 |     $4,750 |      10% |
+| 2027-12 |            1 |   $401,200 |   $407,340 |    $7,611,372 |    $8,019,096 |       $900 |       5% |
+| 2028-01 |            0 |         $0 |         $0 |    $8,019,096 |    $8,019,186 |         $0 |       0% |
+
+## Roll to charge-off by bucket (base case)
+
+Two measures of the same thing. On the evening of the first of each month, when the
+provision job sets the allowance, every unpaid installment is recorded under the
+delinquency bucket of its plan. And every unpaid installment is recorded once when its
+plan first moves into a bucket. The roll rate is the share of that principal that was
+later written off. All rent here is due on the first, so no plan is in the grace bucket on
+a provision date: only the entry measure sees it. The reserve rates in
+`src/servicing/policy.ts` are the first of the month rates for CURRENT, DELINQUENT, and
+DEFAULT and the entry rate for GRACE, rounded up.
+
+| Bucket     | Principal on the first of a month | Later written off | Roll rate | Principal on entering the bucket | Later written off | Roll rate |
+| ---------- | --------------------------------: | ----------------: | --------: | -------------------------------: | ----------------: | --------: |
+| CURRENT    |                       $90,230,500 |          $324,125 |     0.36% |                      $90,250,625 |          $337,025 |     0.37% |
+| GRACE      |                                $0 |                $0 |       n/a |                         $394,525 |          $333,550 |    84.54% |
+| DELINQUENT |                          $153,825 |          $145,100 |    94.33% |                         $372,163 |          $337,800 |    90.77% |
+| DEFAULT    |                          $677,000 |          $675,600 |    99.79% |                         $341,325 |          $337,800 |    98.97% |
+
+## Sensitivities (not gated)
+
+The gated configuration with one assumption of the simulation changed, on the same
+applicants in the base case, seeds pooled. These numbers do not decide a gate.
+
+- `partial_advance`: Counter offers are fronted in part: when the limit is below the rent, CashFlow fronts the limit and the business pays the rest itself. The product does not do this. It refuses a lease above the limit, which is what the gated run models.
+- `manual_payment`: Of installments still unpaid 7 days past due at a business that is still trading, 30% are paid by hand between day 7 and day 30. An assumption with no data behind it. The gated run assumes none are.
+
+| Run                 | Approved | Approved on usable terms | Plans |       Volume | Bad rate | Net loss (bps) | Net margin (bps) |      AUC (mean, range) |
+| ------------------- | -------: | -----------------------: | ----: | -----------: | -------: | -------------: | ---------------: | ---------------------: |
+| v2_standard (gated) |    60.8% |                    40.7% | 4,071 | $170,220,750 |     3.5% |  $304,020 (18) |  $1,347,764 (79) | 0.669 (0.569 to 0.714) |
+| partial_advance     |    60.8% |                    60.8% | 6,084 | $283,661,950 |     4.4% |  $604,080 (21) |  $2,649,924 (93) | 0.678 (0.643 to 0.709) |
+| manual_payment      |    60.8% |                    40.7% | 4,071 | $170,238,850 |     3.5% |  $304,785 (18) |  $1,347,069 (79) | 0.669 (0.569 to 0.714) |
 
 ## Challengers (not gated)
 
@@ -270,25 +307,28 @@ gated run.
 
 | Run                 | Approval | Refer |       Volume | Bad rate | Net loss bps | Margin bps |      AUC (mean, range) | Fraud approved |
 | ------------------- | -------: | ----: | -----------: | -------: | -----------: | ---------: | ---------------------: | -------------: |
-| v2_standard (gated) |    60.8% |  1.7% | $283,105,350 |     4.8% |           22 |         92 | 0.706 (0.668 to 0.752) |           0.8% |
-| cutoff_55           |    59.4% |  0.2% | $278,426,050 |     4.5% |           21 |         92 | 0.686 (0.638 to 0.747) |           0.4% |
+| v2_standard (gated) |    60.8% |  1.7% | $170,220,750 |     3.5% |           18 |         79 | 0.669 (0.569 to 0.714) |           0.8% |
+| cutoff_55           |    59.4% |  0.2% | $170,220,750 |     3.5% |           18 |         79 | 0.669 (0.569 to 0.714) |           0.4% |
 
 | Comparison               | Swap in | Swap in bad rate | Swap in net margin | Swap out | Swap out bad rate | Swap out net margin |
 | ------------------------ | ------: | ---------------: | -----------------: | -------: | ----------------: | ------------------: |
-| v2_standard to cutoff_55 |       0 |              n/a |                 $0 |      145 |             20.7% |             $64,748 |
+| v2_standard to cutoff_55 |       0 |              n/a |                 $0 |      145 |               n/a |                  $0 |
 
 ## Assumptions
 
-| Assumption                        | Value                                                                                                      |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Cost of funds                     | 12% APR on principal outstanding each day                                                                  |
-| Servicing cost                    | $12.00 per plan-month                                                                                      |
-| Recovery on written off principal | 10%                                                                                                        |
-| Manual review                     | catches and declines 70% of referred fraud applicants; approves every other referral at the engine's terms |
-| Funding wait                      | a plan the pool cannot take waits up to 3 rent dates                                                       |
-| Loss measurement                  | unpaid 90 days past due at the end of observation                                                          |
-| Bad definition                    | any installment 30 days past due, or written off                                                           |
-| Monotonic gate tolerance          | 100 bps, grades under 30 plans skipped                                                                     |
+| Assumption                             | Value                                                                                                       |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Cost of funds                          | 12% APR on principal outstanding each day                                                                   |
+| Servicing cost                         | $12.00 per plan-month                                                                                       |
+| Recovery on written off principal      | 10%                                                                                                         |
+| Returned debits                        | a debit the account cannot cover is booked as collected and reversed 2 days later (standard servicing only) |
+| Counter offers                         | the product fronts a whole lease rent or nothing, so an approval below the rent requested opens no plan     |
+| Manual payment after failed collection | none (see the sensitivity)                                                                                  |
+| Manual review                          | catches and declines 70% of referred fraud applicants; approves every other referral at the engine's terms  |
+| Funding wait                           | a plan the pool cannot take waits up to 3 rent dates                                                        |
+| Loss measurement                       | unpaid 90 days past due at the end of observation                                                           |
+| Bad definition                         | any installment 30 days past due, or written off                                                            |
+| Monotonic gate tolerance               | 100 bps, grades under 30 plans skipped                                                                      |
 
 ## What this can and cannot tell you
 

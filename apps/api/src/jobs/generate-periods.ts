@@ -6,7 +6,8 @@ import { runJob } from './runner.ts';
 
 /**
  * Creates next month's landlord payout and installments for every active plan, 30 days ahead.
- * A plan frozen by a periodic review gets no new period until the freeze is released.
+ * A paused, closed, or frozen plan gets no new period. A period whose due date passed while
+ * the plan was paused or frozen is never created afterwards: see `ensureUpcomingPeriods`.
  */
 export function generatePeriodsJob(ctx: AppContext, asOf: IsoDate) {
   return runJob(ctx, 'generate-periods', asOf, async () => {

@@ -1,11 +1,14 @@
 import {
   Cents,
+  DelinquencySummary,
   Id,
   IsoDateSchema,
   IsoDateTimeSchema,
   LedgerAccount,
   RecordReviewRequest,
   RecordReviewResponse,
+  ReleaseFreezeRequest,
+  RentPlan,
   ReviewQueueItem,
   TrialBalance,
 } from '@cashflow/shared';
@@ -16,7 +19,10 @@ import { z } from 'zod';
 import { todayIso } from '../dates.ts';
 import { runAllJobs } from '../jobs/index.ts';
 import { trialBalance } from '../ledger/service.ts';
-import { toApplication, toReview } from '../serializers.ts';
+import { toApplication, toRentPlan, toReview } from '../serializers.ts';
+import { planStandings } from '../services/delinquency.ts';
+import { delinquencySummary } from '../services/provisioning.ts';
+import { releaseAdvanceFreeze } from '../services/rent-plan.ts';
 import { listReviewQueue, recordReview } from '../services/reviews.ts';
 
 /**
@@ -133,6 +139,44 @@ export async function adminRoutes(app: FastifyInstance) {
         ...request.body,
       });
       return { review: toReview(review), application: toApplication(application) };
+    },
+  );
+
+  /**
+   * Delinquency and the loss accounts: plans and principal by bucket with the reserve the
+   * servicing policy calls for, the allowance, charge-offs and recoveries to date, held
+   * payouts, and frozen plans.
+   */
+  r.get(
+    '/admin/delinquency',
+    { schema: { tags: ['admin'], response: { 200: DelinquencySummary } } },
+    async () => delinquencySummary(db, todayIso()),
+  );
+
+  /**
+   * Lift a freeze on a plan (periodic review, unauthorized return, returned payout). A
+   * payout held by the freeze is paid on the next job run if it is still inside its release
+   * window; otherwise it is cancelled. The reviewer's identity comes from the request body
+   * until admin authentication exists.
+   */
+  r.post(
+    '/admin/rent-plans/:id/release-freeze',
+    {
+      schema: {
+        tags: ['admin'],
+        params: z.object({ id: Id }),
+        body: ReleaseFreezeRequest,
+        response: { 200: RentPlan },
+      },
+    },
+    async (request) => {
+      const plan = await releaseAdvanceFreeze(db, {
+        planId: request.params.id,
+        reviewer: request.body.reviewer,
+        reason: request.body.reason,
+      });
+      const standings = await planStandings(db, [plan], todayIso());
+      return toRentPlan(plan, standings.get(plan.id));
     },
   );
 

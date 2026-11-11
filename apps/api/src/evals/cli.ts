@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 import { allGatesPass } from './gates.ts';
 import { renderBaseline, renderJson, renderMarkdown } from './report.ts';
-import { CHALLENGERS, DEFAULT_RUN, evaluate } from './run.ts';
+import { CHALLENGERS, DEFAULT_RUN, evaluate, SENSITIVITIES } from './run.ts';
 
 interface Args {
   n: number;
@@ -69,6 +69,7 @@ const evaluation = evaluate({
   seeds: args.seeds,
   horizonMonths: args.horizonMonths,
   challengers: CHALLENGERS,
+  sensitivities: SENSITIVITIES,
 });
 const seconds = ((performance.now() - started) / 1000).toFixed(1);
 

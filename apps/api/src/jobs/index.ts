@@ -3,30 +3,66 @@ import cron from 'node-cron';
 
 import type { AppContext } from '../context.ts';
 import { todayIso } from '../dates.ts';
+import { ageReceivablesJob } from './age-receivables.ts';
 import { collectInstallmentsJob } from './collect-installments.ts';
 import { generatePeriodsJob } from './generate-periods.ts';
 import { processPayoutsJob } from './process-payouts.ts';
+import { provisionJob } from './provision.ts';
+import { reconcilePaymentsJob } from './reconcile-payments.ts';
 import { reunderwriteJob } from './reunderwrite.ts';
 
+/** Every job by name, in the order `runAllJobs` runs them. */
 export const JOBS = {
   reunderwrite: reunderwriteJob,
+  'reconcile-payments': reconcilePaymentsJob,
+  'age-receivables': ageReceivablesJob,
   'generate-periods': generatePeriodsJob,
   'process-payouts': processPayoutsJob,
   'collect-installments': collectInstallmentsJob,
+  provision: provisionJob,
 } as const;
 export type JobName = keyof typeof JOBS;
 
 /**
- * Runs the jobs in dependency order. Re-underwriting goes first, so a plan it freezes gets
- * no new period and no payout in the same run. Then periods exist, landlords get paid, and
- * businesses repay.
+ * Runs the jobs in dependency order. Each is idempotent for a given as-of date, so the whole
+ * run can be repeated. The order is what makes one run act on the truth as of that day:
+ *
+ *   1. reunderwrite          A plan it freezes must get no new period and no payout today.
+ *   2. reconcile-payments    Payments that came back are undone before anything reads who
+ *                            is paid up: a return can make a plan past due, or freeze it.
+ *   3. age-receivables       Buckets and LATE marks are brought up to today, and plans at
+ *                            the charge-off age are written off and closed, before periods
+ *                            are generated or payouts decided for them.
+ *   4. generate-periods      Next month's payout and installments exist, 30 days ahead, for
+ *                            plans that are active and not frozen.
+ *   5. process-payouts       Each due payout is paid, held, or cancelled, on the state the
+ *                            three jobs above left. It runs before collections, so a
+ *                            business has to be current at the start of the day for its
+ *                            landlord to be paid, and so the first installment of a period
+ *                            is collected on the day its payout goes out.
+ *   6. collect-installments  Scheduled debits, a payment's effect on the bucket, and then
+ *                            the cash sweep: operating cash is settled with the pool.
+ *   7. provision             Last, so the allowance is set on the day's closing balances.
+ *                            Posts at most once per calendar month.
  */
 export async function runAllJobs(ctx: AppContext, asOf: IsoDate = todayIso()) {
   const reunderwrite = await reunderwriteJob(ctx, asOf);
+  const reconcilePayments = await reconcilePaymentsJob(ctx, asOf);
+  const ageReceivables = await ageReceivablesJob(ctx, asOf);
   const generatePeriods = await generatePeriodsJob(ctx, asOf);
   const processPayouts = await processPayoutsJob(ctx, asOf);
   const collectInstallments = await collectInstallmentsJob(ctx, asOf);
-  return { asOf, reunderwrite, generatePeriods, processPayouts, collectInstallments };
+  const provision = await provisionJob(ctx, asOf);
+  return {
+    asOf,
+    reunderwrite,
+    reconcilePayments,
+    ageReceivables,
+    generatePeriods,
+    processPayouts,
+    collectInstallments,
+    provision,
+  };
 }
 
 /** Schedules runAllJobs inside the API process. Returns a stop function. */

@@ -80,6 +80,8 @@ export interface Challenger {
   description: string;
   policy?: CreditPolicy;
   servicing?: ServicingPolicy;
+  /** Simulator settings to change, for a sensitivity. */
+  portfolio?: Partial<PortfolioConfig>;
 }
 
 /** The lower half of grade D is funded after review. This challenger shows the book without it. */
@@ -98,6 +100,30 @@ export const CHALLENGERS: readonly Challenger[] = [
   },
 ];
 
+/**
+ * Sensitivities change one assumption of the gated run, not the policy. They are reported
+ * beside the gated numbers and never decide a gate.
+ */
+export const SENSITIVITIES: readonly Challenger[] = [
+  {
+    name: 'partial_advance',
+    description:
+      'Counter offers are fronted in part: when the limit is below the rent, CashFlow fronts the limit and the business pays the rest itself. The product does not do this. It refuses a lease above the limit, which is what the gated run models.',
+    portfolio: { partialAdvance: true },
+  },
+  {
+    name: 'manual_payment',
+    description: `Of installments still unpaid ${ASSUMPTIONS.manualPaymentFirstDay} days past due at a business that is still trading, ${ASSUMPTIONS.manualPaymentShareBps / 100}% are paid by hand between day ${ASSUMPTIONS.manualPaymentFirstDay} and day ${ASSUMPTIONS.manualPaymentLastDay}. An assumption with no data behind it. The gated run assumes none are.`,
+    portfolio: {
+      manualPayment: {
+        shareBps: ASSUMPTIONS.manualPaymentShareBps,
+        firstDay: ASSUMPTIONS.manualPaymentFirstDay,
+        lastDay: ASSUMPTIONS.manualPaymentLastDay,
+      },
+    },
+  },
+];
+
 export interface EvaluationOptions {
   n: number;
   /** One seed, or several. With several, the gates judge the mean. */
@@ -107,6 +133,7 @@ export interface EvaluationOptions {
   gated?: PolicyConfig;
   comparisons?: readonly PolicyConfig[];
   challengers?: readonly Challenger[];
+  sensitivities?: readonly Challenger[];
 }
 
 export interface ConfigOutcome {
@@ -156,6 +183,8 @@ export interface Evaluation {
   gates: GateResult[];
   comparisons: ConfigOutcome[];
   challengers: ChallengerOutcome[];
+  /** The gated configuration with one simulator assumption changed. Base case only. */
+  sensitivities: ChallengerOutcome[];
 }
 
 export const DEFAULT_RUN = {
@@ -174,6 +203,10 @@ function portfolioConfig(
     exposure: policy.exposure,
     servicing,
     horizonMonths,
+    // The baseline policy describes the services before they handled returns: a failed
+    // debit was booked as failed on the day.
+    returnDelayDays:
+      servicing.name === BASELINE_SERVICING_POLICY.name ? 0 : ASSUMPTIONS.returnDelayDays,
   };
 }
 
@@ -189,10 +222,12 @@ export function evaluate(options: EvaluationOptions): Evaluation {
     servicing: ServicingPolicy,
     label: string,
     stress: PortfolioConfig['stress'] = null,
+    overrides: Partial<PortfolioConfig> = {},
   ): PortfolioResult[] =>
     populations.map((population) =>
       runPortfolio(population, {
         ...portfolioConfig(policy, servicing, options.horizonMonths),
+        ...overrides,
         label,
         stress,
       }),
@@ -229,8 +264,14 @@ export function evaluate(options: EvaluationOptions): Evaluation {
     };
   });
 
-  const challengerOutcomes = challengers.map((c): ChallengerOutcome => {
-    const results = runAll(c.policy ?? gated.policy, c.servicing ?? gated.servicing, c.name);
+  const challenge = (c: Challenger): ChallengerOutcome => {
+    const results = runAll(
+      c.policy ?? gated.policy,
+      c.servicing ?? gated.servicing,
+      c.name,
+      null,
+      c.portfolio,
+    );
     const m = metricsOf(results);
     return {
       name: c.name,
@@ -239,7 +280,9 @@ export function evaluate(options: EvaluationOptions): Evaluation {
       metricsBySeed: m.bySeed,
       swapSet: swapSet(pooledBaseResult, poolResults(results)),
     };
-  });
+  };
+  const challengerOutcomes = challengers.map(challenge);
+  const sensitivityOutcomes = (options.sensitivities ?? []).map(challenge);
 
   return {
     run: {
@@ -262,5 +305,6 @@ export function evaluate(options: EvaluationOptions): Evaluation {
     gates: evaluateGates({ base: base.bySeed, mild: mild.bySeed }),
     comparisons: comparisonOutcomes,
     challengers: challengerOutcomes,
+    sensitivities: sensitivityOutcomes,
   };
 }

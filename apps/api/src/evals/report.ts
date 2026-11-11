@@ -115,6 +115,12 @@ function headlineRows(m: PortfolioMetrics): [string, string][] {
   return [
     ['Applicants', count(o.applicants)],
     ['Approved', `${count(o.approved)} (${pct(o.approvalRateBps)})`],
+    ['Approved for less than the rent requested (counter offer)', count(o.counterOffers)],
+    ['Counter offers that could not be used (no plan opened)', count(o.unusableCounterOffers)],
+    [
+      'Approved on usable terms',
+      `${count(o.approved - o.unusableCounterOffers)} (${pct(o.usableApprovalRateBps)})`,
+    ],
     ['Approved by the engine alone', count(o.autoApproved)],
     ['Referred to a reviewer', `${count(o.referred)} (${pct(o.referRateBps)})`],
     ['Declined', `${count(o.declined)} (${pct(m.declineRateBps)})`],
@@ -131,6 +137,11 @@ function headlineRows(m: PortfolioMetrics): [string, string][] {
     ['Recoveries', dollars(o.recoveryCents)],
     ['Net loss', `${dollars(o.netLossCents)} (${o.netLossBps} bps of volume)`],
     ['Net margin', `${dollars(o.netMarginCents)} (${o.netMarginBps} bps of volume)`],
+    ['Landlord payouts held', count(o.heldPayouts)],
+    ['Held payouts released and paid', count(o.releasedPayouts)],
+    ['Payouts cancelled (never paid)', count(o.cancelledPayouts)],
+    ['Debits put off by the balance check', count(o.deferredDebits)],
+    ['Debits returned for insufficient funds', count(o.failedDebits)],
     ['Bad rate (30+ days past due or written off)', pct(o.badRateBps)],
     ['First payment default rate', pct(o.firstPaymentDefaultRateBps)],
     ['Customers who were net profitable', pct(o.profitableShareBps)],
@@ -394,6 +405,82 @@ function swapSection(e: Evaluation): string[] {
   ];
 }
 
+function rollTable(m: PortfolioMetrics): string {
+  const rate = (r: { observedCents: number; rollRateBps: number }) =>
+    r.observedCents === 0 ? 'n/a' : pct(r.rollRateBps, 2);
+  return markdownTable(
+    [
+      'Bucket',
+      'Principal on the first of a month',
+      'Later written off',
+      'Roll rate',
+      'Principal on entering the bucket',
+      'Later written off',
+      'Roll rate',
+    ],
+    m.bucketRoll.map((r, i) => {
+      const entry = m.bucketEntryRoll[i]!;
+      return [
+        r.bucket,
+        dollars(r.observedCents),
+        dollars(r.chargedOffCents),
+        rate(r),
+        dollars(entry.observedCents),
+        dollars(entry.chargedOffCents),
+        rate(entry),
+      ];
+    }),
+    ['left', 'right', 'right', 'right', 'right', 'right', 'right'],
+  );
+}
+
+function sensitivitySection(e: Evaluation): string[] {
+  if (e.sensitivities.length === 0) return [];
+  const row = (name: string, m: PortfolioMetrics, bySeed: readonly PortfolioMetrics[]) => [
+    name,
+    pct(m.overall.approvalRateBps),
+    pct(m.overall.usableApprovalRateBps),
+    count(m.overall.plans),
+    dollars(m.overall.volumeCents),
+    pct(m.overall.badRateBps),
+    `${dollars(m.overall.netLossCents)} (${m.overall.netLossBps})`,
+    `${dollars(m.overall.netMarginCents)} (${m.overall.netMarginBps})`,
+    meanRange(
+      bySeed,
+      (x) => x.rankOrdering.auc,
+      (v) => v.toFixed(3),
+    ),
+  ];
+  return [
+    '## Sensitivities (not gated)',
+    '',
+    'The gated configuration with one assumption of the simulation changed, on the same',
+    'applicants in the base case, seeds pooled. These numbers do not decide a gate.',
+    '',
+    ...e.sensitivities.map((c) => `- \`${c.name}\`: ${c.description}`),
+    '',
+    markdownTable(
+      [
+        'Run',
+        'Approved',
+        'Approved on usable terms',
+        'Plans',
+        'Volume',
+        'Bad rate',
+        'Net loss (bps)',
+        'Net margin (bps)',
+        'AUC (mean, range)',
+      ],
+      [
+        row('v2_standard (gated)', e.base, e.baseBySeed),
+        ...e.sensitivities.map((c) => row(c.name, c.metrics, c.metricsBySeed)),
+      ],
+      ['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
+    ),
+    '',
+  ];
+}
+
 function challengerSection(e: Evaluation): string[] {
   if (e.challengers.length === 0) return [];
   const row = (name: string, m: PortfolioMetrics, bySeed: readonly PortfolioMetrics[]) => [
@@ -553,6 +640,20 @@ export function renderMarkdown(e: Evaluation): string {
     '',
     poolTable(e.baseBySeed[0]!),
     '',
+    '## Roll to charge-off by bucket (base case)',
+    '',
+    'Two measures of the same thing. On the evening of the first of each month, when the',
+    'provision job sets the allowance, every unpaid installment is recorded under the',
+    'delinquency bucket of its plan. And every unpaid installment is recorded once when its',
+    'plan first moves into a bucket. The roll rate is the share of that principal that was',
+    'later written off. All rent here is due on the first, so no plan is in the grace bucket on',
+    'a provision date: only the entry measure sees it. The reserve rates in',
+    '`src/servicing/policy.ts` are the first of the month rates for CURRENT, DELINQUENT, and',
+    'DEFAULT and the entry rate for GRACE, rounded up.',
+    '',
+    rollTable(e.base),
+    '',
+    ...sensitivitySection(e),
     ...challengerSection(e),
     '## Assumptions',
     '',
@@ -568,6 +669,15 @@ export function renderMarkdown(e: Evaluation): string {
           `${formatCents(ASSUMPTIONS.servicingCostCentsPerPlanMonth)} per plan-month`,
         ],
         ['Recovery on written off principal', pct(ASSUMPTIONS.recoveryRateBps, 0)],
+        [
+          'Returned debits',
+          `a debit the account cannot cover is booked as collected and reversed ${ASSUMPTIONS.returnDelayDays} days later (standard servicing only)`,
+        ],
+        [
+          'Counter offers',
+          'the product fronts a whole lease rent or nothing, so an approval below the rent requested opens no plan',
+        ],
+        ['Manual payment after failed collection', 'none (see the sensitivity)'],
         [
           'Manual review',
           `catches and declines ${pct(e.run.reviewFraudCatchRateBps, 0)} of referred fraud applicants; approves every other referral at the engine's terms`,
@@ -646,6 +756,9 @@ export function stableJson(value: unknown, printWidth = 100): string {
 function headline(m: PortfolioMetrics) {
   return {
     approvalRateBps: m.overall.approvalRateBps,
+    usableApprovalRateBps: m.overall.usableApprovalRateBps,
+    counterOffers: m.overall.counterOffers,
+    unusableCounterOffers: m.overall.unusableCounterOffers,
     referRateBps: m.overall.referRateBps,
     declineRateBps: m.declineRateBps,
     needsInfoRateBps: m.needsInfoRateBps,
@@ -669,6 +782,13 @@ function headline(m: PortfolioMetrics) {
     poolMinCents: m.pool.minCents,
     poolPeakUtilizationBps: m.pool.peakUtilizationBps,
     unfundedPayouts: m.pool.unfundedPayouts,
+    heldPayouts: m.overall.heldPayouts,
+    releasedPayouts: m.overall.releasedPayouts,
+    cancelledPayouts: m.overall.cancelledPayouts,
+    rollRateBpsByBucket: Object.fromEntries(m.bucketRoll.map((r) => [r.bucket, r.rollRateBps])),
+    entryRollRateBpsByBucket: Object.fromEntries(
+      m.bucketEntryRoll.map((r) => [r.bucket, r.rollRateBps]),
+    ),
     badRateBpsByGrade: Object.fromEntries(
       Object.entries(m.byGrade)
         .filter(([, g]) => g.plans > 0)
@@ -719,6 +839,11 @@ export function renderJson(e: Evaluation): string {
       swapSet: c.swapSet,
       metrics: c.metrics,
     })),
+    sensitivities: e.sensitivities.map((c) => ({
+      name: c.name,
+      description: c.description,
+      metrics: c.metrics,
+    })),
   });
 }
 
@@ -744,5 +869,9 @@ export function renderBaseline(e: Evaluation): string {
     headline: { base: headline(e.base), mild: headline(e.mild), severe: headline(e.severe) },
     gates: gateSummary(e.gates),
   };
-  return stableJson({ run: e.run, configurations });
+  // The same decisions and servicing as the gated configuration, with one assumption of the
+  // simulation changed. Recorded so a change to either shows up in the diff.
+  const sensitivities: Record<string, unknown> = {};
+  for (const c of e.sensitivities) sensitivities[c.name] = { base: headline(c.metrics) };
+  return stableJson({ run: e.run, configurations, sensitivities });
 }

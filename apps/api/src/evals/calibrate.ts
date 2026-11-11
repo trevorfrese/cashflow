@@ -161,6 +161,9 @@ function main(argv: string[]) {
       decide: (input) => decide(input, policy),
       servicing: STANDARD_SERVICING_POLICY,
       exposure: policy.exposure,
+      // The gated configuration: returns handled as the services handle them, and a whole
+      // lease rent or nothing (the simulator's default).
+      returnDelayDays: ASSUMPTIONS.returnDelayDays,
     });
     customers.push(...result.customers);
   }

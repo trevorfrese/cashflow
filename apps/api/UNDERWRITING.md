@@ -406,16 +406,20 @@ The `reunderwrite` job runs first in every job run. Once a calendar month it re-
 active plan on fresh bank data, with the plan's rent as the request, and stores the result as
 a decision of kind `PERIODIC_REVIEW` beside the origination decision (it does not replace
 it). When the result is a credit decline, or the score is below the watch threshold (50), the
-plan is frozen: `advanceFrozenAt` is set, no new rent period is generated, and no scheduled
-payout is paid. A period already paid out is not touched and is collected as normal.
+plan is frozen: `advanceFrozenAt` is set, no new rent period is generated, and a payout
+that falls due is held (`HELD`, reason `ADVANCE_FROZEN`). A period already paid out is not
+touched and is collected as normal.
 
 - Idempotent: one review per plan per month, enforced by a unique index.
 - A review needs fresh data. When the newest transaction is more than 7 days older than the
   review date the feed is stale, nothing is stored, and the next run tries again.
 - A decline for an origination rule (an exposure cap, the fee cap) does not freeze a customer
   who is repaying. Only deterioration does.
-- A freeze is not lifted automatically. Releasing it must not pay the periods skipped while
-  it was frozen, which needs the held payout handling of the servicing phase.
+- A freeze is not lifted automatically. A reviewer lifts it with
+  `POST /v1/admin/rent-plans/:id/release-freeze`. A payout held by the freeze is then paid
+  only if it is still within 5 days of its scheduled date. Otherwise it is cancelled, and a
+  month that went by while the plan was frozen is never paid late or generated afterwards.
+  See "Holds" in `ARCHITECTURE.md`.
 
 ## Audit log
 

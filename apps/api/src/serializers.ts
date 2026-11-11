@@ -27,8 +27,12 @@ import type {
   UnderwritingDecision,
   User,
 } from './generated/prisma/client.ts';
+import type { PlanStanding } from './services/delinquency.ts';
+import { releaseBy } from './services/payouts.ts';
+import { ACTIVE_SERVICING_POLICY } from './servicing/policy.ts';
 
 const iso = (d: Date) => d.toISOString();
+const isoOrNull = (d: Date | null) => (d ? d.toISOString() : null);
 
 export const toUser = (u: User): UserDto => ({
   id: u.id,
@@ -145,7 +149,12 @@ export const toLease = (l: Lease): LeaseDto => ({
   updatedAt: iso(l.updatedAt),
 });
 
-export const toRentPlan = (p: RentPlan): RentPlanDto => ({
+/**
+ * A plan as its owner sees it. `standing` is derived from the installments as of today by
+ * `planStandings`. Leaving it out is right only for a plan that cannot owe anything yet (one
+ * that was just created): it then reads as current.
+ */
+export const toRentPlan = (p: RentPlan, standing?: PlanStanding): RentPlanDto => ({
   id: p.id,
   businessId: p.businessId,
   leaseId: p.leaseId,
@@ -156,6 +165,12 @@ export const toRentPlan = (p: RentPlan): RentPlanDto => ({
   dueDayOfMonth: p.dueDayOfMonth,
   status: p.status,
   advanceFrozen: p.advanceFrozenAt !== null,
+  delinquencyStatus: standing?.delinquencyStatus ?? p.delinquencyStatus,
+  daysPastDue: standing?.daysPastDue ?? 0,
+  pastDueCents: standing?.pastDueCents ?? 0,
+  needsPayment: standing?.needsPayment ?? false,
+  closedAt: isoOrNull(p.closedAt),
+  closedReason: p.closedReason,
   createdAt: iso(p.createdAt),
   updatedAt: iso(p.updatedAt),
 });
@@ -170,6 +185,11 @@ export const toPayout = (p: LandlordPayout): PayoutDto => ({
   paidAt: p.paidAt ? iso(p.paidAt) : null,
   providerRef: p.providerRef,
   failureReason: p.failureReason,
+  heldReason: p.heldReason as PayoutDto['heldReason'],
+  heldAt: isoOrNull(p.heldAt),
+  releaseBy: p.status === 'HELD' ? releaseBy(p.scheduledFor) : null,
+  cancelledAt: isoOrNull(p.cancelledAt),
+  returnCode: p.returnCode,
 });
 
 export const toInstallment = (i: Installment): InstallmentDto => ({
@@ -184,6 +204,11 @@ export const toInstallment = (i: Installment): InstallmentDto => ({
   dueDate: i.dueDate,
   status: i.status,
   paidAt: i.paidAt ? iso(i.paidAt) : null,
+  chargedOffAt: isoOrNull(i.chargedOffAt),
+  attempts: i.attemptCount,
+  maxAttempts: ACTIVE_SERVICING_POLICY.retry.maxAttempts,
+  collectionSkipReason: i.collectionSkipReason,
+  collectionSkippedOn: i.collectionSkippedOn,
 });
 
 export const toRepayment = (r: Repayment): RepaymentDto => ({
@@ -194,6 +219,8 @@ export const toRepayment = (r: Repayment): RepaymentDto => ({
   providerRef: r.providerRef,
   status: r.status,
   failureReason: r.failureReason,
+  returnCode: r.returnCode,
+  returnedAt: isoOrNull(r.returnedAt),
   createdAt: iso(r.createdAt),
 });
 

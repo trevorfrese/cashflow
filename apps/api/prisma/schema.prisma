@@ -335,23 +335,40 @@ enum RentPlanStatus {
 
 enum PayoutStatus {
   SCHEDULED
-  PROCESSING
+  /// Due, but not paid while something holds it. Released or cancelled by the payout job.
+  HELD
   PAID
   FAILED
+  /// Never paid and never will be. Its installments are VOIDED.
+  CANCELLED
 }
 
 enum InstallmentStatus {
   SCHEDULED
-  COLLECTING
   PAID
   FAILED
   LATE
+  /// Written off. Still owed: a later payment is booked as a recovery.
+  CHARGED_OFF
+  /// Never owed: the landlord payout was cancelled or came back.
+  VOIDED
 }
 
 enum RepaymentStatus {
-  PENDING
   SUCCEEDED
   FAILED
+  /// The debit went through and the bank later sent it back.
+  RETURNED
+}
+
+/// Where a plan stands, from the age of its oldest unpaid installment. Boundaries live in
+/// `src/servicing/policy.ts`.
+enum DelinquencyStatus {
+  CURRENT
+  GRACE
+  DELINQUENT
+  DEFAULT
+  CHARGED_OFF
 }
 
 model RentPlan {
@@ -367,11 +384,19 @@ model RentPlan {
   monthlyRentCents     Int
   dueDayOfMonth        Int
   status               RentPlanStatus          @default(ACTIVE)
-  /// Set by the re-underwriting job when a periodic review falls below the watch threshold.
-  /// While set, no new rent period is generated or paid to the landlord. Periods already
-  /// paid out are still collected.
+  /// Set by the re-underwriting job when a periodic review falls below the watch threshold,
+  /// by an unauthorized return, or by a returned landlord payout. While set, no new rent
+  /// period is generated and a payout that falls due is held. Periods already paid out are
+  /// still collected. Cleared only by a reviewer.
   advanceFrozenAt      DateTime?
   advanceFrozenReason  String?
+  /// The delinquency bucket as of the last aging run or payment. Stored because a change of
+  /// bucket is an event (it is audited, and provisioning and the ops summary group by it).
+  /// Days past due is not stored: it is derived from the oldest unpaid installment on read.
+  delinquencyStatus    DelinquencyStatus       @default(CURRENT)
+  closedAt             DateTime?
+  /// For example CHARGED_OFF.
+  closedReason         String?
   createdAt            DateTime                @default(now())
   updatedAt            DateTime                @updatedAt
 
@@ -380,6 +405,7 @@ model RentPlan {
 
   @@index([businessId])
   @@index([status])
+  @@index([delinquencyStatus])
 }
 
 model LandlordPayout {
@@ -393,6 +419,13 @@ model LandlordPayout {
   paidAt        DateTime?
   providerRef   String?
   failureReason String?
+  /// PAST_DUE, ADVANCE_FROZEN, PLAN_PAUSED, PLAN_CLOSED, NOT_PAID_IN_TIME. Kept on a
+  /// cancelled payout as the reason it was never paid. Cleared when a held payout is paid.
+  heldReason    String?
+  heldAt        DateTime?
+  cancelledAt   DateTime?
+  /// Bank return code when a paid payout came back, for example R03.
+  returnCode    String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
@@ -400,24 +433,35 @@ model LandlordPayout {
 
   @@unique([rentPlanId, periodMonth])
   @@index([status, scheduledFor])
+  @@index([providerRef])
 }
 
 model Installment {
-  id             String            @id @default(cuid())
-  rentPlanId     String
-  rentPlan       RentPlan          @relation(fields: [rentPlanId], references: [id], onDelete: Cascade)
-  payoutId       String
-  payout         LandlordPayout    @relation(fields: [payoutId], references: [id], onDelete: Cascade)
-  periodMonth    String // YYYY-MM
-  sequence       Int
-  principalCents Int
-  feeCents       Int
-  totalCents     Int
-  dueDate        String // YYYY-MM-DD
-  status         InstallmentStatus @default(SCHEDULED)
-  paidAt         DateTime?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  id                   String            @id @default(cuid())
+  rentPlanId           String
+  rentPlan             RentPlan          @relation(fields: [rentPlanId], references: [id], onDelete: Cascade)
+  payoutId             String
+  payout               LandlordPayout    @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+  periodMonth          String // YYYY-MM
+  sequence             Int
+  principalCents       Int
+  feeCents             Int
+  totalCents           Int
+  dueDate              String // YYYY-MM-DD
+  status               InstallmentStatus @default(SCHEDULED)
+  paidAt               DateTime?
+  /// Set when written off. Stays set when the installment is paid later (a recovery).
+  chargedOffAt         DateTime?
+  /// Debits presented to `attemptBankLinkId` so far, failed or returned. A debit put off by
+  /// the balance check is not an attempt. Starts again from zero on a new bank link.
+  attemptCount         Int               @default(0)
+  lastAttemptOn        String? // YYYY-MM-DD
+  attemptBankLinkId    String?
+  /// Why the last scheduled debit was put off (INSUFFICIENT_BALANCE, NO_BANK_LINK), and when.
+  collectionSkipReason String?
+  collectionSkippedOn  String? // YYYY-MM-DD
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
   repayments Repayment[]
 
@@ -434,9 +478,19 @@ model Repayment {
   providerRef   String?
   status        RepaymentStatus
   failureReason String?
+  /// The bank link that was debited. Null when there was none to debit.
+  bankLinkId    String?
+  /// Bank return code on a failed or returned debit, for example R01.
+  returnCode    String?
+  returnedAt    DateTime?
+  /// The owner asked for this payment, as opposed to the collection job.
+  manual        Boolean         @default(false)
+  /// Booked as a recovery: the installment had been written off.
+  recovery      Boolean         @default(false)
   createdAt     DateTime        @default(now())
 
   @@index([installmentId])
+  @@index([providerRef])
 }
 
 // ---------- Ledger ----------
@@ -456,7 +510,8 @@ enum LedgerDirection {
 
 model LedgerAccount {
   id        String            @id @default(cuid())
-  /// Stable code such as "capital_pool", "cash", "fee_revenue", "receivable:<businessId>".
+  /// Stable code such as "capital_pool", "cash", "fee_revenue", "allowance:credit_losses",
+  /// "receivable:<businessId>".
   code      String            @unique
   name      String
   type      LedgerAccountType
@@ -476,11 +531,16 @@ model LedgerTransaction {
   referenceId    String?
   /// Guards against double posting for the same business event.
   idempotencyKey String?  @unique
+  /// When the row was written.
   postedAt       DateTime @default(now())
+  /// The calendar date the movement belongs to, YYYY-MM-DD. Differs from `postedAt` when
+  /// history is replayed with `job:run --as-of`.
+  effectiveDate  String
 
   entries LedgerEntry[]
 
   @@index([referenceType, referenceId])
+  @@index([effectiveDate])
 }
 
 model LedgerEntry {

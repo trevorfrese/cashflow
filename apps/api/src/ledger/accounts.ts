@@ -11,6 +11,17 @@ export const ACCOUNTS = {
   FEE_REVENUE: 'fee_revenue',
   /** Where the pool's money came from (investors, a credit facility). Equity. */
   POOL_EQUITY: 'pool_equity',
+  /**
+   * Allowance for credit losses: the part of receivables not expected to be repaid. A contra
+   * asset: typed ASSET with a credit balance, so its natural balance reads negative and
+   * receivables plus the allowance is the net receivable. Built by the provision job,
+   * drawn down by charge-offs.
+   */
+  ALLOWANCE: 'allowance:credit_losses',
+  /** Cost of building the allowance. Expense. */
+  PROVISION_EXPENSE: 'provision_expense',
+  /** Payments received on balances already written off. Revenue. */
+  RECOVERY_INCOME: 'recovery_income',
 } as const;
 
 export const SYSTEM_ACCOUNTS: ReadonlyArray<{
@@ -22,7 +33,13 @@ export const SYSTEM_ACCOUNTS: ReadonlyArray<{
   { code: ACCOUNTS.CASH, name: 'Operating cash', type: 'ASSET' },
   { code: ACCOUNTS.FEE_REVENUE, name: 'Fee revenue', type: 'REVENUE' },
   { code: ACCOUNTS.POOL_EQUITY, name: 'Pool capital', type: 'EQUITY' },
+  { code: ACCOUNTS.ALLOWANCE, name: 'Allowance for credit losses', type: 'ASSET' },
+  { code: ACCOUNTS.PROVISION_EXPENSE, name: 'Provision for credit losses', type: 'EXPENSE' },
+  { code: ACCOUNTS.RECOVERY_INCOME, name: 'Recoveries on charged off balances', type: 'REVENUE' },
 ];
+
+/** Prefix shared by every per business receivable account. */
+export const RECEIVABLE_PREFIX = 'receivable:';
 
 export function receivableCode(businessId: string): string {
   return `receivable:${businessId}`;

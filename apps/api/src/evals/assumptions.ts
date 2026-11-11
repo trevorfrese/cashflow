@@ -54,6 +54,28 @@ export const ASSUMPTIONS = {
    */
   maxFundingWaitMonths: 3,
 
+  /**
+   * Days between a debit that the account could not cover and the bank's return reaching
+   * CashFlow. Until then the debit is booked as collected, exactly as the services book it,
+   * and the reconcile job reverses it. Two banking days is the network deadline for an
+   * insufficient funds return. Not applied to the baseline servicing policy, which describes
+   * the services before they handled returns.
+   */
+  returnDelayDays: 2,
+
+  /**
+   * Manual payment sensitivity, reported beside the gated numbers and never part of them.
+   * The gated run assumes a balance that automatic debits never collect is never paid any
+   * other way. The sensitivity assumes instead that, of the installments still unpaid once
+   * the scheduled retries are over (day 7), the owner of a business that is still trading
+   * pays this share by hand, from money outside the business account, on a day spread evenly
+   * between day 7 and day 30 past due. 30% is an assumption with no data behind it: it is
+   * there to show how much the gated loss figure depends on assuming zero.
+   */
+  manualPaymentShareBps: 3000,
+  manualPaymentFirstDay: 7,
+  manualPaymentLastDay: 30,
+
   /** A plan is "bad" if any installment reaches this many days past due, or is written off. */
   badDaysPastDue: 30,
 

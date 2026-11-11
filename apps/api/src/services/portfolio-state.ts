@@ -3,9 +3,9 @@ import { addDays, type IsoDate } from '@cashflow/shared';
 import type { Tx } from '../db.ts';
 import type { BankLink, Business, Lease } from '../generated/prisma/client.ts';
 import { ACCOUNTS } from '../ledger/accounts.ts';
-import { accountBalance } from '../ledger/service.ts';
+import { accountBalance, receivablesBalance } from '../ledger/service.ts';
 import type { Providers } from '../providers/index.ts';
-import { STANDARD_SERVICING_POLICY } from '../servicing/policy.ts';
+import { ACTIVE_SERVICING_POLICY } from '../servicing/policy.ts';
 import type { ExposureContext, PoolState } from '../underwriting/exposure.ts';
 import { landlordIsApplicant, type IntegrityContext } from '../underwriting/integrity.ts';
 
@@ -22,29 +22,32 @@ import { landlordIsApplicant, type IntegrityContext } from '../underwriting/inte
 /** A plan counts toward exposure while it can still draw a landlord payout. */
 const COMMITTED_STATUSES = ['ACTIVE', 'PAUSED'] as const;
 
-/** Pool cash from the capital provider and the ledger, receivables from the ledger. */
+/**
+ * Pool cash from the capital provider and the ledger, receivables from the ledger.
+ *
+ * Receivables are gross: the sum of the per business receivable accounts, before the
+ * allowance for credit losses. The exposure rules measure how much of the pool is out, and
+ * a reserve is an estimate of loss, not money that has come back, so it is not netted off.
+ * A written off balance is different: the charge-off posting takes it out of the receivable
+ * account, so it stops counting as capital here the day it is written off. A closed plan is
+ * not committed, so a written off plan drops out of committed rent the same day. The
+ * portfolio simulator keeps the same three numbers the same way.
+ */
 export async function gatherPoolState(tx: Tx, providers: Providers): Promise<PoolState> {
-  const [available, operatingCash, receivableEntries, committed] = await Promise.all([
+  const [available, operatingCash, receivableCents, committed] = await Promise.all([
     providers.capital.availableCents(tx),
     accountBalance(tx, ACCOUNTS.CASH),
-    // Receivables are asset accounts, one per business: debits less credits is what is owed.
-    tx.ledgerEntry.groupBy({
-      by: ['direction'],
-      where: { account: { code: { startsWith: 'receivable:' } } },
-      _sum: { amountCents: true },
-    }),
+    receivablesBalance(tx),
     tx.rentPlan.aggregate({
       where: { status: { in: [...COMMITTED_STATUSES] } },
       _sum: { monthlyRentCents: true },
     }),
   ]);
-  const receivableCents = receivableEntries.reduce(
-    (sum, row) => sum + (row.direction === 'DEBIT' ? 1 : -1) * (row._sum.amountCents ?? 0),
-    0,
-  );
   return {
     // Collected cash not yet swept is pool money too.
     cashCents: available + operatingCash,
+    // A returned payout whose installments were already collected leaves a credit on one
+    // business's account. It nets against the others; the total never reads below zero.
     receivableCents: Math.max(0, receivableCents),
     committedCents: committed._sum.monthlyRentCents ?? 0,
   };
@@ -53,13 +56,28 @@ export async function gatherPoolState(tx: Tx, providers: Providers): Promise<Poo
 /**
  * Rent periods a business has repaid in full with every installment inside the grace
  * period. This is what moves it up the limit ladder.
+ *
+ * A period counts only if no payment on it ever came back. An installment whose debit was
+ * returned and then collected again inside grace is paid, but it is not a clean period: the
+ * first payment bounced. And a payment that is returned after it was counted stops counting
+ * at once, because this is computed from the rows on every read.
  */
 export async function countOnTimePeriods(tx: Tx, businessId: string): Promise<number> {
   const payouts = await tx.landlordPayout.findMany({
     where: { status: 'PAID', rentPlan: { businessId } },
-    select: { installments: { select: { status: true, dueDate: true, paidAt: true } } },
+    select: {
+      installments: {
+        select: {
+          status: true,
+          dueDate: true,
+          paidAt: true,
+          chargedOffAt: true,
+          repayments: { where: { status: 'RETURNED' }, select: { id: true }, take: 1 },
+        },
+      },
+    },
   });
-  const grace = STANDARD_SERVICING_POLICY.lateGraceDays;
+  const grace = ACTIVE_SERVICING_POLICY.lateGraceDays;
   return payouts.filter(
     (p) =>
       p.installments.length > 0 &&
@@ -67,6 +85,8 @@ export async function countOnTimePeriods(tx: Tx, businessId: string): Promise<nu
         (i) =>
           i.status === 'PAID' &&
           i.paidAt !== null &&
+          i.chargedOffAt === null &&
+          i.repayments.length === 0 &&
           (i.paidAt.toISOString().slice(0, 10) as IsoDate) <= addDays(i.dueDate, grace),
       ),
   ).length;

@@ -8,6 +8,7 @@ import {
 
 import type { CashFlowSummary } from '@cashflow/shared';
 
+import { effectiveAt } from '../dates.ts';
 import type { Db, Tx } from '../db.ts';
 import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { ensureReceivableAccount } from '../ledger/accounts.ts';
@@ -90,6 +91,9 @@ export async function ensureUpcomingPeriods(
   let nextDue: IsoDate = latest
     ? followingDueDate(latest.scheduledFor, plan.dueDayOfMonth)
     : nextRentDueDate(plan.dueDayOfMonth, plan.startsOn > asOf ? plan.startsOn : asOf);
+  // A month that went by while the plan was paused or frozen is not fronted afterwards: the
+  // business has paid that rent itself. Scheduling starts again from the next due date.
+  while (nextDue < asOf) nextDue = followingDueDate(nextDue, plan.dueDayOfMonth);
 
   let created = 0;
   while (nextDue <= horizon) {
@@ -131,6 +135,10 @@ export async function createRentPlan(
     if (!lease) throw notFound('Lease');
     if (lease.business.ownerUserId !== args.userId) throw forbidden();
     if (lease.status !== 'ACTIVE') throw unprocessable('LEASE_NOT_ACTIVE', 'Lease is not active');
+    // Suspended by a charge-off: no new plan on any lease.
+    if (lease.business.status === 'SUSPENDED') {
+      throw unprocessable('BUSINESS_SUSPENDED', 'This business cannot open a new rent plan');
+    }
 
     const application = await tx.underwritingApplication.findUnique({
       where: { id: args.applicationId },
@@ -230,8 +238,46 @@ export async function createRentPlan(
         feeBps: plan.feeBps,
         installmentsPerMonth: plan.installmentsPerMonth,
       },
+      at: effectiveAt(args.asOf),
     });
 
     return plan;
+  });
+}
+
+/**
+ * A reviewer lifts a freeze (set by a periodic review, an unauthorized return, a returned
+ * landlord payout, or a charge-off on another of the business's plans). From the next job
+ * run the plan is scheduled again, and a payout held by the freeze is paid if it is still
+ * inside the release window. A payout whose window has passed is cancelled, never paid
+ * late, and months that went by while frozen are not made up.
+ */
+export async function releaseAdvanceFreeze(
+  db: Db,
+  args: { planId: string; reviewer: string; reason: string },
+) {
+  return db.$transaction(async (tx) => {
+    const plan = await tx.rentPlan.findUnique({ where: { id: args.planId } });
+    if (!plan) throw notFound('Rent plan');
+    if (plan.status === 'CLOSED') throw unprocessable('PLAN_CLOSED', 'This plan is closed');
+    if (plan.advanceFrozenAt === null) {
+      throw unprocessable('PLAN_NOT_FROZEN', 'This plan is not frozen');
+    }
+    const updated = await tx.rentPlan.update({
+      where: { id: plan.id },
+      data: { advanceFrozenAt: null, advanceFrozenReason: null },
+    });
+    await recordAudit(tx, {
+      actor: { type: 'reviewer', id: args.reviewer },
+      eventType: 'PLAN_ADVANCE_RELEASED',
+      subjectType: 'rent_plan',
+      subjectId: plan.id,
+      payload: {
+        frozenAt: plan.advanceFrozenAt.toISOString(),
+        frozenReason: plan.advanceFrozenReason,
+        reason: args.reason,
+      },
+    });
+    return updated;
   });
 }

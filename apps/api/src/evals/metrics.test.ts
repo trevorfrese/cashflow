@@ -13,7 +13,7 @@ import {
   segmentMetrics,
   swapSet,
 } from './metrics.ts';
-import type { CustomerResult, PortfolioResult } from './portfolio.ts';
+import { emptyBucketRoll, type CustomerResult, type PortfolioResult } from './portfolio.ts';
 
 const COSTS = { costOfFundsAprBps: 1200, servicingCostCentsPerPlanMonth: 1200 };
 
@@ -83,6 +83,8 @@ function portfolio(customers: CustomerResult[], label = 'base'): PortfolioResult
     unfundedPayoutDays: 0,
     plansDelayed: 0,
     plansNeverFunded: 0,
+    bucketRoll: emptyBucketRoll(),
+    bucketEntryRoll: emptyBucketRoll(),
     pool: [
       {
         month: '2026-02',

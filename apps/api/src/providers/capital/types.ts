@@ -1,3 +1,5 @@
+import type { IsoDate } from '@cashflow/shared';
+
 import type { Tx } from '../../db.ts';
 
 export class InsufficientCapitalError extends Error {
@@ -27,6 +29,6 @@ export interface CapitalProvider {
    * The actual movement is recorded by the caller's ledger posting (receivable debit, pool credit).
    */
   reserve(tx: Tx, amountCents: number, reference: string): Promise<void>;
-  /** Adds capital to the pool, recorded as pool equity. */
-  fund(tx: Tx, amountCents: number, description: string): Promise<void>;
+  /** Adds capital to the pool, recorded as pool equity, dated `effectiveDate` (default today). */
+  fund(tx: Tx, amountCents: number, description: string, effectiveDate?: IsoDate): Promise<void>;
 }

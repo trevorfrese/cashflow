@@ -87,7 +87,8 @@ export default function RentSettings() {
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text variant="heading">Pause rent splitting</Text>
             <Text variant="caption" tone="muted">
-              CashFlow stops paying the landlord and collecting until you resume.
+              CashFlow stops paying your landlord until you resume. Rent already paid for you is
+              still collected on schedule.
             </Text>
           </View>
           <Toggle

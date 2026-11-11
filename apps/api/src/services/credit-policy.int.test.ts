@@ -656,6 +656,7 @@ describe('audit log and append-only guards', () => {
     await h.db.$transaction((tx) =>
       postTransaction(tx, {
         description: 'Test: more capital',
+        effectiveDate: todayIso(),
         entries: [
           { accountCode: ACCOUNTS.CAPITAL_POOL, direction: 'DEBIT', amountCents: 500 },
           { accountCode: ACCOUNTS.POOL_EQUITY, direction: 'CREDIT', amountCents: 500 },
@@ -772,15 +773,16 @@ describe('periodic re-underwriting', () => {
     expect(installments.map((i) => i.status)).toEqual(['PAID', 'PAID']);
 
     // The next period is not paid, and no further period is generated.
-    expect(two.processPayouts.summary).toMatchObject({ paid: 0 });
+    expect(two.processPayouts.summary).toMatchObject({ paid: 0, held: 1 });
     expect(two.generatePeriods.summary).toMatchObject({ plans: 0, periodsCreated: 0 });
     const payouts = await h.db.landlordPayout.findMany({
       where: { rentPlanId: planId },
       orderBy: { scheduledFor: 'asc' },
     });
-    expect(payouts.map((p) => [p.scheduledFor, p.status])).toEqual([
-      [firstDue, 'PAID'],
-      [secondDue, 'SCHEDULED'],
+    // The payout that fell due under the freeze is held, where the owner can see why.
+    expect(payouts.map((p) => [p.scheduledFor, p.status, p.heldReason])).toEqual([
+      [firstDue, 'PAID', null],
+      [secondDue, 'HELD', 'ADVANCE_FROZEN'],
     ]);
 
     // Running the same date again changes nothing.
@@ -801,9 +803,15 @@ describe('periodic re-underwriting', () => {
       periodicReview: { planId, period: secondDue.slice(0, 7), watchReason: expect.any(String) },
     });
 
+    // Held once: the repeat run did not write a second event. This test runs the jobs only
+    // on the two rent dates, so the second installment of month one (due on the 15th) is
+    // found 17 days past due by the aging job, and is collected later in the same run.
     await expect(auditTypes('rent_plan', planId)).resolves.toEqual([
       'PLAN_CREATED',
       'PLAN_ADVANCE_FROZEN',
+      'DELINQUENCY_CHANGED',
+      'PAYOUT_HELD',
+      'DELINQUENCY_CHANGED',
     ]);
     // The applicant's own decision is untouched.
     const application = await api.get<ApplicationBody>(

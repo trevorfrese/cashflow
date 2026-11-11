@@ -70,7 +70,7 @@ export function watchReason(result: EngineResult, policy: CreditPolicy): string 
 /**
  * Re-score one active plan as of `asOf` and store the result. A result below the watch
  * threshold, or a credit decline, freezes the plan: `advanceFrozenAt` is set, and from then
- * on no new period is generated and no scheduled payout is paid. Rent already paid to the
+ * on no new period is generated and a payout that falls due is held. Rent already paid to the
  * landlord is still collected. Runs at most once per plan per
  * calendar month: the review is keyed by application and month, and the database enforces
  * that with a unique index, so a concurrent second run cannot double up either.
@@ -194,6 +194,7 @@ export async function reunderwritePlan(
         grade: result.grade,
         watchReason: reason,
       },
+      at: effectiveAt(asOf),
     });
     if (freeze && !wasFrozen) {
       await tx.rentPlan.update({
@@ -206,6 +207,7 @@ export async function reunderwritePlan(
         subjectType: 'rent_plan',
         subjectId: plan.id,
         payload: { decisionId: decision.id, period, reason, score: result.score },
+        at: effectiveAt(asOf),
       });
       ctx.log.warn(
         { planId: plan.id, reason, score: result.score },
@@ -214,8 +216,9 @@ export async function reunderwritePlan(
     }
     if (unscored) return 'unscored';
     // A freeze is not lifted here. A later review that passes is stored like any other, and
-    // releasing the plan is a reviewer's call: the periods skipped while it was frozen must
-    // not be paid late, which needs the held payout handling that comes with Phase R3.
+    // releasing the plan is a reviewer's call (`releaseAdvanceFreeze`). While frozen, a
+    // payout that falls due is HELD and then cancelled once its release window has passed,
+    // so a period skipped by a freeze is never paid late.
     return freeze || wasFrozen ? 'frozen' : 'ok';
   });
 }

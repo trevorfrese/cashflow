@@ -27,7 +27,7 @@ pnpm dev          # API :4000, web :3000
 pnpm dev:mobile   # Expo dev server, second terminal
 ```
 
-Sign in with the seeded demo account, `demo@cashflow.local` / `demo-password-123`. It owns three businesses: one with an active $10,000 rent plan and payment history, one declined for overdrafts, and one that still needs a bank. Or register and pick a sandbox bank scenario to walk through every underwriting outcome.
+Sign in with the seeded demo account, `demo@cashflow.local` / `demo-password-123`. It owns five businesses: one with an active $10,000 rent plan and payment history, one that has fallen behind and has a landlord payout on hold, one whose plan was charged off and closed, one declined for overdrafts, and one that still needs a bank. Or register and pick a sandbox bank scenario to walk through every underwriting outcome.
 
 Other commands: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm db:reset`, and `pnpm --filter @cashflow/api job:run --as-of YYYY-MM-DD` to run the payout and collection jobs for a given day.
 

@@ -1,10 +1,16 @@
-import type { AccountBalance, TrialBalance } from '@cashflow/shared';
+import type { AccountBalance, IsoDate, TrialBalance } from '@cashflow/shared';
 
 import type { Tx } from '../db.ts';
+import { ACCOUNTS, RECEIVABLE_PREFIX } from './accounts.ts';
 import { naturalBalance, validateEntries, type EntryInput } from './validate.ts';
 
 export interface PostTransactionInput {
   description: string;
+  /**
+   * The calendar date the movement belongs to: the job's as-of date, or today for a request.
+   * `postedAt` records when the row was written, so replayed history keeps both.
+   */
+  effectiveDate: IsoDate;
   referenceType?: string;
   referenceId?: string;
   /** Prevents double posting for the same business event. Strongly recommended. */
@@ -41,6 +47,7 @@ export async function postTransaction(tx: Tx, input: PostTransactionInput) {
       referenceType: input.referenceType ?? null,
       referenceId: input.referenceId ?? null,
       idempotencyKey: input.idempotencyKey ?? null,
+      effectiveDate: input.effectiveDate,
       entries: {
         create: input.entries.map((e) => ({
           accountId: byCode.get(e.accountCode)!.id,
@@ -77,6 +84,55 @@ export async function accountBalance(tx: Tx, code: string): Promise<number> {
   if (!account) return 0;
   const { debitsCents, creditsCents } = await sumsFor(tx, account.id);
   return naturalBalance(account.type, debitsCents, creditsCents);
+}
+
+/** A posted transaction with its entries and their account codes, or null. */
+export function findTransactionByKey(tx: Tx, idempotencyKey: string) {
+  return tx.ledgerTransaction.findUnique({
+    where: { idempotencyKey },
+    include: { entries: { include: { account: { select: { code: true } } } } },
+  });
+}
+
+/**
+ * Posts the mirror image of an earlier transaction: every debit becomes a credit and every
+ * credit a debit. Ledger rows are append-only, so this is how a returned payment is undone.
+ * Idempotent on `idempotencyKey`. Throws if the original was never posted.
+ */
+export async function reverseTransaction(
+  tx: Tx,
+  originalKey: string,
+  input: Omit<PostTransactionInput, 'entries'> & { idempotencyKey: string },
+) {
+  const original = await findTransactionByKey(tx, originalKey);
+  if (!original) throw new Error(`No ledger transaction to reverse: ${originalKey}`);
+  return postTransaction(tx, {
+    ...input,
+    entries: original.entries.map((e) => ({
+      accountCode: e.account.code,
+      direction: e.direction === 'DEBIT' ? ('CREDIT' as const) : ('DEBIT' as const),
+      amountCents: e.amountCents,
+    })),
+  });
+}
+
+/** Sum of every per business receivable account: principal owed and not written off. */
+export async function receivablesBalance(tx: Tx): Promise<number> {
+  const grouped = await tx.ledgerEntry.groupBy({
+    by: ['direction'],
+    where: { account: { code: { startsWith: RECEIVABLE_PREFIX } } },
+    _sum: { amountCents: true },
+  });
+  return grouped.reduce(
+    (sum, row) => sum + (row.direction === 'DEBIT' ? 1 : -1) * (row._sum.amountCents ?? 0),
+    0,
+  );
+}
+
+/** The allowance for credit losses as a positive number (it is a contra asset). */
+export async function allowanceBalance(tx: Tx): Promise<number> {
+  const natural = await accountBalance(tx, ACCOUNTS.ALLOWANCE);
+  return natural === 0 ? 0 : -natural;
 }
 
 export async function trialBalance(tx: Tx): Promise<TrialBalance> {

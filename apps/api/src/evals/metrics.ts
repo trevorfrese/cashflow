@@ -1,7 +1,14 @@
 import type { CreditGrade } from '@cashflow/shared';
 
 import { ASSUMPTIONS } from './assumptions.ts';
-import type { CustomerResult, PoolMonth, PortfolioResult } from './portfolio.ts';
+import { OPEN_BUCKETS, type OpenBucket } from '../servicing/policy.ts';
+import {
+  emptyBucketRoll,
+  type BucketRoll,
+  type CustomerResult,
+  type PoolMonth,
+  type PortfolioResult,
+} from './portfolio.ts';
 
 /**
  * Portfolio metrics, computed from simulation output only. Money is integer cents; rates are
@@ -32,6 +39,24 @@ export interface SegmentMetrics {
   /** Approved, but the pool had no room within the wait limit. */
   neverFunded: number;
   approvalRateBps: number;
+  /** Approved for less than the rent requested. */
+  counterOffers: number;
+  /** Counter offers that opened no plan, because the product fronts a whole rent or nothing. */
+  unusableCounterOffers: number;
+  /**
+   * Approved with terms the applicant can use: approvals less unusable counter offers, over
+   * applicants. Equal to `approvalRateBps` when counter offers are fronted in part. The
+   * approval floor gate judges this one.
+   */
+  usableApprovalRateBps: number;
+  /** Payouts held for at least a day, and what became of them. */
+  heldPayouts: number;
+  releasedPayouts: number;
+  cancelledPayouts: number;
+  /** Debits returned for insufficient funds, and scheduled debits put off by the balance check. */
+  failedDebits: number;
+  deferredDebits: number;
+  manualPayments: number;
   /** Approved applicants with at least one landlord payout. */
   plans: number;
   planMonths: number;
@@ -117,6 +142,27 @@ export interface PortfolioMetrics {
   honest: SegmentMetrics;
   pool: PoolMetrics;
   concentration: Concentration;
+  /** Share of principal seen in each bucket at a provision date that was later written off. */
+  bucketRoll: BucketRollRow[];
+  /** The same, for principal recorded once when its plan first moved into each bucket. */
+  bucketEntryRoll: BucketRollRow[];
+}
+
+export interface BucketRollRow {
+  bucket: OpenBucket;
+  observedCents: number;
+  chargedOffCents: number;
+  /** Written off as a share of observed, in bps. Zero when nothing was observed. */
+  rollRateBps: number;
+}
+
+export function bucketRollRows(roll: BucketRoll): BucketRollRow[] {
+  return OPEN_BUCKETS.map((bucket) => ({
+    bucket,
+    observedCents: roll[bucket].observedCents,
+    chargedOffCents: roll[bucket].chargedOffCents,
+    rollRateBps: bps(roll[bucket].chargedOffCents, roll[bucket].observedCents),
+  }));
 }
 
 function bps(numerator: number, denominator: number): number {
@@ -155,6 +201,15 @@ export function segmentMetrics(
     autoApproved: 0,
     neverFunded: 0,
     approvalRateBps: 0,
+    counterOffers: 0,
+    unusableCounterOffers: 0,
+    usableApprovalRateBps: 0,
+    heldPayouts: 0,
+    releasedPayouts: 0,
+    cancelledPayouts: 0,
+    failedDebits: 0,
+    deferredDebits: 0,
+    manualPayments: 0,
     plans: 0,
     planMonths: 0,
     volumeCents: 0,
@@ -182,6 +237,14 @@ export function segmentMetrics(
     if (c.referred) m.referred += 1;
     else if (c.outcome === 'APPROVED') m.autoApproved += 1;
     if (c.neverFunded) m.neverFunded += 1;
+    if (c.outcome === 'APPROVED' && c.counterOffer) m.counterOffers += 1;
+    if (c.unusableCounterOffer) m.unusableCounterOffers += 1;
+    m.heldPayouts += c.heldPayouts;
+    m.releasedPayouts += c.releasedPayouts;
+    m.cancelledPayouts += c.cancelledPayouts;
+    m.failedDebits += c.failedDebits;
+    m.deferredDebits += c.deferredDebits;
+    m.manualPayments += c.manualPayments;
     if (c.payoutCount === 0) continue;
     m.plans += 1;
     m.planMonths += c.payoutCount;
@@ -197,6 +260,7 @@ export function segmentMetrics(
     if (customerNetMarginCents(c, costs) > 0) profitable += 1;
   }
   m.approvalRateBps = bps(m.approved, m.applicants);
+  m.usableApprovalRateBps = bps(m.approved - m.unusableCounterOffers, m.applicants);
   m.referRateBps = bps(m.referred, m.applicants);
   m.netLossCents = m.chargeOffCents - m.recoveryCents;
   m.netLossBps = bps(m.netLossCents, m.volumeCents);
@@ -344,10 +408,23 @@ export function poolResults(results: readonly PortfolioResult[]): PortfolioResul
     unfundedPayoutDays: results.reduce((sum, r) => sum + r.unfundedPayoutDays, 0),
     plansDelayed: results.reduce((sum, r) => sum + r.plansDelayed, 0),
     plansNeverFunded: results.reduce((sum, r) => sum + r.plansNeverFunded, 0),
+    bucketRoll: sumRolls(results.map((r) => r.bucketRoll)),
+    bucketEntryRoll: sumRolls(results.map((r) => r.bucketEntryRoll)),
     customers: results.flatMap((r, i) =>
       r.customers.map((c) => ({ ...c, applicantId: `${i}:${c.applicantId}` })),
     ),
   };
+}
+
+function sumRolls(rolls: readonly BucketRoll[]): BucketRoll {
+  const total = emptyBucketRoll();
+  for (const roll of rolls) {
+    for (const bucket of OPEN_BUCKETS) {
+      total[bucket].observedCents += roll[bucket].observedCents;
+      total[bucket].chargedOffCents += roll[bucket].chargedOffCents;
+    }
+  }
+  return total;
 }
 
 export function concentration(byIndustry: Record<string, SegmentMetrics>): Concentration {
@@ -412,6 +489,8 @@ export function computeMetrics(
       months: result.pool,
     },
     concentration: concentration(byIndustry),
+    bucketRoll: bucketRollRows(result.bucketRoll),
+    bucketEntryRoll: bucketRollRows(result.bucketEntryRoll),
   };
 }
 

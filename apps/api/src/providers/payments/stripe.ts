@@ -1,5 +1,12 @@
 import type { Config } from '../../config.ts';
-import type { ChargeInput, PaymentResult, PaymentsProvider, PayoutInput } from './types.ts';
+import type {
+  ChargeInput,
+  PaymentResult,
+  PaymentReturn,
+  PaymentsProvider,
+  PayoutInput,
+  ReturnsQuery,
+} from './types.ts';
 
 /**
  * Skeleton for a Stripe test mode adapter. Compiles against the interface, carries no SDK
@@ -13,8 +20,11 @@ import type { ChargeInput, PaymentResult, PaymentsProvider, PayoutInput } from '
  *             payment_method_types: ['us_bank_account'], confirm: true, customer }, { idempotencyKey })
  *             where sourceToken is the us_bank_account PaymentMethod (created from a Plaid processor token).
  *
- * Settlement is asynchronous for ACH, so a production version also needs a webhook handler that
- * flips Installment and LandlordPayout rows from PROCESSING to PAID or FAILED.
+ *   listReturns -> stripe.events.list({ types: ['payment_intent.payment_failed', 'payout.failed',
+ *             'charge.dispute.created'], created: { gte, lte } }), mapping the ACH return code on
+ *             the failure to `returnCode`. ACH debits settle asynchronously, so a return can
+ *             arrive after the payment was booked: the reconcile-payments job polls this and
+ *             reverses the booking.
  */
 export class StripePaymentsProvider implements PaymentsProvider {
   readonly name = 'stripe';
@@ -39,6 +49,12 @@ export class StripePaymentsProvider implements PaymentsProvider {
   async charge(_input: ChargeInput): Promise<PaymentResult> {
     throw new Error(
       'StripePaymentsProvider.charge is not implemented. See the notes in stripe.ts.',
+    );
+  }
+
+  async listReturns(_query: ReturnsQuery): Promise<PaymentReturn[]> {
+    throw new Error(
+      'StripePaymentsProvider.listReturns is not implemented. See the notes in stripe.ts.',
     );
   }
 }

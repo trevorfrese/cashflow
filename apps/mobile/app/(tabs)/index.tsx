@@ -305,7 +305,11 @@ function InstallmentRow({
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const canPay =
-    payable && (i.status === 'SCHEDULED' || i.status === 'FAILED' || i.status === 'LATE');
+    payable &&
+    (i.status === 'SCHEDULED' ||
+      i.status === 'FAILED' ||
+      i.status === 'LATE' ||
+      i.status === 'CHARGED_OFF');
   const paid = i.status === 'PAID';
 
   const onPay = async () => {

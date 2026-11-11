@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { LedgerAccountType, LedgerDirection } from '../enums';
-import { Cents, Id, IsoDateTimeSchema } from './common';
+import { Cents, Id, IsoDateSchema, IsoDateTimeSchema } from './common';
 
 export const LedgerAccount = z.object({
   id: Id,
@@ -27,7 +27,10 @@ export const LedgerTransaction = z.object({
   description: z.string(),
   referenceType: z.string().nullable(),
   referenceId: Id.nullable(),
+  /** When the row was written. */
   postedAt: IsoDateTimeSchema,
+  /** The calendar date the movement belongs to. Differs from `postedAt` on replayed history. */
+  effectiveDate: IsoDateSchema,
   entries: z.array(LedgerEntry),
 });
 export type LedgerTransaction = z.infer<typeof LedgerTransaction>;

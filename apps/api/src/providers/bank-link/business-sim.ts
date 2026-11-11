@@ -89,6 +89,12 @@ export interface SimulationOptions {
 export interface ExternalDebit {
   amountCents: number;
   description: string;
+  /**
+   * The creditor read the balance, saw it could not cover the debit, and told the owner
+   * instead of presenting it. Nothing is debited and no fee is charged, but the owner
+   * reacts as to a returned debit. The result flag is false.
+   */
+  noticeOnly?: boolean;
 }
 
 export const NSF_FEE_CENTS = 3500;
@@ -147,6 +153,7 @@ export class BusinessSimulation {
   private readonly weeklyRevenue: number;
   private ownerReserveCents: number;
   private externalRentCents = 0;
+  private lateRentCents = 0;
 
   // Calendar cursor for the next day to simulate.
   private year: number;
@@ -225,6 +232,14 @@ export class BusinessSimulation {
    */
   setExternalRent(cents: number): void {
     this.externalRentCents = Math.max(0, cents);
+  }
+
+  /**
+   * Rent that someone else was expected to pay this month and did not: the business pays it
+   * itself on the next simulated day, like its usual rent debit but late.
+   */
+  payRentLate(cents: number): void {
+    this.lateRentCents += Math.max(0, cents);
   }
 
   /** Remaining multiplier on revenue from shocks and declines on day `i`. */
@@ -390,7 +405,10 @@ export class BusinessSimulation {
     if (external && external.length > 0) {
       const flags: boolean[] = [];
       for (const d of external) {
-        if (d.amountCents <= this.balanceCents) {
+        if (d.noticeOnly) {
+          externalShortfall += d.amountCents;
+          flags.push(false);
+        } else if (d.amountCents <= this.balanceCents) {
           this.push(-d.amountCents, d.description, 'RENT');
           this.balanceCents -= d.amountCents;
           flags.push(true);
@@ -416,6 +434,11 @@ export class BusinessSimulation {
         'RENT',
       );
       this.missedRents = paid ? 0 : this.missedRents + 1;
+    }
+    if (this.lateRentCents > 0) {
+      const paid = this.debit(this.lateRentCents, 'RENT - HARBOR VIEW PROPERTIES', 'RENT');
+      this.missedRents = paid ? 0 : this.missedRents + 1;
+      this.lateRentCents = 0;
     }
     if (dow === 1 || dow === 3 || dow === 5) {
       this.debit(

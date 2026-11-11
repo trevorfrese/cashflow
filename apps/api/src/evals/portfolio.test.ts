@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { BASELINE_SERVICING_POLICY, type ServicingPolicy } from '../servicing/policy.ts';
+import {
+  BASELINE_SERVICING_POLICY,
+  STANDARD_SERVICING_POLICY,
+  type ServicingPolicy,
+} from '../servicing/policy.ts';
 import { decide } from '../underwriting/engine.ts';
 import { POLICY_V1, POLICY_V2 } from '../underwriting/policy.ts';
 import { STRESS } from './assumptions.ts';
@@ -13,6 +17,7 @@ const HOLD: ServicingPolicy = {
   ...BASELINE_SERVICING_POLICY,
   name: 'hold',
   holdPayoutPastDueDays: 3,
+  payoutReleaseWindowDays: 5,
 };
 const WRITE_OFF: ServicingPolicy = { ...HOLD, name: 'write_off', chargeOffAfterDays: 90 };
 
@@ -103,7 +108,10 @@ describe('portfolio simulator: one plan', () => {
     });
     const c = result.customers[0]!;
     expect(c.payoutCount).toBe(4);
+    // Every later payout is held, never released, and cancelled when its window closes.
     expect(c.heldPayouts).toBe(8);
+    expect(c.releasedPayouts).toBe(0);
+    expect(c.cancelledPayouts).toBe(8);
     expect(c.chargedOffCents).toBe(400_000);
     expectCashConserved(result);
 
@@ -116,6 +124,180 @@ describe('portfolio simulator: one plan', () => {
     expect(writtenOff.customers[0]!.chargedOffCents).toBe(400_000);
     expect(writtenOff.customers[0]!.recoveredCents).toBe(40_000);
     expectCashConserved(writtenOff);
+  });
+
+  it('writes the whole unpaid balance off at once and closes the plan', () => {
+    // Closes two days after the first installment of the fifth period: half of that month's
+    // rent is unpaid. The second half reaches 90 days two weeks after the first would.
+    const closing = makeApplicant({
+      params: { events: [{ kind: 'closure', date: '2026-06-03' }] },
+    });
+    const result = runPortfolio([closing], {
+      ...MECHANICS,
+      poolSizeCents: 10_000_000,
+      servicing: STANDARD_SERVICING_POLICY,
+      returnDelayDays: 2,
+    });
+    const c = result.customers[0]!;
+    expect(c.payoutCount).toBe(5);
+    expect(c.chargedOffCents).toBe(200_000);
+    expect(c.recoveredCents).toBe(20_000);
+    // Each of the three rent dates before the write off is held, never released, and
+    // cancelled. Then the plan is closed and nothing more falls due.
+    expect(c.heldPayouts).toBe(3);
+    expect(c.releasedPayouts).toBe(0);
+    expect(c.cancelledPayouts).toBe(3);
+    expect(c.maxDaysPastDue).toBe(90);
+    expectCashConserved(result);
+  });
+
+  it('the balance check puts debits off without using attempts', () => {
+    const closing = makeApplicant({
+      params: { events: [{ kind: 'closure', date: '2026-04-20' }] },
+    });
+    const run = (balancePreCheck: boolean) =>
+      runPortfolio([closing], {
+        ...MECHANICS,
+        poolSizeCents: 10_000_000,
+        servicing: {
+          ...STANDARD_SERVICING_POLICY,
+          retry: { ...STANDARD_SERVICING_POLICY.retry, balancePreCheck },
+        },
+        returnDelayDays: 2,
+      }).customers[0]!;
+    // Without the check, each of the two unpaid installments is presented three times and
+    // returned three times. With it, the empty account is read every day and never debited.
+    const blind = run(false);
+    expect(blind.failedDebits).toBe(6);
+    expect(blind.deferredDebits).toBe(0);
+    const checked = run(true);
+    expect(checked.failedDebits).toBe(0);
+    expect(checked.deferredDebits).toBeGreaterThan(100);
+    // The loss is the same either way: the business is gone.
+    expect(checked.chargedOffCents).toBe(400_000);
+    expect(blind.chargedOffCents).toBe(400_000);
+  });
+
+  it('a returned debit is booked as collected until the return arrives, and conserves cash', () => {
+    const closing = makeApplicant({
+      params: { events: [{ kind: 'closure', date: '2026-04-20' }] },
+    });
+    const noCheck = {
+      ...STANDARD_SERVICING_POLICY,
+      retry: { ...STANDARD_SERVICING_POLICY.retry, balancePreCheck: false },
+    };
+    const run = (returnDelayDays: number) =>
+      runPortfolio([closing], {
+        ...MECHANICS,
+        poolSizeCents: 10_000_000,
+        servicing: noCheck,
+        returnDelayDays,
+      });
+    const immediate = run(0);
+    const delayed = run(2);
+    expectCashConserved(immediate);
+    expectCashConserved(delayed);
+    // Same debits, same loss. Only the books in between differ.
+    expect(delayed.customers[0]).toEqual(immediate.customers[0]);
+    expect(delayed.poolEndCents).toBe(immediate.poolEndCents);
+  });
+
+  // A business that takes a large one off bill in March and has no owner reserve: its
+  // debits bounce for a while, it keeps trading, and its account recovers.
+  const squeezed = makeApplicant({
+    params: {
+      ownerReserveCents: 0,
+      overdraftLimitCents: 100_000_000,
+      events: [{ kind: 'expense', date: '2026-03-13', shareOfMonthly: 3.5 }],
+    },
+  });
+  const noCheck: ServicingPolicy = {
+    ...STANDARD_SERVICING_POLICY,
+    retry: { ...STANDARD_SERVICING_POLICY.retry, balancePreCheck: false },
+  };
+
+  it('releases a held payout when the business cures inside the window', () => {
+    // The owner pays each overdue installment by hand 18 days past due: an installment due
+    // on the 15th is paid on the 2nd, a day after the next payout was held.
+    const result = runPortfolio([squeezed], {
+      ...MECHANICS,
+      poolSizeCents: 10_000_000,
+      servicing: noCheck,
+      manualPayment: { shareBps: 10_000, firstDay: 18, lastDay: 18 },
+    });
+    const c = result.customers[0]!;
+    expect(c.heldPayouts).toBe(2);
+    expect(c.releasedPayouts).toBe(2);
+    expect(c.cancelledPayouts).toBe(0);
+    // Every month was fronted in the end, and nothing was lost.
+    expect(c.payoutCount).toBe(12);
+    expect(c.chargedOffCents).toBe(0);
+    expect(c.manualPayments).toBeGreaterThan(0);
+    expectCashConserved(result);
+  });
+
+  it('cancels a held payout when the cure comes after the window', () => {
+    // Paid by hand 25 days past due: the 9th, three days after the window closed.
+    const result = runPortfolio([squeezed], {
+      ...MECHANICS,
+      poolSizeCents: 10_000_000,
+      servicing: noCheck,
+      manualPayment: { shareBps: 10_000, firstDay: 25, lastDay: 25 },
+    });
+    const c = result.customers[0]!;
+    expect(c.heldPayouts).toBe(2);
+    expect(c.releasedPayouts).toBe(0);
+    expect(c.cancelledPayouts).toBe(2);
+    // The two cancelled months were never fronted, and are not made up later.
+    expect(c.payoutCount).toBe(10);
+    expect(c.payoutCents).toBe(10 * 400_000);
+    expect(c.chargedOffCents).toBe(0);
+    expectCashConserved(result);
+  });
+
+  it('fronts a whole lease rent or nothing, as the product does', () => {
+    // An approval for less than the rent requested.
+    const counterOffer = (input: Parameters<typeof decide>[0]) => ({
+      ...decide(input, POLICY_V1),
+      approvedMonthlyLimitCents: 300_000,
+    });
+    const product = runPortfolio([makeApplicant()], {
+      ...MECHANICS,
+      decide: counterOffer,
+      poolSizeCents: 10_000_000,
+    });
+    expect(product.customers[0]).toMatchObject({
+      outcome: 'APPROVED',
+      counterOffer: true,
+      unusableCounterOffer: true,
+      planRentCents: 0,
+      payoutCount: 0,
+    });
+    const m = computeMetrics(product).overall;
+    expect(m).toMatchObject({
+      approved: 1,
+      approvalRateBps: 10_000,
+      counterOffers: 1,
+      unusableCounterOffers: 1,
+      usableApprovalRateBps: 0,
+      plans: 0,
+    });
+
+    // The alternative the product does not offer: front the limit, the business pays the rest.
+    const partial = runPortfolio([makeApplicant()], {
+      ...MECHANICS,
+      decide: counterOffer,
+      poolSizeCents: 10_000_000,
+      partialAdvance: true,
+    });
+    expect(partial.customers[0]).toMatchObject({
+      counterOffer: true,
+      unusableCounterOffer: false,
+      planRentCents: 300_000,
+      payoutCount: 12,
+    });
+    expect(computeMetrics(partial).overall.usableApprovalRateBps).toBe(10_000);
+    expectCashConserved(partial);
   });
 
   it('a bust out defaults on the first payment', () => {

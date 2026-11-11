@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { makeCustomer } from './fixtures.ts';
 import { allGatesPass, evaluateGates, GATE_THRESHOLDS } from './gates.ts';
 import { computeMetrics, type PortfolioMetrics } from './metrics.ts';
-import type { CustomerResult } from './portfolio.ts';
+import { emptyBucketRoll, type CustomerResult } from './portfolio.ts';
 
 /**
  * A book built to pass every gate: 200 plans across four grades with bad rates rising from A
@@ -58,6 +58,8 @@ function passingMetrics(): PortfolioMetrics {
     unfundedPayoutDays: 0,
     plansDelayed: 0,
     plansNeverFunded: 0,
+    bucketRoll: emptyBucketRoll(),
+    bucketEntryRoll: emptyBucketRoll(),
     pool: [],
     customers,
   });
@@ -136,6 +138,7 @@ describe('gates', () => {
   it('cannot be passed by declining everyone', () => {
     const { failed } = gatesWith((b) => {
       b.overall.approvalRateBps = 0;
+      b.overall.usableApprovalRateBps = 0;
       b.overall.volumeCents = 0;
       b.rankOrdering.auc = null;
     });
@@ -146,7 +149,17 @@ describe('gates', () => {
       'auc',
       'approval_floor',
     ]);
-    expect(gatesWith((b) => (b.overall.approvalRateBps = 2999)).failed).toEqual(['approval_floor']);
+    expect(gatesWith((b) => (b.overall.usableApprovalRateBps = 2999)).failed).toEqual([
+      'approval_floor',
+    ]);
+    // An approval nobody can use does not count toward the floor: the gate reads usable
+    // approvals, whatever the headline approval rate says.
+    expect(
+      gatesWith((b) => {
+        b.overall.approvalRateBps = 6000;
+        b.overall.usableApprovalRateBps = 2500;
+      }).failed,
+    ).toEqual(['approval_floor']);
   });
 
   it('holds referrals to 5% of applicants', () => {

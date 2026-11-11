@@ -190,6 +190,7 @@ export function renderBoard(status, term, { personas = null, password = null } =
   lines.push('');
   lines.push(
     `  ${c.bold('Dev menu')}     ${status.devTools.enabled ? status.devTools.menu : c.yellow(`off. Set ENABLE_DEV_TOOLS=true in ${status.envFiles.api} and EXPO_PUBLIC_DEV_TOOLS=true in ${status.envFiles.mobile}`)}`,
+    `  ${c.bold('Phone view')}   the app in a phone frame with a persona picker: ${status.home.url}/phone`,
   );
   lines.push(
     `  ${c.bold('Ops console')}  sign in with ADMIN_API_TOKEN or REVIEWER_API_TOKEN from ${status.envFiles.api} (not shown here)`,

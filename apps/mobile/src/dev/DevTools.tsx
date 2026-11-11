@@ -166,8 +166,18 @@ function EnabledProvider({ children }: { children: ReactNode }) {
         setMenuOpen(false);
       }
     };
+    // The dev home page's phone preview shows the app in a frame and asks it to open the
+    // menu by message. Only a page served from this machine is listened to.
+    const onMessage = (event: MessageEvent) => {
+      if (!/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(event.origin)) return;
+      if (event.data === 'cashflow-dev:open-menu') setMenuOpen(true);
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('message', onMessage);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('message', onMessage);
+    };
   }, []);
   const linkHandled = useRef(false);
   useEffect(() => {

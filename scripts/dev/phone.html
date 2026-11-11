@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>CashFlow phone preview</title>
+    <style>
+      /* Colors come from packages/shared/src/brand.ts, injected by the supervisor. */
+      /*BRAND_TOKENS*/
+      @font-face {
+        font-family: 'Archivo';
+        font-weight: 400;
+        src: url('/fonts/Archivo-Regular.ttf');
+      }
+      @font-face {
+        font-family: 'Archivo';
+        font-weight: 700;
+        src: url('/fonts/Archivo-Bold.ttf');
+      }
+      @font-face {
+        font-family: 'Archivo Expanded';
+        font-weight: 800;
+        src: url('/fonts/ArchivoExpanded-ExtraBold.ttf');
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--canvas);
+        color: var(--ink);
+        font-family: 'Archivo', system-ui, sans-serif;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        height: 100vh;
+      }
+      aside {
+        overflow-y: auto;
+        background: var(--paper);
+        border-right: 3px solid var(--ink);
+        padding: 20px 16px 32px;
+      }
+      h1 {
+        font-family: 'Archivo Expanded', 'Archivo', sans-serif;
+        font-weight: 800;
+        font-size: 20px;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--slate);
+        margin: 20px 0 8px;
+      }
+      a {
+        color: var(--azure-deep);
+      }
+      .small {
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      .muted {
+        color: var(--slate);
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      button,
+      select {
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        border: 2px solid var(--ink);
+        border-radius: 10px;
+        background: var(--white);
+        color: var(--ink);
+        padding: 7px 10px;
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--azure);
+        color: var(--white);
+      }
+      button:hover {
+        box-shadow: 2px 2px 0 var(--ink);
+      }
+      .persona {
+        display: block;
+        width: 100%;
+        text-align: left;
+        margin-bottom: 6px;
+        padding: 8px 10px;
+        font-weight: 400;
+      }
+      .persona.active {
+        background: var(--selected-bg);
+        box-shadow: 3px 3px 0 var(--ink);
+      }
+      .persona .name {
+        font-weight: 700;
+      }
+      .pill {
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 700;
+        border-radius: 999px;
+        padding: 1px 7px;
+        margin-left: 6px;
+        border: 1.5px solid var(--ink);
+        background: var(--stone);
+      }
+      .pill.paid {
+        background: var(--success-bg);
+      }
+      .pill.due {
+        background: var(--warning-bg);
+      }
+      .pill.late {
+        background: var(--danger-bg);
+      }
+      .pill.gold {
+        background: var(--cream);
+      }
+      .pill.info {
+        background: var(--info-bg);
+      }
+      main {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        position: relative;
+      }
+      .stage {
+        transform-origin: center center;
+      }
+      .device {
+        position: relative;
+        background: var(--ink);
+        padding: 14px;
+        border-radius: 56px;
+        box-shadow:
+          0 0 0 2px #3a3644,
+          0 30px 60px rgba(0, 0, 0, 0.28);
+      }
+      .device.flat {
+        border-radius: 28px;
+        padding: 12px;
+      }
+      .screen {
+        position: relative;
+        overflow: hidden;
+        border-radius: 44px;
+        background: var(--white);
+      }
+      .device.flat .screen {
+        border-radius: 18px;
+      }
+      .island {
+        position: absolute;
+        top: 11px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 124px;
+        height: 36px;
+        border-radius: 20px;
+        background: #000;
+        z-index: 2;
+        pointer-events: none;
+      }
+      .device.flat .island {
+        display: none;
+      }
+      iframe {
+        display: block;
+        border: 0;
+        width: 100%;
+      }
+      .statusbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 34px 0;
+        font-size: 15px;
+        font-weight: 700;
+        background: var(--paper);
+      }
+      .statusbar.flat {
+        padding: 0 12px;
+        font-size: 12px;
+      }
+      .statusbar .glyphs {
+        font-size: 10px;
+        letter-spacing: 1px;
+      }
+      .homebar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--paper);
+      }
+      .homebar span {
+        width: 134px;
+        height: 5px;
+        border-radius: 3px;
+        background: var(--ink);
+      }
+      .empty {
+        max-width: 420px;
+        text-align: center;
+      }
+      @media (max-width: 800px) {
+        .layout {
+          grid-template-columns: 1fr;
+          grid-template-rows: auto 1fr;
+          height: auto;
+        }
+        aside {
+          border-right: 0;
+          border-bottom: 3px solid var(--ink);
+          max-height: 40vh;
+        }
+        main {
+          min-height: 90vh;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside>
+        <h1>Phone preview</h1>
+        <div class="small muted">
+          The Expo web app in a phone sized frame. Pick a persona to sign the app in as them.
+          <a href="/">Back to dev home</a>.
+        </div>
+        <div class="controls">
+          <select id="device" aria-label="Device size"></select>
+          <button class="primary" id="menu">Dev menu</button>
+          <button id="reload">Reload</button>
+        </div>
+        <div class="small muted" style="margin-top: 8px">
+          Inside the phone, five taps on the coin also open the dev menu.
+        </div>
+        <div id="personas"></div>
+      </aside>
+      <main>
+        <div class="stage" id="stage"></div>
+      </main>
+    </div>
+    <script>
+      const DEVICES = [
+        // top and bottom are the safe area insets the real device reserves for the status bar
+        // and home indicator, so the app gets the same height it would on the phone.
+        {
+          key: 'iphone-15',
+          label: 'iPhone 15 (393 x 852)',
+          w: 393,
+          h: 852,
+          notch: true,
+          top: 59,
+          bottom: 34,
+        },
+        {
+          key: 'iphone-se',
+          label: 'iPhone SE (375 x 667)',
+          w: 375,
+          h: 667,
+          notch: false,
+          top: 20,
+          bottom: 0,
+        },
+        {
+          key: 'iphone-15-pro-max',
+          label: 'iPhone 15 Pro Max (430 x 932)',
+          w: 430,
+          h: 932,
+          notch: true,
+          top: 59,
+          bottom: 34,
+        },
+        {
+          key: 'pixel-8',
+          label: 'Pixel 8 (412 x 915)',
+          w: 412,
+          h: 915,
+          notch: false,
+          top: 24,
+          bottom: 16,
+        },
+      ];
+      const $ = (id) => document.getElementById(id);
+      const esc = (v) =>
+        String(v ?? '').replace(
+          /[&<>"']/g,
+          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+        );
+      const store = {
+        get(k) {
+          try {
+            return localStorage.getItem(k);
+          } catch {
+            return null;
+          }
+        },
+        set(k, v) {
+          try {
+            localStorage.setItem(k, v);
+          } catch {}
+        },
+      };
+
+      const params = new URL(location.href).searchParams;
+      let mobileUrl = null;
+      let persona = params.get('persona');
+      let device =
+        DEVICES.find((d) => d.key === (params.get('device') ?? store.get('phone.device'))) ??
+        DEVICES[0];
+
+      $('device').innerHTML = DEVICES.map(
+        (d) =>
+          `<option value="${d.key}" ${d.key === device.key ? 'selected' : ''}>${esc(d.label)}</option>`,
+      ).join('');
+
+      function frameSrc() {
+        if (!mobileUrl) return null;
+        return persona
+          ? `${mobileUrl}/?devPersona=${encodeURIComponent(persona)}`
+          : `${mobileUrl}/`;
+      }
+
+      function renderDevice() {
+        const src = frameSrc();
+        if (!src) {
+          $('stage').innerHTML =
+            `<div class="empty small">The app (Expo web) is not running. Start it with <code>./dev</code>, then reload this page.</div>`;
+          return;
+        }
+        $('stage').innerHTML = `
+          <div class="device ${device.notch ? '' : 'flat'}">
+            <div class="screen" style="width:${device.w}px;height:${device.h}px">
+              <div class="statusbar ${device.notch ? '' : 'flat'}" style="height:${device.top}px">
+                <span>9:41</span><span class="glyphs">&#9679;&#9679;&#9679; &#9646;</span>
+              </div>
+              <div class="island"></div>
+              <iframe id="app" title="CashFlow app" src="${esc(src)}" style="height:${device.h - device.top - device.bottom}px"></iframe>
+              ${device.bottom ? `<div class="homebar" style="height:${device.bottom}px"><span></span></div>` : ''}
+            </div>
+          </div>`;
+        fit();
+      }
+
+      // Scale the phone down to fit the window, never up, so 1 CSS pixel stays 1 pixel when it fits.
+      function fit() {
+        const main = document.querySelector('main');
+        const stage = $('stage');
+        const pad = 48;
+        const w = device.w + 28;
+        const h = device.h + 28;
+        const scale = Math.min(1, (main.clientWidth - pad) / w, (main.clientHeight - pad) / h);
+        stage.style.transform = `scale(${scale})`;
+      }
+      window.addEventListener('resize', fit);
+
+      function syncUrl() {
+        const url = new URL(location.href);
+        persona ? url.searchParams.set('persona', persona) : url.searchParams.delete('persona');
+        url.searchParams.set('device', device.key);
+        history.replaceState(null, '', url.toString());
+      }
+
+      function renderPersonas(list) {
+        let html = '';
+        let section = '';
+        for (const p of list.personas) {
+          const heading = p.group === 'FRESH' ? 'Fresh applicants' : `Existing: ${p.section}`;
+          if (heading !== section) {
+            section = heading;
+            html += `<h2>${esc(heading)}</h2>`;
+          }
+          html += `<button class="persona ${p.key === persona ? 'active' : ''}" data-key="${esc(p.key)}">
+              <span class="name">${esc(p.title)}</span><span class="pill ${esc(p.state.tone)}">${esc(p.state.label)}</span>
+              <div class="small muted">${esc(p.demonstrates)}</div>
+            </button>`;
+        }
+        $('personas').innerHTML = html;
+      }
+
+      $('personas').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-key]');
+        if (!btn) return;
+        persona = btn.dataset.key;
+        document
+          .querySelectorAll('.persona')
+          .forEach((b) => b.classList.toggle('active', b === btn));
+        syncUrl();
+        renderDevice();
+      });
+      $('device').addEventListener('change', (e) => {
+        device = DEVICES.find((d) => d.key === e.target.value) ?? DEVICES[0];
+        store.set('phone.device', device.key);
+        syncUrl();
+        renderDevice();
+      });
+      $('reload').addEventListener('click', () => {
+        const frame = $('app');
+        if (frame) frame.src = `${mobileUrl}/`;
+      });
+      $('menu').addEventListener('click', () => {
+        const frame = $('app');
+        if (frame && mobileUrl) {
+          frame.contentWindow?.postMessage('cashflow-dev:open-menu', mobileUrl);
+          frame.focus();
+        }
+      });
+
+      (async () => {
+        try {
+          const status = await (await fetch('/api/status', { cache: 'no-store' })).json();
+          const mobile = status.services.find((s) => s.name === 'mobile');
+          mobileUrl = mobile && mobile.selected !== false ? mobile.url : null;
+        } catch {}
+        syncUrl();
+        renderDevice();
+        try {
+          const res = await fetch('/api/dev/personas', { cache: 'no-store' });
+          if (res.ok) renderPersonas(await res.json());
+          else
+            $('personas').innerHTML =
+              `<div class="small muted" style="margin-top:16px">Personas need the API running with dev tools on.</div>`;
+        } catch {
+          $('personas').innerHTML =
+            `<div class="small muted" style="margin-top:16px">The API is not reachable.</div>`;
+        }
+      })();
+    </script>
+  </body>
+</html>

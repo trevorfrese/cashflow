@@ -17,6 +17,7 @@ import { LOG_DIR, stripAnsi, tailFile } from './util.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PAGE = path.join(HERE, '../home.html');
+const PHONE_PAGE = path.join(HERE, '../phone.html');
 const BRAND = path.join(HERE, '../../../packages/shared/src/brand.ts');
 const FONT_DIR = path.join(HERE, '../../../apps/mobile/assets/fonts');
 const FONTS = [
@@ -72,6 +73,10 @@ export async function handleHomeRequest(req, res) {
   if (req.method === 'GET' && url.pathname === '/') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     return res.end(fs.readFileSync(PAGE, 'utf8').replace('/*BRAND_TOKENS*/', brandCss()));
+  }
+  if (req.method === 'GET' && url.pathname === '/phone') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    return res.end(fs.readFileSync(PHONE_PAGE, 'utf8').replace('/*BRAND_TOKENS*/', brandCss()));
   }
   if (req.method === 'GET' && url.pathname.startsWith('/fonts/')) {
     const name = url.pathname.slice('/fonts/'.length);

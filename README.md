@@ -53,6 +53,7 @@ It exists only when the local `.env` files turn it on, which `./dev` does. The A
 | `./dev --reseed`                 | Wipe the database and rebuild the demo data on the way up                   |
 | `./dev --no-dev-tools`           | Run with the dev menu, personas and simulated clock off                     |
 | `./dev --open`                   | Open the dev home page when everything is up                                |
+| `localhost:4100/phone`           | The app in a phone frame, with a persona picker and a dev menu button       |
 | `./dev --timeout 300`            | Seconds to wait for services to be healthy (default 240)                    |
 | `./dev status [--json]`          | The status board again, or the same as JSON                                 |
 | `./dev wait`                     | Block until every started service is healthy                                |

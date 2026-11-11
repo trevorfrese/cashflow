@@ -529,7 +529,7 @@
 
       function renderPersonas(list) {
         $('persona-note').textContent =
-          `Each is its own login with the password ${list.password}. "Open app as" signs the app in as that persona in a new tab.`;
+          `Each is its own login with the password ${list.password}. "Open app as" signs the app in as that persona in a new tab, and "On a phone" shows it in a phone frame.`;
         let html = '';
         let section = '';
         for (const p of list.personas) {
@@ -539,7 +539,7 @@
             html += `<h3>${esc(heading)}</h3>`;
           }
           const open = window.mobileUrl
-            ? `<a href="${esc(window.mobileUrl)}/?devPersona=${encodeURIComponent(p.key)}" target="_blank" rel="noreferrer"><button class="primary">Open app as</button></a>`
+            ? `<a href="${esc(window.mobileUrl)}/?devPersona=${encodeURIComponent(p.key)}" target="_blank" rel="noreferrer"><button class="primary">Open app as</button></a><a href="/phone?persona=${encodeURIComponent(p.key)}"><button>On a phone</button></a>`
             : '';
           html += `
             <div class="persona">

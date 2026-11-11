@@ -4,7 +4,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState, type ReactNode } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { DevIndicator, DevToolsProvider } from '@/dev/DevTools';
@@ -71,13 +71,18 @@ export default function RootLayout() {
   );
 }
 
+/** Wider than any phone held upright: below this the web build fills the window. */
+const FRAME_MIN_WIDTH = 500;
+
 /**
- * On the web build, keeps the app in a phone frame from the design canvas (390 by 844, ink
- * border, hard shadow) instead of stretching across a desktop window. Native platforms
- * render the app full screen.
+ * On the web build in a desktop sized window, keeps the app in a phone frame from the design
+ * canvas (390 by 844, ink border, hard shadow) instead of stretching across the window. In a
+ * phone sized window (a phone's browser, or the dev home's phone preview) and on native
+ * platforms the app renders full screen, so it is never a frame inside a phone.
  */
 function PhoneFrame({ children }: { children: ReactNode }) {
-  if (Platform.OS !== 'web') return <>{children}</>;
+  const { width } = useWindowDimensions();
+  if (Platform.OS !== 'web' || width < FRAME_MIN_WIDTH) return <>{children}</>;
   return (
     <View style={styles.stage}>
       <View style={[styles.frame, hardShadow('xl')]}>{children}</View>

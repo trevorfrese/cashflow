@@ -16,10 +16,10 @@ export default function Home() {
   return (
     <main className="page">
       <header className="top">
-        <a href="/" className="wordmark-small" aria-label="CashFlow home">
+        <button type="button" className="wordmark-small" aria-label="CashFlow">
           <CoinMark size={28} decorative />
           CashFlow
-        </a>
+        </button>
         <a className="top-link" href={GITHUB} target="_blank" rel="noopener noreferrer">
           GitHub
         </a>
@@ -30,7 +30,7 @@ export default function Home() {
           <CoinMark size={200} title="CashFlow gold coin with a cents symbol" />
           <h1 className="wordmark">CashFlow</h1>
         </div>
-        <p className="tagline">
+        <p className="tagline" data-quiet>
           Buy now, pay later for small business rent. Now an open source project.
         </p>
         <div className="actions">

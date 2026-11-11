@@ -74,6 +74,30 @@ a:hover {
   font-weight: 800;
   font-size: 20px;
   letter-spacing: -0.3px;
+  /* A button, not a link: there is only one page, so it answers a press and goes nowhere. */
+  font-family: inherit;
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.wordmark-small svg {
+  transition: transform 120ms ease;
+}
+
+.wordmark-small:hover svg {
+  transform: rotate(-12deg);
+}
+
+.wordmark-small:active svg {
+  transform: rotate(-12deg) scale(0.88);
+}
+
+.wordmark-small:focus-visible {
+  outline: 3px solid var(--azure);
+  outline-offset: 4px;
+  border-radius: 6px;
 }
 
 .top-link {

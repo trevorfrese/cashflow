@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { forbidden, notFound, unprocessable } from '../errors.ts';
 import { toApplication } from '../serializers.ts';
+import { INCLUDE_CURRENT_DECISION, withCurrentDecision } from '../services/decisions.ts';
 import { underwriteApplication } from '../services/underwriting.ts';
 import { currentUserId, getOwnedBusiness } from './helpers.ts';
 
@@ -17,11 +18,11 @@ export async function underwritingRoutes(app: FastifyInstance) {
   const loadOwned = async (id: string, userId: string) => {
     const application = await db.underwritingApplication.findUnique({
       where: { id },
-      include: { decision: true, business: true, bankLink: true, commerceLink: true },
+      include: { ...INCLUDE_CURRENT_DECISION, business: true, bankLink: true, commerceLink: true },
     });
     if (!application) throw notFound('Application');
     if (application.business.ownerUserId !== userId) throw forbidden();
-    return application;
+    return withCurrentDecision(application);
   };
 
   r.post(
@@ -63,13 +64,16 @@ export async function underwritingRoutes(app: FastifyInstance) {
           timeInBusinessMonths: request.body.timeInBusinessMonths,
           requestedMonthlyRentCents: request.body.requestedMonthlyRentCents,
         },
-        include: { decision: true },
       });
-      return reply.code(201).send(toApplication(application));
+      return reply.code(201).send(toApplication({ ...application, decision: null }));
     },
   );
 
-  /** Runs underwriting. Can be called again after NEEDS_INFO once a bank or POS link is attached. */
+  /**
+   * Runs underwriting. Can be called again after NEEDS_INFO once a bank or POS link is
+   * attached: each run adds a decision and supersedes the one before it. Clean applications
+   * are decided in this request. A referred one comes back IN_REVIEW.
+   */
   r.post(
     '/underwriting/applications/:id/submit',
     {
@@ -87,6 +91,12 @@ export async function underwritingRoutes(app: FastifyInstance) {
         throw unprocessable(
           'APPLICATION_FINAL',
           `Application is already ${application.status.toLowerCase()}`,
+        );
+      }
+      if (application.status === 'IN_REVIEW') {
+        throw unprocessable(
+          'APPLICATION_IN_REVIEW',
+          'Application is with a reviewer. We will be in touch if anything more is needed',
         );
       }
 
@@ -164,10 +174,10 @@ export async function underwritingRoutes(app: FastifyInstance) {
       await getOwnedBusiness(db, request.params.id, currentUserId(request));
       const rows = await db.underwritingApplication.findMany({
         where: { businessId: request.params.id },
-        include: { decision: true },
+        include: INCLUDE_CURRENT_DECISION,
         orderBy: { createdAt: 'desc' },
       });
-      return rows.map(toApplication);
+      return rows.map((row) => toApplication(withCurrentDecision(row)));
     },
   );
 }

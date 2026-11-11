@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { todayIso } from '../dates.ts';
 import { forbidden, notFound, unprocessable } from '../errors.ts';
 import { toInstallment, toPayout, toRentPlan, toRepayment } from '../serializers.ts';
+import { recordAudit } from '../services/audit.ts';
 import { collectInstallment } from '../services/collections.ts';
 import { createRentPlan } from '../services/rent-plan.ts';
 import { currentUserId, getOwnedBusiness, getOwnedRentPlan } from './helpers.ts';
@@ -33,7 +34,7 @@ export async function rentPlanRoutes(app: FastifyInstance) {
       schema: { tags: ['rent-plans'], body: CreateRentPlanRequest, response: { 201: RentPlan } },
     },
     async (request, reply) => {
-      const plan = await createRentPlan(db, {
+      const plan = await createRentPlan(app.ctx, {
         userId: currentUserId(request),
         leaseId: request.body.leaseId,
         applicationId: request.body.applicationId,
@@ -108,12 +109,25 @@ export async function rentPlanRoutes(app: FastifyInstance) {
     async (request) => {
       const plan = await getOwnedRentPlan(db, request.params.id, currentUserId(request));
       if (plan.status === 'CLOSED') throw unprocessable('PLAN_CLOSED', 'This plan is closed');
-      const updated = await db.rentPlan.update({
-        where: { id: plan.id },
-        data: {
-          installmentsPerMonth: request.body.installmentsPerMonth,
-          status: request.body.status,
-        },
+      const userId = currentUserId(request);
+      const updated = await db.$transaction(async (tx) => {
+        const row = await tx.rentPlan.update({
+          where: { id: plan.id },
+          data: {
+            installmentsPerMonth: request.body.installmentsPerMonth,
+            status: request.body.status,
+          },
+        });
+        if (row.status !== plan.status) {
+          await recordAudit(tx, {
+            actor: { type: 'user', id: userId },
+            eventType: 'PLAN_STATUS_CHANGED',
+            subjectType: 'rent_plan',
+            subjectId: plan.id,
+            payload: { from: plan.status, to: row.status },
+          });
+        }
+        return row;
       });
       return toRentPlan(updated);
     },

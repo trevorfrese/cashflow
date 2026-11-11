@@ -3,7 +3,7 @@ import type { UnderwritingInput, UnderwritingProvider, UnderwritingResult } from
 
 /** The in-house cash flow underwriting engine. Deterministic, explainable, fully offline. */
 export class CashFlowUnderwritingProvider implements UnderwritingProvider {
-  readonly name = 'cashflow-v1';
+  readonly name = 'cashflow';
 
   async decide(input: UnderwritingInput): Promise<UnderwritingResult> {
     return decide(input);

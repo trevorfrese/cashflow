@@ -139,12 +139,17 @@ function headline(status: string): string {
       return 'Not approved right now';
     case 'NEEDS_INFO':
       return 'A little more information';
+    case 'IN_REVIEW':
+      return 'In review';
     default:
       return 'Decision';
   }
 }
 
 function summaryLine(status: string): string {
+  if (status === 'IN_REVIEW') {
+    return 'Our team is taking a look before we confirm terms. We will be in touch, and we will ask if we need anything.';
+  }
   return status === 'DECLINED'
     ? 'The account did not meet our policy on one or more hard rules. The reasons below are specific so you know what would need to change.'
     : 'Underwriting ran but needs one more input before it can decide.';

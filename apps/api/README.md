@@ -31,7 +31,9 @@ pnpm --filter @cashflow/api db:reset       # drop, migrate, seed
 pnpm --filter @cashflow/api db:studio      # Prisma Studio
 pnpm --filter @cashflow/api job:run        # run jobs once as of today
 pnpm --filter @cashflow/api job:run -- --as-of 2026-12-01
+pnpm --filter @cashflow/api job:run -- --only reunderwrite   # one job by name
 pnpm --filter @cashflow/api eval:portfolio # portfolio simulation and gates, see evals/README.md
+pnpm --filter @cashflow/api eval:calibrate # regenerate the PD table the pricing module reads
 ```
 
 ## Layout
@@ -46,7 +48,7 @@ src/auth/                scrypt passwords, JWT access tokens, rotating refresh t
 src/ledger/              double-entry ledger: accounts, validation, posting, trial balance
 src/providers/           underwriting, bank-link, payments, capital (mocks + skeletons)
 src/services/            rent plan creation, landlord payouts, installment collection
-src/jobs/                generate-periods, process-payouts, collect-installments, cron, CLI
+src/jobs/                reunderwrite, generate-periods, process-payouts, collect-installments, cron, CLI
 src/routes/              HTTP handlers grouped by resource
 src/serializers.ts       Prisma rows to API shapes from @cashflow/shared
 src/test/                integration test harness
@@ -59,6 +61,12 @@ With `ENABLE_ADMIN=true` (the local default) these unauthenticated routes exist 
 - `POST /v1/admin/jobs/run` with optional `{ "asOf": "YYYY-MM-DD" }`: run all jobs as of a date.
 - `GET /v1/admin/ledger/trial-balance`: every account with debits, credits, and balance.
 - `GET /v1/admin/capital` and `POST /v1/admin/capital/fund`: inspect and top up the mock pool.
+- `GET /v1/admin/reviews`: applications the engine referred, with its recommendation, the
+  referral triggers, and the integrity flags.
+- `POST /v1/admin/applications/:id/review` with `{ reviewer, decision, reasonCodes, notes }`:
+  record a reviewer's decision. See "Escalation and manual review" in `UNDERWRITING.md`.
+- `GET /v1/admin/audit-events?subjectType=application&subjectId=...`: the audit trail for one
+  record.
 
 Never enable them on a public deployment.
 

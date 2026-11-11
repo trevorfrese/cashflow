@@ -63,6 +63,29 @@ export const MonthlyCashFlow = z.object({
 export type MonthlyCashFlow = z.infer<typeof MonthlyCashFlow>;
 
 /**
+ * Revenue trend measured on daily windows of bank operating inflows, which see a turn up to
+ * a month sooner than full calendar months do. All values are basis points of change; null
+ * when the account history is too short for the comparison.
+ */
+export const RevenueTrend = z.object({
+  /** Trailing 4 weeks against the 12 weeks before them, per week. */
+  recent4VsPrior12WeeksBps: z.number().int().nullable(),
+  /** Trailing 12 weeks against the 12 weeks before them. */
+  recent12VsPrior12WeeksBps: z.number().int().nullable(),
+  /**
+   * Trailing four weeks against the same four weeks a year earlier (48 to 52 weeks back,
+   * as far as the history reaches). Season neutral, which is what separates a seasonal
+   * trough from a real decline.
+   */
+  yearOverYearBps: z.number().int().nullable(),
+  /** Least squares slope of the last six full months, per month, as a share of their mean. */
+  slope6Bps: z.number().int().nullable(),
+  /** The trend the scorecard and the decline rules read: season adjusted where possible. */
+  compositeBps: z.number().int(),
+});
+export type RevenueTrend = z.infer<typeof RevenueTrend>;
+
+/**
  * Features the underwriting engine derives from bank transactions, and from platform sales
  * when a commerce account is connected. Stored with every
  * decision so a decision can be explained and audited later. Ratios are in basis points
@@ -94,6 +117,12 @@ export const CashFlowSummary = z.object({
   avgDailyBalance90Cents: z.number().int().nullable(),
   minBalance90Cents: z.number().int().nullable(),
   daysOfCashOnHand: z.number().int().min(0).nullable(),
+  /**
+   * The lowest balance of the last 90 days, in days of average outflows. The low point of
+   * the buffer: a balance that is healthy today but touched zero last month is thin. Null
+   * when the balance is unknown or on decisions made before policy version 2.
+   */
+  lowPointDaysOfCash90: z.number().int().min(0).nullable().default(null),
   negativeBalanceDays90: z.number().int().min(0),
   nsfCount90: z.number().int().min(0),
   nsfCount365: z.number().int().min(0),
@@ -107,5 +136,7 @@ export const CashFlowSummary = z.object({
 
   /** Platform sales features when a POS or commerce account was connected. */
   commerce: CommerceSummary.nullable().default(null),
+  /** Daily window trend measures. Null on decisions made before policy version 2. */
+  revenueTrend: RevenueTrend.nullable().default(null),
 });
 export type CashFlowSummary = z.infer<typeof CashFlowSummary>;

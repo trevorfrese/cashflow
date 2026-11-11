@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { BASELINE_SERVICING_POLICY, type ServicingPolicy } from '../servicing/policy.ts';
 import { decide } from '../underwriting/engine.ts';
+import { POLICY_V1, POLICY_V2 } from '../underwriting/policy.ts';
 import { STRESS } from './assumptions.ts';
 import { makeApplicant } from './fixtures.ts';
 import { computeMetrics } from './metrics.ts';
@@ -14,6 +15,16 @@ const HOLD: ServicingPolicy = {
   holdPayoutPastDueDays: 3,
 };
 const WRITE_OFF: ServicingPolicy = { ...HOLD, name: 'write_off', chargeOffAfterDays: 90 };
+
+/**
+ * The one plan tests below are about the simulator's mechanics (payouts, debits, aging, the
+ * pool), not about credit policy. They run the launch policy, whose decisions do not depend
+ * on the size of the pool, so a test can use a small pool without tripping an exposure rule.
+ */
+const MECHANICS = {
+  decide: (input: Parameters<typeof decide>[0]) => decide(input, POLICY_V1),
+  exposure: null,
+};
 
 function sum(result: PortfolioResult, pick: (c: PortfolioResult['customers'][number]) => number) {
   return result.customers.reduce((total, c) => total + pick(c), 0);
@@ -32,7 +43,7 @@ function expectCashConserved(result: PortfolioResult) {
 
 describe('portfolio simulator: one plan', () => {
   it('a healthy business is approved and repays every installment with the fee', () => {
-    const result = runPortfolio([makeApplicant()], { poolSizeCents: 1_000_000 });
+    const result = runPortfolio([makeApplicant()], { ...MECHANICS, poolSizeCents: 1_000_000 });
     const c = result.customers[0]!;
     expect(c.outcome).toBe('APPROVED');
     expect(c.planRentCents).toBe(400_000);
@@ -64,7 +75,7 @@ describe('portfolio simulator: one plan', () => {
     const closing = makeApplicant({
       params: { events: [{ kind: 'closure', date: '2026-04-20' }] },
     });
-    const result = runPortfolio([closing], { poolSizeCents: 10_000_000 });
+    const result = runPortfolio([closing], { ...MECHANICS, poolSizeCents: 10_000_000 });
     const c = result.customers[0]!;
     expect(c.outcome).toBe('APPROVED');
     expect(c.closedOn).toBe('2026-04-20');
@@ -85,7 +96,11 @@ describe('portfolio simulator: one plan', () => {
     const closing = makeApplicant({
       params: { events: [{ kind: 'closure', date: '2026-04-20' }] },
     });
-    const result = runPortfolio([closing], { poolSizeCents: 10_000_000, servicing: HOLD });
+    const result = runPortfolio([closing], {
+      ...MECHANICS,
+      poolSizeCents: 10_000_000,
+      servicing: HOLD,
+    });
     const c = result.customers[0]!;
     expect(c.payoutCount).toBe(4);
     expect(c.heldPayouts).toBe(8);
@@ -93,7 +108,11 @@ describe('portfolio simulator: one plan', () => {
     expectCashConserved(result);
 
     // Writing off at 90 days during the run gives the same loss as measuring it at the end.
-    const writtenOff = runPortfolio([closing], { poolSizeCents: 10_000_000, servicing: WRITE_OFF });
+    const writtenOff = runPortfolio([closing], {
+      ...MECHANICS,
+      poolSizeCents: 10_000_000,
+      servicing: WRITE_OFF,
+    });
     expect(writtenOff.customers[0]!.chargedOffCents).toBe(400_000);
     expect(writtenOff.customers[0]!.recoveredCents).toBe(40_000);
     expectCashConserved(writtenOff);
@@ -105,7 +124,7 @@ describe('portfolio simulator: one plan', () => {
       segment: 'bust_out',
       params: { events: [{ kind: 'closure', date: '2026-01-15' }] },
     });
-    const c = runPortfolio([bustOut], { poolSizeCents: 10_000_000 }).customers[0]!;
+    const c = runPortfolio([bustOut], { ...MECHANICS, poolSizeCents: 10_000_000 }).customers[0]!;
     expect(c.outcome).toBe('APPROVED');
     expect(c.firstPaymentDefault).toBe(true);
     expect(c.principalCollectedCents).toBe(0);
@@ -113,7 +132,7 @@ describe('portfolio simulator: one plan', () => {
   });
 
   it('a pool too small to fund a payout records the shortfall and never goes negative', () => {
-    const result = runPortfolio([makeApplicant()], { poolSizeCents: 300_000 });
+    const result = runPortfolio([makeApplicant()], { ...MECHANICS, poolSizeCents: 300_000 });
     expect(result.unfundedPayouts).toBe(12);
     expect(result.poolMinCents).toBe(300_000);
     expect(result.customers[0]!.payoutCount).toBe(0);
@@ -138,6 +157,90 @@ describe('portfolio simulator: one plan', () => {
     });
     expect(result.customers[0]!.outcome).toBe('DECLINED');
     expect(result.customers[0]!.payoutCount).toBe(0);
+  });
+});
+
+describe('portfolio simulator: review and exposure', () => {
+  const v2 = {
+    decide: (input: Parameters<typeof decide>[0]) => decide(input, POLICY_V2),
+    exposure: POLICY_V2.exposure,
+  };
+  const referEverything = {
+    ...v2,
+    decide: (input: Parameters<typeof decide>[0]) => {
+      const r = decide(input, POLICY_V2);
+      return r.outcome === 'APPROVED' ? { ...r, outcome: 'REFER' as const } : r;
+    },
+  };
+
+  it('a clean applicant is decided by the engine alone under the current policy', () => {
+    const c = runPortfolio([makeApplicant()], { ...v2, poolSizeCents: 100_000_000 }).customers[0]!;
+    expect(c).toMatchObject({ outcome: 'APPROVED', engineOutcome: 'APPROVED', referred: false });
+    expect(c.payoutCount).toBe(12);
+    // The limit is the request and the fee build up is recorded.
+    expect(c.approvedLimitCents).toBe(400_000);
+    expect(c.pdBps).toBeGreaterThan(0);
+    expect(c.expectedLossBps).toBeGreaterThan(0);
+  });
+
+  it('a referred honest applicant is approved at the terms the engine recommended', () => {
+    const c = runPortfolio([makeApplicant()], {
+      ...referEverything,
+      poolSizeCents: 100_000_000,
+    }).customers[0]!;
+    expect(c).toMatchObject({ outcome: 'APPROVED', engineOutcome: 'REFER', referred: true });
+    expect(c.planRentCents).toBe(400_000);
+    expect(c.payoutCount).toBe(12);
+  });
+
+  it('a referred fraud applicant is declined when the reviewer catches it, funded when not', () => {
+    const fraud = makeApplicant({ fraud: 'inflated_revenue', segment: 'inflated_revenue' });
+    const caught = runPortfolio([fraud], {
+      ...referEverything,
+      poolSizeCents: 100_000_000,
+      reviewFraudCatchRateBps: 10_000,
+    }).customers[0]!;
+    expect(caught).toMatchObject({ outcome: 'DECLINED', engineOutcome: 'REFER', referred: true });
+    expect(caught.payoutCount).toBe(0);
+    const missed = runPortfolio([fraud], {
+      ...referEverything,
+      poolSizeCents: 100_000_000,
+      reviewFraudCatchRateBps: 0,
+    }).customers[0]!;
+    expect(missed).toMatchObject({ outcome: 'APPROVED', referred: true });
+    expect(missed.payoutCount).toBe(12);
+  });
+
+  it('a plan waits when the pool is over its utilization ceiling, then gives up', () => {
+    // $4,000 of rent against a $4,500 pool is 89% of capital: over the 85% ceiling. The
+    // engine is told nothing about the pool here, so only the start of the plan is gated.
+    const result = runPortfolio([makeApplicant()], {
+      decide: (input) => decide({ ...input, exposureContext: null }, POLICY_V2),
+      exposure: POLICY_V2.exposure,
+      poolSizeCents: 450_000,
+      maxWaitMonths: 2,
+    });
+    const c = result.customers[0]!;
+    expect(c.outcome).toBe('APPROVED');
+    expect(c).toMatchObject({ neverFunded: true, fundingWaitMonths: 3, payoutCount: 0 });
+    expect(result).toMatchObject({ plansDelayed: 1, plansNeverFunded: 1, unfundedPayouts: 0 });
+    expectCashConserved(result);
+    // The same plan starts at once when the exposure rules are off.
+    const open = runPortfolio([makeApplicant()], {
+      decide: (input) => decide({ ...input, exposureContext: null }, POLICY_V2),
+      exposure: null,
+      poolSizeCents: 450_000,
+    });
+    expect(open.customers[0]!.payoutCount).toBe(12);
+  });
+
+  it('a business over its share of the pool waits: the limit is not cut', () => {
+    // 5% of a $50,000 pool is $2,500, against a $4,000 plan.
+    const result = runPortfolio([makeApplicant()], { ...v2, poolSizeCents: 5_000_000 });
+    const c = result.customers[0]!;
+    expect(c.outcome).toBe('APPROVED');
+    expect(c.approvedLimitCents).toBe(400_000);
+    expect(c).toMatchObject({ neverFunded: true, payoutCount: 0 });
   });
 });
 

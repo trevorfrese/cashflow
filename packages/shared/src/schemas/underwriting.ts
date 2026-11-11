@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { CashFlowSummary } from './bank-data';
 
-import { ApplicationStatus, DecisionOutcome } from '../enums';
+import { ApplicationStatus, DecisionKind, DecisionOutcome, ReviewDecision } from '../enums';
 import { Bps, Cents, Id, IsoDateTimeSchema } from './common';
 
 export const CreateApplicationRequest = z.object({
@@ -48,8 +48,12 @@ export const UnderwritingDecision = z.object({
   reasons: z.array(DecisionReason),
   /** Features the decision was based on. Null when no bank data was available. */
   cashFlow: CashFlowSummary.nullable(),
-  /** Which provider produced the decision (for example "cashflow-v1"). */
+  /** Which provider produced the decision (for example "cashflow"). */
   provider: z.string(),
+  /** Version of the credit policy that made the decision (for example "cashflow-v2"). */
+  policyVersion: z.string().optional(),
+  /** Whether the engine, a reviewer, or a periodic review produced it. */
+  kind: DecisionKind.optional(),
   decidedAt: IsoDateTimeSchema,
 });
 export type UnderwritingDecision = z.infer<typeof UnderwritingDecision>;
@@ -63,3 +67,91 @@ export const UnderwritingApplication = CreateApplicationRequest.extend({
   updatedAt: IsoDateTimeSchema,
 });
 export type UnderwritingApplication = z.infer<typeof UnderwritingApplication>;
+
+/**
+ * Reason codes a reviewer picks from. At least one is required whenever the reviewer's
+ * outcome or terms differ from the engine's recommendation.
+ */
+export const ReviewReasonCode = z.enum([
+  'LEASE_VERIFIED',
+  'REVENUE_VERIFIED_OTHER_SOURCE',
+  'IDENTITY_VERIFIED',
+  'INTEGRITY_FLAG_CLEARED',
+  'INTEGRITY_FLAG_CONFIRMED',
+  'FRAUD_SUSPECTED',
+  'DOCUMENTS_NOT_PROVIDED',
+  'COMPENSATING_FACTORS',
+  'EXPOSURE_ADJUSTED',
+  'PRICING_ADJUSTED',
+  'OTHER',
+]);
+export type ReviewReasonCode = z.infer<typeof ReviewReasonCode>;
+
+export const RecordReviewRequest = z.object({
+  /**
+   * Who reviewed. A free text identity until admin authentication exists, recorded as given.
+   */
+  reviewer: z.string().min(1).max(200),
+  decision: ReviewDecision,
+  reasonCodes: z.array(ReviewReasonCode).max(10).default([]),
+  /** Internal notes. Never shown to the applicant. */
+  notes: z.string().max(2000).optional(),
+  /** What the applicant is asked to provide. Required with REQUEST_INFO, shown to them. */
+  applicantMessage: z.string().min(1).max(500).optional(),
+  /** Approve at this limit instead of the engine's recommended one. */
+  approvedMonthlyLimitCents: Cents.optional(),
+  /** Approve at this fee instead of the engine's recommended one. */
+  feeBps: Bps.optional(),
+});
+export type RecordReviewRequest = z.infer<typeof RecordReviewRequest>;
+
+export const ApplicationReview = z.object({
+  id: Id,
+  applicationId: Id,
+  reviewer: z.string(),
+  decision: ReviewDecision,
+  reasonCodes: z.array(z.string()),
+  notes: z.string().nullable(),
+  approvedMonthlyLimitCents: Cents.nullable(),
+  feeBps: Bps.nullable(),
+  /** The reviewer's outcome or terms differed from the engine's recommendation. */
+  isOverride: z.boolean(),
+  createdAt: IsoDateTimeSchema,
+});
+export type ApplicationReview = z.infer<typeof ApplicationReview>;
+
+/** One integrity finding, as an operator sees it. Never sent to applicants. */
+export const IntegrityFlagView = z.object({
+  code: z.string(),
+  severity: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+  action: z.enum(['KNOCKOUT', 'REFER', 'CAP', 'NEEDS_INFO', 'INFORM']),
+  detail: z.string(),
+});
+export type IntegrityFlagView = z.infer<typeof IntegrityFlagView>;
+
+/** An application waiting for a reviewer, with what the engine found. Operator only. */
+export const ReviewQueueItem = z.object({
+  applicationId: Id,
+  businessId: Id,
+  businessName: z.string(),
+  status: ApplicationStatus,
+  requestedMonthlyRentCents: Cents,
+  submittedAt: IsoDateTimeSchema.nullable(),
+  policyVersion: z.string(),
+  score: z.number().int().nullable(),
+  grade: CreditGrade.nullable(),
+  /** What the engine would have done without the referral. */
+  recommendedOutcome: DecisionOutcome,
+  recommendedMonthlyLimitCents: Cents.nullable(),
+  recommendedFeeBps: Bps.nullable(),
+  referTriggers: z.array(z.string()),
+  integrityFlags: z.array(IntegrityFlagView),
+  reasons: z.array(DecisionReason),
+});
+export type ReviewQueueItem = z.infer<typeof ReviewQueueItem>;
+
+export const RecordReviewResponse = z.object({
+  review: ApplicationReview,
+  application: UnderwritingApplication,
+});
+export type RecordReviewResponse = z.infer<typeof RecordReviewResponse>;

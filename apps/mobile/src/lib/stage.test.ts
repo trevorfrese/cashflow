@@ -21,6 +21,10 @@ describe('deriveStage', () => {
     expect(deriveStage({ applications: [app('DECLINED')], leases: [], plans: [] }).kind).toBe(
       'DECLINED',
     );
+    // A referred application is waiting on a reviewer, not approved.
+    expect(deriveStage({ applications: [app('IN_REVIEW')], leases: [], plans: [] }).kind).toBe(
+      'IN_REVIEW',
+    );
     expect(
       deriveStage({
         applications: [

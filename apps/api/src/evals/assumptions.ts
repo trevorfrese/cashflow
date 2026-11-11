@@ -37,6 +37,23 @@ export const ASSUMPTIONS = {
    */
   measurementChargeOffDays: 90,
 
+  /**
+   * Manual review. A reviewer who is sent a referred application catches and declines this
+   * share of fraud applicants, in basis points, and approves everything else at the terms
+   * the engine recommended. 70% is an assumption, not a measurement: a reviewer who asks for
+   * the lease and calls the landlord stops most staged applications, and misses some. Honest
+   * applicants are unaffected, because the reviewer has no information about them that the
+   * engine lacks.
+   */
+  reviewFraudCatchRateBps: 7000,
+
+  /**
+   * An approved plan the pool cannot take under the exposure rules waits and is tried again
+   * on each of this many following rent dates. After that the applicant is counted as
+   * approved but never funded.
+   */
+  maxFundingWaitMonths: 3,
+
   /** A plan is "bad" if any installment reaches this many days past due, or is written off. */
   badDaysPastDue: 30,
 

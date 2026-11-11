@@ -5,6 +5,7 @@ import {
   client,
   createTestApp,
   demoLease,
+  fundPool,
   registerUser,
   resetDb,
   type TestHarness,
@@ -24,6 +25,8 @@ beforeEach(async () => {
 
 describe('rent plan settings', () => {
   it('changes the cadence, pauses and resumes, and stays private to the owner', async () => {
+    // A plan can only be opened against a funded pool.
+    await fundPool(h.app, 25_000_000);
     const session = await registerUser(h.app);
     const api = client(h.app, session);
     const { businessId, applicationId } = await approvedBusiness(h.app, session);

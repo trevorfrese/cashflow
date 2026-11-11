@@ -12,11 +12,22 @@ export const ApplicationStatus = z.enum([
   'APPROVED',
   'DECLINED',
   'NEEDS_INFO',
+  /** Referred to a reviewer. No terms are shown until the review is recorded. */
+  'IN_REVIEW',
 ]);
 export type ApplicationStatus = z.infer<typeof ApplicationStatus>;
 
-export const DecisionOutcome = z.enum(['APPROVED', 'DECLINED', 'NEEDS_INFO']);
+/** `REFER` means the engine would not decide alone: a reviewer records the outcome. */
+export const DecisionOutcome = z.enum(['APPROVED', 'DECLINED', 'NEEDS_INFO', 'REFER']);
 export type DecisionOutcome = z.infer<typeof DecisionOutcome>;
+
+/** What a reviewer decided about a referred or reconsidered application. */
+export const ReviewDecision = z.enum(['APPROVE', 'DECLINE', 'REQUEST_INFO']);
+export type ReviewDecision = z.infer<typeof ReviewDecision>;
+
+/** Why a decision row exists: the engine ran, a reviewer decided, or a periodic review ran. */
+export const DecisionKind = z.enum(['ENGINE', 'REVIEW', 'PERIODIC_REVIEW']);
+export type DecisionKind = z.infer<typeof DecisionKind>;
 
 export const LeaseStatus = z.enum(['DRAFT', 'ACTIVE', 'ENDED']);
 export type LeaseStatus = z.infer<typeof LeaseStatus>;

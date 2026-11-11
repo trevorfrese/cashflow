@@ -60,6 +60,11 @@ export const RentPlan = z.object({
   monthlyRentCents: Cents,
   dueDayOfMonth: z.number().int().min(1).max(31),
   status: RentPlanStatus,
+  /**
+   * True when a periodic review has frozen the plan: no new rent period is generated or paid
+   * to the landlord until a later review clears it. Rent already fronted is still collected.
+   */
+  advanceFrozen: z.boolean().optional(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });

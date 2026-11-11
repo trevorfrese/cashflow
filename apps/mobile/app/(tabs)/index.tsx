@@ -131,6 +131,24 @@ function StageCard({ stage, leases }: { stage: Stage; leases: Lease[] }) {
           />
         </Card>
       );
+    case 'IN_REVIEW':
+      return (
+        <Card>
+          <Pill label="In review" tone="due" />
+          <Text variant="title">We are taking a look</Text>
+          <Text variant="body" tone="muted">
+            Our team is reviewing your application before we confirm terms. Nothing more is needed
+            from you right now.
+          </Text>
+          <Button
+            title="View application"
+            variant="secondary"
+            onPress={() =>
+              router.push({ pathname: '/application/[id]', params: { id: stage.application.id } })
+            }
+          />
+        </Card>
+      );
     case 'DECLINED':
       return (
         <Card>

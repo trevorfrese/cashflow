@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { makeCustomer } from './fixtures.ts';
 import {
+  calibration,
+  calibrationBand,
   computeMetrics,
   customerNetMarginCents,
+  poolResults,
   gradeInversions,
   rankOrdering,
   scoreBand,
@@ -78,6 +81,8 @@ function portfolio(customers: CustomerResult[], label = 'base'): PortfolioResult
     poolMinCents: 800_000,
     unfundedPayouts: 0,
     unfundedPayoutDays: 0,
+    plansDelayed: 0,
+    plansNeverFunded: 0,
     pool: [
       {
         month: '2026-02',
@@ -252,5 +257,98 @@ describe('swap set', () => {
     expect(s.neitherApproved).toBe(0);
     expect(s.swapOut).toEqual({ count: 1, plans: 1, badRateBps: 10_000, netMarginCents: -46_844 });
     expect(s.swapIn).toMatchObject({ count: 1, plans: 1, badRateBps: 10_000 });
+  });
+});
+
+describe('referrals and funding', () => {
+  it('counts referrals beside the final outcome and separates engine only approvals', () => {
+    const referredApproved = makeCustomer({
+      applicantId: 'r1',
+      engineOutcome: 'REFER',
+      referred: true,
+    });
+    const referredDeclined = makeCustomer({
+      applicantId: 'r2',
+      outcome: 'DECLINED',
+      engineOutcome: 'REFER',
+      referred: true,
+      fraud: 'bust_out',
+    });
+    const waiting = makeCustomer({ applicantId: 'w', neverFunded: true });
+    const m = segmentMetrics([good, referredApproved, referredDeclined, waiting, declined], COSTS);
+    expect(m).toMatchObject({
+      applicants: 5,
+      approved: 3,
+      declined: 2,
+      referred: 2,
+      referRateBps: 4000,
+      autoApproved: 2,
+      neverFunded: 1,
+    });
+    const metrics = computeMetrics(portfolio([good, referredDeclined]), COSTS);
+    expect(metrics.fraud).toMatchObject({ applicants: 1, approved: 0, referred: 1 });
+    expect(metrics.funding).toEqual({ plansDelayed: 0, plansNeverFunded: 0 });
+  });
+});
+
+describe('calibration', () => {
+  it('bands scores five wide from 45 up', () => {
+    expect(calibrationBand(44)).toBe('0-44');
+    expect(calibrationBand(50)).toBe('50-54');
+    expect(calibrationBand(54)).toBe('50-54');
+    expect(calibrationBand(94)).toBe('90-94');
+    expect(calibrationBand(95)).toBe('95-100');
+    expect(calibrationBand(100)).toBe('95-100');
+  });
+
+  it('sets expected bad rate and loss beside what was realized', () => {
+    const priced = (id: string, isBad: boolean) =>
+      makeCustomer({
+        applicantId: id,
+        score: 62,
+        pdBps: 1000,
+        expectedLossBps: 50,
+        payoutCount: 10,
+        payoutCents: 1_000_000,
+        chargedOffCents: isBad ? 100_000 : 0,
+        recoveredCents: isBad ? 10_000 : 0,
+        bad: isBad,
+      });
+    const rows = calibration([
+      priced('a', false),
+      priced('b', false),
+      priced('c', false),
+      priced('d', true),
+    ]);
+    expect(rows).toEqual([
+      {
+        band: '60-64',
+        plans: 4,
+        expectedBadRateBps: 1000,
+        realizedBadRateBps: 2500,
+        expectedLossBps: 50,
+        // 90,000 net loss on 4,000,000 of volume.
+        realizedLossBps: 225,
+      },
+    ]);
+  });
+
+  it('leaves out plans that were not priced on expected loss, and unfunded applicants', () => {
+    expect(calibration([good, bad, declined])).toEqual([]);
+  });
+});
+
+describe('pooling seeds', () => {
+  it('makes one book of several runs', () => {
+    const a = portfolio([good, bad]);
+    const b = { ...portfolio([good, declined]), poolMinCents: 700_000, unfundedPayouts: 2 };
+    const pooled = poolResults([a, b]);
+    expect(pooled.customers).toHaveLength(4);
+    // Ids stay unique so swap sets can pair customers across runs.
+    expect(new Set(pooled.customers.map((c) => c.applicantId)).size).toBe(4);
+    expect(pooled.poolMinCents).toBe(700_000);
+    expect(pooled.unfundedPayouts).toBe(2);
+    const m = computeMetrics(pooled, COSTS);
+    expect(m.overall).toMatchObject({ applicants: 4, approved: 3, plans: 3 });
   });
 });

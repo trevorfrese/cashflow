@@ -21,7 +21,8 @@
     "db:reset": "prisma migrate reset --force",
     "db:studio": "prisma studio",
     "job:run": "tsx --env-file-if-exists=.env src/jobs/cli.ts",
-    "eval:portfolio": "tsx src/evals/cli.ts"
+    "eval:portfolio": "tsx src/evals/cli.ts",
+    "eval:calibrate": "tsx src/evals/calibrate.ts"
   },
   "dependencies": {
     "@cashflow/shared": "workspace:*",

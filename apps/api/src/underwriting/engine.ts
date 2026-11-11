@@ -10,7 +10,29 @@ import type {
 } from '@cashflow/shared';
 import { formatCents } from '@cashflow/shared';
 
-import { computeCashFlowFeatures } from './features.ts';
+import {
+  approvedLimit,
+  checkFunding,
+  NO_EXPOSURE_CONTEXT,
+  type ExposureContext,
+  type FundingCheck,
+  type LimitResult,
+} from './exposure.ts';
+import { computeCashFlowFeatures, coverageRatio, freeCashCents } from './features.ts';
+import {
+  findRoundTrips,
+  flagsWithAction,
+  runIntegrityChecks,
+  type IntegrityContext,
+  type IntegrityFlag,
+} from './integrity.ts';
+import {
+  CURRENT_POLICY,
+  thresholdsInForce,
+  type CreditPolicy,
+  type PolicyThresholds,
+} from './policy.ts';
+import { priceFee, type FeeBuildUp } from './pricing.ts';
 import { scoreCashFlow } from './scorecard.ts';
 
 /**
@@ -18,12 +40,19 @@ import { scoreCashFlow } from './scorecard.ts';
  *
  * Order of operations:
  *   1. Missing data -> NEEDS_INFO. We never decline for information we have not received.
- *   2. Features from bank transactions (and platform sales when a POS is connected), then a
- *      0 to 100 score and letter grade.
- *   3. Hard policy rules -> DECLINED regardless of score.
- *   4. Capacity: the largest monthly rent the business can carry with a margin of safety,
- *      bounded by a share of verified revenue and by free cash flow coverage.
- *   5. Pricing by grade, and a suggested installment cadence from cash flow timing.
+ *   2. Features from bank transactions (and platform sales when a POS is connected). Credits
+ *      the integrity checks matched to a same sized transfer out are left out of revenue.
+ *   3. Integrity checks: can the numbers be trusted. See `integrity.ts`.
+ *   4. A 0 to 100 score and letter grade.
+ *   5. Hard policy rules -> DECLINED regardless of score.
+ *   6. Capacity, price, and exposure limit, solved together: the fee depends on the rent
+ *      (servicing is a fixed cost) and the rent we can front depends on the fee.
+ *   7. A fee above the cap -> DECLINED. An offer under half the request -> DECLINED.
+ *   8. Escalation: anything a person should look at -> REFER, carrying the terms the engine
+ *      would have offered.
+ *
+ * Every number comes from the `CreditPolicy` passed in, which defaults to the current one.
+ * The function is pure: same input and policy, same result.
  */
 
 export interface EngineInput {
@@ -41,10 +70,57 @@ export interface EngineInput {
     dailySales: DailySales[];
     connectedSince: IsoDate;
   } | null;
+  /** Facts the service looked up for the integrity checks. Absent means not checked. */
+  integrityContext?: IntegrityContext | null;
+  /** What the business and the pool already hold. Absent means a new customer, pool unknown. */
+  exposureContext?: ExposureContext | null;
+  /**
+   * A periodic review of a running plan. What the owner stated on the application months
+   * ago is no longer the question, so the stated revenue checks are skipped: a business
+   * whose revenue has collapsed must be scored, not asked to explain the gap.
+   */
+  periodicReview?: boolean;
+}
+
+/**
+ * Everything behind a decision that is stored but never shown to the applicant: the policy
+ * version and cutoffs in force, what went in, integrity flags, the fee build up with PD and
+ * expected loss, the caps on the limit, and why it was referred.
+ */
+export interface DecisionSnapshot {
+  policyVersion: string;
+  inputs: {
+    statedMonthlyRevenueCents: number;
+    timeInBusinessMonths: number;
+    requestedMonthlyRentCents: number;
+    asOf: IsoDate | null;
+    transactionCount: number;
+    excludedRoundTripCredits: number;
+    commercePlatform: CommercePlatform | null;
+    integrityContext: IntegrityContext | null;
+    exposureContext: ExposureContext | null;
+  };
+  thresholds: PolicyThresholds;
+  integrityFlags: IntegrityFlag[];
+  pricing: FeeBuildUp | null;
+  exposure: LimitResult | null;
+  funding: FundingCheck | null;
+  /** Empty unless the outcome is REFER. */
+  referTriggers: string[];
+  /** What the engine would have done had nothing sent the application to a reviewer. */
+  recommendation: {
+    outcome: DecisionOutcome;
+    approvedMonthlyLimitCents: number | null;
+    feeBps: number | null;
+  };
 }
 
 export interface EngineResult {
   outcome: DecisionOutcome;
+  /**
+   * The limit and fee offered. On a REFER these are the engine's recommended terms for the
+   * reviewer; serializers do not show them to the applicant until a review approves.
+   */
   approvedMonthlyLimitCents: number | null;
   feeBps: number | null;
   score: number | null;
@@ -52,43 +128,12 @@ export interface EngineResult {
   recommendedInstallmentsPerMonth: number | null;
   reasons: DecisionReason[];
   cashFlow: CashFlowSummary | null;
+  policyVersion: string;
+  snapshot: DecisionSnapshot;
 }
 
-/** All policy numbers in one place so the credit box is readable at a glance. */
-export const POLICY = {
-  /** Full months of bank history before we can score at all. */
-  minMonthsOfHistory: 6,
-  /** Months in business (self reported) below which we decline. */
-  minTimeInBusinessMonths: 6,
-  /** Verified monthly revenue floor. */
-  minVerifiedRevenueCents: 500_000,
-  /** Stated revenue more than this far above verified revenue needs explaining. 5000 bps = 50%. */
-  maxStatedRevenueVarianceBps: 5000,
-  /** Bank deposits must cover this share of POS net sales before POS sales count as verified revenue. */
-  minDepositMatchBps: 7000,
-  /** Hard limits on conduct in the last 90 days. */
-  maxNsf90: 2,
-  maxNegativeBalanceDays90: 10,
-  /** Hard limit on rent as a share of verified revenue. */
-  maxRentToRevenueBps: 4000,
-  /** Steepest revenue decline we will accept, last 3 months vs prior 3. */
-  maxRevenueDeclineBps: -2500,
-  /** Free cash flow must cover rent plus fee by this much. 125 = 1.25x. */
-  minCoverageRatio: 125,
-  /** Score below which we decline. */
-  minScore: 45,
-  /** Approve at a lower limit when capacity is at least this share of the request. */
-  minCounterOfferBps: 5000,
-  /** Limits are rounded down to this increment. */
-  limitIncrementCents: 10_000,
-  pricing: {
-    A: { feeBps: 150, maxRentShareBps: 3000 },
-    B: { feeBps: 200, maxRentShareBps: 2500 },
-    C: { feeBps: 250, maxRentShareBps: 2000 },
-    D: { feeBps: 300, maxRentShareBps: 1500 },
-    F: { feeBps: 300, maxRentShareBps: 0 },
-  } satisfies Record<CreditGrade, { feeBps: number; maxRentShareBps: number }>,
-} as const;
+/** The current policy. Kept under this name for callers that predate `policy.ts`. */
+export const POLICY = CURRENT_POLICY;
 
 function reason(
   code: string,
@@ -98,29 +143,23 @@ function reason(
   return { code, message, impact };
 }
 
-function needsInfo(reasons: DecisionReason[], cashFlow: CashFlowSummary | null): EngineResult {
-  return {
-    outcome: 'NEEDS_INFO',
-    approvedMonthlyLimitCents: null,
-    feeBps: null,
-    score: null,
-    grade: null,
-    recommendedInstallmentsPerMonth: null,
-    reasons,
-    cashFlow,
-  };
-}
-
-/** Largest rent such that revenue share and coverage policies both hold, rounded down. */
-export function capacityCents(s: CashFlowSummary, grade: CreditGrade): number {
-  const pricing = POLICY.pricing[grade];
-  const revenueCap = (s.verifiedMonthlyRevenueCents * pricing.maxRentShareBps) / 10_000;
-  const freeCash = s.monthlyNetCashFlowCents + (s.observedRentCents ?? 0);
-  const feeMultiplier = 1 + pricing.feeBps / 10_000;
-  const coverageCap = freeCash / ((POLICY.minCoverageRatio / 100) * feeMultiplier);
+/**
+ * Largest rent such that revenue share and coverage policies both hold, rounded down.
+ * `feeBps` is the fee the coverage test must leave room for; it defaults to the grade floor.
+ */
+export function capacityCents(
+  s: CashFlowSummary,
+  grade: CreditGrade,
+  policy: CreditPolicy = CURRENT_POLICY,
+  feeBps: number = policy.pricing[grade].feeBps,
+): number {
+  const revenueCap =
+    (s.verifiedMonthlyRevenueCents * policy.pricing[grade].maxRentShareBps) / 10_000;
+  const feeMultiplier = 1 + feeBps / 10_000;
+  const coverageCap = freeCashCents(s) / ((policy.minCoverageRatio / 100) * feeMultiplier);
   const raw = Math.min(revenueCap, coverageCap);
   if (!Number.isFinite(raw) || raw <= 0) return 0;
-  return Math.floor(raw / POLICY.limitIncrementCents) * POLICY.limitIncrementCents;
+  return Math.floor(raw / policy.limitIncrementCents) * policy.limitIncrementCents;
 }
 
 /**
@@ -133,7 +172,115 @@ export function recommendInstallments(s: CashFlowSummary): number {
   return 2;
 }
 
-export function decide(input: EngineInput): EngineResult {
+export interface DeclineSignal {
+  code: 'REVENUE_DECLINING' | 'DECLINE_WITH_THIN_BUFFER';
+  message: string;
+}
+
+/**
+ * Earlier decline detection (policy version 2).
+ *
+ * Version 1 declined only when the last three full months were more than 25% below the prior
+ * three. By the time a slide shows that clearly in calendar quarters it is months old. This
+ * looks at windows that end on the application date, and uses the same weeks a year earlier
+ * to tell a seasonal trough from a decline:
+ *
+ *   - With a year of history: decline when the trailing four weeks are down against a year
+ *     ago by more than the threshold (widened for businesses whose months are noisy), and
+ *     the trailing twelve weeks confirm it. A seasonal business in its slow season is level
+ *     with last year and passes.
+ *   - Without a year of history there is no way to rule out a season, so the bar is higher:
+ *     the trailing twelve weeks must be well down on the twelve before.
+ *   - Either way, a smaller decline is enough when the cash buffer is thin, because there is
+ *     nothing to absorb it.
+ */
+export function detectDecline(s: CashFlowSummary, policy: CreditPolicy): DeclineSignal | null {
+  const rules = policy.trend;
+  const t = s.revenueTrend ?? null;
+  if (!rules || !t) return null;
+  const pct = (bpsValue: number) => `${Math.abs(bpsValue / 100).toFixed(0)}%`;
+  const thin = s.daysOfCashOnHand !== null && s.daysOfCashOnHand < rules.thinBufferDays;
+  const recent = t.recent12VsPrior12WeeksBps;
+  if (t.yearOverYearBps !== null) {
+    const yoy = t.yearOverYearBps;
+    const confirmed = recent !== null && recent < rules.confirmRecentDeclineBps;
+    const threshold = Math.min(
+      rules.maxYearOverYearDeclineBps,
+      -Math.round(s.revenueVolatilityBps * rules.volatilityMultiple),
+    );
+    if (yoy < threshold && confirmed) {
+      return {
+        code: 'REVENUE_DECLINING',
+        message: `Revenue over the last four weeks is down ${pct(yoy)} on the same weeks a year ago, and the last twelve weeks are down ${pct(recent)} on the twelve before.`,
+      };
+    }
+    if (thin && yoy < rules.thinBufferDeclineBps && confirmed) {
+      return {
+        code: 'DECLINE_WITH_THIN_BUFFER',
+        message: `Revenue is down ${pct(yoy)} on a year ago with ${s.daysOfCashOnHand} days of cash on hand, which leaves no room to absorb a further fall.`,
+      };
+    }
+    return null;
+  }
+  if (recent === null) return null;
+  if (recent < rules.maxRecentDeclineBps) {
+    return {
+      code: 'REVENUE_DECLINING',
+      message: `Revenue over the last twelve weeks is down ${pct(recent)} on the twelve weeks before.`,
+    };
+  }
+  if (thin && recent < rules.thinBufferDeclineBps) {
+    return {
+      code: 'DECLINE_WITH_THIN_BUFFER',
+      message: `Revenue is down ${pct(recent)} over the last twelve weeks with ${s.daysOfCashOnHand} days of cash on hand, which leaves no room to absorb a further fall.`,
+    };
+  }
+  return null;
+}
+
+const usd = (cents: number) => formatCents(cents, { showCents: false });
+const feePct = (feeBps: number) =>
+  `${(feeBps / 100).toFixed(feeBps % 100 === 0 ? 0 : feeBps % 10 === 0 ? 1 : 2)}%`;
+
+export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY): EngineResult {
+  const requested = input.requestedMonthlyRentCents;
+  const snapshot: DecisionSnapshot = {
+    policyVersion: policy.version,
+    inputs: {
+      statedMonthlyRevenueCents: input.statedMonthlyRevenueCents,
+      timeInBusinessMonths: input.timeInBusinessMonths,
+      requestedMonthlyRentCents: requested,
+      asOf: input.bankData?.asOf ?? null,
+      transactionCount: input.bankData?.transactions.length ?? 0,
+      excludedRoundTripCredits: 0,
+      commercePlatform: input.commerceData?.platform ?? null,
+      integrityContext: input.integrityContext ?? null,
+      exposureContext: input.exposureContext ?? null,
+    },
+    thresholds: thresholdsInForce(policy),
+    integrityFlags: [],
+    pricing: null,
+    exposure: null,
+    funding: null,
+    referTriggers: [],
+    recommendation: { outcome: 'NEEDS_INFO', approvedMonthlyLimitCents: null, feeBps: null },
+  };
+  const needsInfo = (
+    reasons: DecisionReason[],
+    cashFlow: CashFlowSummary | null,
+  ): EngineResult => ({
+    outcome: 'NEEDS_INFO',
+    approvedMonthlyLimitCents: null,
+    feeBps: null,
+    score: null,
+    grade: null,
+    recommendedInstallmentsPerMonth: null,
+    reasons,
+    cashFlow,
+    policyVersion: policy.version,
+    snapshot,
+  });
+
   if (!input.bankData) {
     return needsInfo(
       [
@@ -147,33 +294,32 @@ export function decide(input: EngineInput): EngineResult {
     );
   }
 
-  const cashFlow = computeCashFlowFeatures({
+  // Deposits that left again as a same sized transfer are not revenue. Find them first so
+  // every feature downstream is computed without them.
+  const roundTrips = policy.integrity
+    ? findRoundTrips(input.bankData.transactions, input.bankData.asOf, policy.integrity.roundTrip)
+    : [];
+  snapshot.inputs.excludedRoundTripCredits = roundTrips.length;
+
+  let cashFlow = computeCashFlowFeatures({
     transactions: input.bankData.transactions,
     currentBalanceCents: input.bankData.currentBalanceCents,
     asOf: input.bankData.asOf,
     statedMonthlyRevenueCents: input.statedMonthlyRevenueCents,
-    requestedMonthlyRentCents: input.requestedMonthlyRentCents,
+    requestedMonthlyRentCents: requested,
+    provisionalFeeBps: policy.scoredCoverageFeeBps,
     commerce: input.commerceData ?? null,
+    ...(roundTrips.length > 0
+      ? { excludeTransactionIds: new Set(roundTrips.map((m) => m.creditId)) }
+      : {}),
   });
 
-  if (cashFlow.monthsOfHistory < POLICY.minMonthsOfHistory) {
+  if (cashFlow.monthsOfHistory < policy.minMonthsOfHistory) {
     return needsInfo(
       [
         reason(
           'INSUFFICIENT_HISTORY',
-          `We found ${cashFlow.monthsOfHistory} month${cashFlow.monthsOfHistory === 1 ? '' : 's'} of transactions. Connect the account that has received your revenue for at least ${POLICY.minMonthsOfHistory} months.`,
-          'INFO',
-        ),
-      ],
-      cashFlow,
-    );
-  }
-  if (cashFlow.statedRevenueVarianceBps > POLICY.maxStatedRevenueVarianceBps) {
-    return needsInfo(
-      [
-        reason(
-          'REVENUE_MISMATCH',
-          `You stated ${formatCents(input.statedMonthlyRevenueCents, { showCents: false })} a month but we verified ${formatCents(cashFlow.verifiedMonthlyRevenueCents, { showCents: false })}. Connect any other accounts that receive revenue, or update the stated figure.`,
+          `We found ${cashFlow.monthsOfHistory} month${cashFlow.monthsOfHistory === 1 ? '' : 's'} of transactions. Connect the account that has received your revenue for at least ${policy.minMonthsOfHistory} months.`,
           'INFO',
         ),
       ],
@@ -181,7 +327,47 @@ export function decide(input: EngineInput): EngineResult {
     );
   }
 
-  const card = scoreCashFlow(cashFlow);
+  const flags = policy.integrity
+    ? runIntegrityChecks(
+        {
+          transactions: input.bankData.transactions,
+          asOf: input.bankData.asOf,
+          summary: cashFlow,
+          statedMonthlyRevenueCents: input.statedMonthlyRevenueCents,
+          timeInBusinessMonths: input.timeInBusinessMonths,
+          requestedMonthlyRentCents: requested,
+          checkStatedRevenue: !input.periodicReview,
+          maxStatedRevenueVarianceBps: policy.maxStatedRevenueVarianceBps,
+          minDepositMatchBps: policy.minDepositMatchBps,
+          context: input.integrityContext ?? null,
+        },
+        policy.integrity,
+        roundTrips,
+      )
+    : [];
+  snapshot.integrityFlags = flags;
+  const integrityKnockouts = flagsWithAction(flags, 'KNOCKOUT');
+
+  // A knockout flag is decided now. Otherwise a large gap between stated and verified
+  // revenue is a question for the applicant, not a decline.
+  if (
+    integrityKnockouts.length === 0 &&
+    !input.periodicReview &&
+    cashFlow.statedRevenueVarianceBps > policy.maxStatedRevenueVarianceBps
+  ) {
+    return needsInfo(
+      [
+        reason(
+          'REVENUE_MISMATCH',
+          `You stated ${usd(input.statedMonthlyRevenueCents)} a month but we verified ${usd(cashFlow.verifiedMonthlyRevenueCents)}. Connect any other accounts that receive revenue, or update the stated figure.`,
+          'INFO',
+        ),
+      ],
+      cashFlow,
+    );
+  }
+
+  const card = scoreCashFlow(cashFlow, policy);
   const reasons: DecisionReason[] = card.factors.map((f) => reason(f.code, f.message, f.impact));
   const knockouts: DecisionReason[] = [];
 
@@ -191,7 +377,7 @@ export function decide(input: EngineInput): EngineResult {
   if (
     commerce &&
     commerce.depositMatchBps !== null &&
-    commerce.depositMatchBps < POLICY.minDepositMatchBps
+    commerce.depositMatchBps < policy.minDepositMatchBps
   ) {
     reasons.push(
       reason(
@@ -202,31 +388,50 @@ export function decide(input: EngineInput): EngineResult {
     );
   }
 
-  if (input.timeInBusinessMonths < POLICY.minTimeInBusinessMonths) {
+  for (const f of integrityKnockouts) {
+    if (f.code === 'ROUND_TRIP_DEPOSITS') {
+      knockouts.push(
+        reason(
+          'UNVERIFIED_DEPOSITS',
+          'Several large deposits were followed within days by transfers out of the same amount. We could not count them as revenue and cannot approve an application on this account.',
+        ),
+      );
+    } else if (f.code === 'LANDLORD_IS_APPLICANT_ACCOUNT') {
+      knockouts.push(
+        reason(
+          'LANDLORD_ACCOUNT_MATCH',
+          'The landlord payout account on your lease matches a bank account linked to your business. Rent has to be paid to the landlord.',
+        ),
+      );
+    } else {
+      knockouts.push(reason('INTEGRITY_CHECK_FAILED', 'We could not verify this application.'));
+    }
+  }
+  if (input.timeInBusinessMonths < policy.minTimeInBusinessMonths) {
     knockouts.push(
       reason(
         'TIME_IN_BUSINESS',
-        `We need at least ${POLICY.minTimeInBusinessMonths} months in business. You reported ${input.timeInBusinessMonths}.`,
+        `We need at least ${policy.minTimeInBusinessMonths} months in business. You reported ${input.timeInBusinessMonths}.`,
       ),
     );
   }
-  if (cashFlow.verifiedMonthlyRevenueCents < POLICY.minVerifiedRevenueCents) {
+  if (cashFlow.verifiedMonthlyRevenueCents < policy.minVerifiedRevenueCents) {
     knockouts.push(
       reason(
         'REVENUE_TOO_LOW',
-        `Verified revenue of ${formatCents(cashFlow.verifiedMonthlyRevenueCents, { showCents: false })} a month is below our ${formatCents(POLICY.minVerifiedRevenueCents, { showCents: false })} minimum.`,
+        `Verified revenue of ${usd(cashFlow.verifiedMonthlyRevenueCents)} a month is below our ${usd(policy.minVerifiedRevenueCents)} minimum.`,
       ),
     );
   }
-  if (cashFlow.nsfCount90 > POLICY.maxNsf90) {
+  if (cashFlow.nsfCount90 > policy.maxNsf90) {
     knockouts.push(
       reason(
         'EXCESSIVE_OVERDRAFTS',
-        `${cashFlow.nsfCount90} overdraft fees in the last 90 days. We allow at most ${POLICY.maxNsf90}.`,
+        `${cashFlow.nsfCount90} overdraft fees in the last 90 days. We allow at most ${policy.maxNsf90}.`,
       ),
     );
   }
-  if (cashFlow.negativeBalanceDays90 > POLICY.maxNegativeBalanceDays90) {
+  if (cashFlow.negativeBalanceDays90 > policy.maxNegativeBalanceDays90) {
     knockouts.push(
       reason(
         'NEGATIVE_BALANCE_DAYS',
@@ -234,24 +439,26 @@ export function decide(input: EngineInput): EngineResult {
       ),
     );
   }
-  if (cashFlow.rentToRevenueBps > POLICY.maxRentToRevenueBps) {
+  if (cashFlow.rentToRevenueBps > policy.maxRentToRevenueBps) {
     knockouts.push(
       reason(
         'RENT_EXCEEDS_REVENUE_SHARE',
-        `Requested rent is ${(cashFlow.rentToRevenueBps / 100).toFixed(0)}% of verified revenue. Our maximum is ${POLICY.maxRentToRevenueBps / 100}%.`,
+        `Requested rent is ${(cashFlow.rentToRevenueBps / 100).toFixed(0)}% of verified revenue. Our maximum is ${policy.maxRentToRevenueBps / 100}%.`,
       ),
     );
   }
-  if (cashFlow.monthsOfHistory >= 6 && cashFlow.revenueGrowthBps < POLICY.maxRevenueDeclineBps) {
+  if (cashFlow.monthsOfHistory >= 6 && cashFlow.revenueGrowthBps < policy.maxRevenueDeclineBps) {
     knockouts.push(
       reason(
         'REVENUE_DECLINING',
         `Revenue fell ${Math.abs(cashFlow.revenueGrowthBps / 100).toFixed(0)}% over the last three months compared with the prior three.`,
       ),
     );
+  } else {
+    const decline = detectDecline(cashFlow, policy);
+    if (decline) knockouts.push(reason(decline.code, decline.message));
   }
-  const freeCashCents = cashFlow.monthlyNetCashFlowCents + (cashFlow.observedRentCents ?? 0);
-  if (freeCashCents <= 0) {
+  if (freeCashCents(cashFlow) <= 0) {
     knockouts.push(
       reason(
         'NEGATIVE_FREE_CASH_FLOW',
@@ -259,97 +466,235 @@ export function decide(input: EngineInput): EngineResult {
       ),
     );
   }
-  if (card.score < POLICY.minScore) {
+  if (card.score < policy.minScore) {
     knockouts.push(
       reason(
         'SCORE_BELOW_MINIMUM',
-        `Overall cash flow score of ${card.score} is below our minimum of ${POLICY.minScore}.`,
+        `Overall cash flow score of ${card.score} is below our minimum of ${policy.minScore}.`,
       ),
     );
   }
 
-  const base = {
-    score: card.score,
-    grade: card.grade,
-    cashFlow,
-    recommendedInstallmentsPerMonth: recommendInstallments(cashFlow),
-  };
-
-  if (knockouts.length > 0) {
-    return {
-      ...base,
-      outcome: 'DECLINED',
-      approvedMonthlyLimitCents: null,
-      feeBps: null,
-      reasons: [...knockouts, ...reasons],
-    };
-  }
-
-  const capacity = capacityCents(cashFlow, card.grade);
-  const pricing = POLICY.pricing[card.grade];
-  const requested = input.requestedMonthlyRentCents;
-
-  if (capacity <= 0) {
-    return {
-      ...base,
-      outcome: 'DECLINED',
-      approvedMonthlyLimitCents: null,
-      feeBps: null,
-      reasons: [
-        reason(
-          'INSUFFICIENT_CAPACITY',
-          'Free cash flow after expenses and debt does not leave room for a rent advance with a margin of safety.',
-        ),
-        ...reasons,
-      ],
-    };
-  }
-
-  if (capacity < requested) {
-    const shareBps = Math.round((capacity * 10_000) / requested);
-    if (shareBps < POLICY.minCounterOfferBps) {
-      return {
-        ...base,
-        outcome: 'DECLINED',
-        approvedMonthlyLimitCents: null,
-        feeBps: null,
-        reasons: [
-          reason(
-            'INSUFFICIENT_CAPACITY',
-            `Cash flow supports up to ${formatCents(capacity, { showCents: false })} of monthly rent, well below the ${formatCents(requested, { showCents: false })} requested.`,
-          ),
-          ...reasons,
-        ],
-      };
+  const installments = recommendInstallments(cashFlow);
+  const finish = (
+    outcome: DecisionOutcome,
+    limitCents: number | null,
+    feeBps: number | null,
+    allReasons: DecisionReason[],
+  ): EngineResult => {
+    if (snapshot.referTriggers.length === 0) {
+      snapshot.recommendation = { outcome, approvedMonthlyLimitCents: limitCents, feeBps };
     }
     return {
-      ...base,
-      outcome: 'APPROVED',
-      approvedMonthlyLimitCents: capacity,
-      feeBps: pricing.feeBps,
-      reasons: [
-        reason(
-          'LIMIT_BELOW_REQUEST',
-          `Approved for up to ${formatCents(capacity, { showCents: false })} a month, below the ${formatCents(requested, { showCents: false })} requested, to keep repayments inside your free cash flow.`,
-          'INFO',
-        ),
-        ...reasons,
-      ],
+      outcome,
+      approvedMonthlyLimitCents: limitCents,
+      feeBps,
+      score: card.score,
+      grade: card.grade,
+      recommendedInstallmentsPerMonth: installments,
+      reasons: allReasons,
+      cashFlow,
+      policyVersion: policy.version,
+      snapshot,
+    };
+  };
+  const declined = (first: DecisionReason[]) =>
+    finish('DECLINED', null, null, [...first, ...reasons]);
+
+  if (knockouts.length > 0) return declined(knockouts);
+
+  // Capacity, price, and limit depend on each other: servicing is a fixed cost so the fee
+  // rate rises as the rent falls, and a higher fee leaves less room under the coverage test.
+  // Start at the requested rent and step down until the three agree. The rent only ever
+  // falls, so this settles in a couple of rounds.
+  const gradeFeeBps = policy.pricing[card.grade].feeBps;
+  const exposureContext = input.exposureContext ?? NO_EXPOSURE_CONTEXT;
+  const leaseVerified = input.integrityContext?.leaseVerified ?? false;
+  let rent = requested;
+  let fee: FeeBuildUp | null = null;
+  let feeBps = gradeFeeBps;
+  let capacity = 0;
+  let limit: LimitResult | null = null;
+  let limitCents = 0;
+  for (let round = 0; round < 6; round++) {
+    fee = policy.expectedLossPricing
+      ? priceFee(
+          { pricing: policy.pricing, expectedLossPricing: policy.expectedLossPricing },
+          {
+            score: card.score,
+            grade: card.grade,
+            rentCents: rent,
+            installmentsPerMonth: installments,
+          },
+        )
+      : null;
+    feeBps = fee?.feeBps ?? gradeFeeBps;
+    capacity = capacityCents(cashFlow, card.grade, policy, feeBps);
+    limit = policy.exposure
+      ? approvedLimit(policy.exposure, {
+          requestedCents: requested,
+          capacityCents: capacity,
+          observedRentCents: cashFlow.observedRentCents,
+          leaseVerified,
+          incrementCents: policy.limitIncrementCents,
+          context: exposureContext,
+        })
+      : null;
+    limitCents = limit ? limit.limitCents : capacity;
+    const fronted = Math.min(requested, limitCents);
+    if (fronted === rent || fronted <= 0) break;
+    rent = fronted;
+  }
+  snapshot.pricing = fee;
+  snapshot.exposure = limit;
+
+  if (capacity <= 0) {
+    return declined([
+      reason(
+        'INSUFFICIENT_CAPACITY',
+        'Free cash flow after expenses and debt does not leave room for a rent advance with a margin of safety.',
+      ),
+    ]);
+  }
+  if (limitCents <= 0) {
+    return declined([
+      reason(
+        'EXPOSURE_LIMIT_REACHED',
+        'Your business already has as much rent with CashFlow as we can front for one business right now.',
+      ),
+    ]);
+  }
+  if (fee && !fee.withinCap) {
+    return declined([
+      fee.driver === 'MINIMUM_FEE' || fee.servicingBps >= fee.maxFeeBps / 2
+        ? reason(
+            'RENT_BELOW_MINIMUM',
+            `Our fee has to cover a fixed cost of running each plan. At ${usd(fee.rentCents)} of monthly rent that comes to ${feePct(fee.feeBps)}, above our maximum fee of ${feePct(fee.maxFeeBps)}.`,
+          )
+        : reason(
+            'FEE_ABOVE_MAXIMUM',
+            `The fee needed to cover the risk and cost of this plan would be ${feePct(fee.feeBps)} of rent, above our maximum of ${feePct(fee.maxFeeBps)}. We would rather decline than approve at a price that does not cover the risk.`,
+          ),
+    ]);
+  }
+
+  // The coverage ratio stored on the decision is restated at the fee actually quoted.
+  if (policy.scoredCoverageFeeBps === 0) {
+    cashFlow = {
+      ...cashFlow,
+      rentCoverageRatio: coverageRatio(freeCashCents(cashFlow), requested, feeBps),
     };
   }
 
-  return {
-    ...base,
+  const binding = limit?.binding ?? 'CAPACITY';
+  let first: DecisionReason;
+  if (limitCents < requested) {
+    const shareBps = Math.round((limitCents * 10_000) / requested);
+    if (shareBps < policy.minCounterOfferBps) {
+      return declined([
+        binding === 'OBSERVED_RENT'
+          ? reason(
+              'RENT_NOT_VERIFIED',
+              `Your account shows rent of about ${usd(cashFlow.observedRentCents ?? 0)} a month. Without a payment history at the new amount we can front up to ${usd(limitCents)}, well below the ${usd(requested)} requested.`,
+            )
+          : binding === 'CAPACITY'
+            ? reason(
+                'INSUFFICIENT_CAPACITY',
+                `Cash flow supports up to ${usd(limitCents)} of monthly rent, well below the ${usd(requested)} requested.`,
+              )
+            : reason(
+                'EXPOSURE_LIMIT',
+                `We can front up to ${usd(limitCents)} a month for a business at this stage, well below the ${usd(requested)} requested. The amount rises with on time rent periods.`,
+              ),
+      ]);
+    }
+    first = reason(
+      'LIMIT_BELOW_REQUEST',
+      binding === 'OBSERVED_RENT'
+        ? `Approved for up to ${usd(limitCents)} a month, below the ${usd(requested)} requested, because your account shows rent of about ${usd(cashFlow.observedRentCents ?? 0)} a month.`
+        : binding === 'CAPACITY' || !limit
+          ? `Approved for up to ${usd(limitCents)} a month, below the ${usd(requested)} requested, to keep repayments inside your free cash flow.`
+          : `Approved for up to ${usd(limitCents)} a month, below the ${usd(requested)} requested. The amount we front rises with on time rent periods.`,
+      'INFO',
+    );
+  } else {
+    first = reason(
+      'APPROVED',
+      `Grade ${card.grade} with a cash flow score of ${card.score}. Approved for up to ${usd(limitCents)} of monthly rent at a ${feePct(feeBps)} fee.`,
+      'POSITIVE',
+    );
+  }
+  const approvedReasons = [first, ...reasons];
+
+  // Funding rules do not change the credit decision. They tell the applicant the plan may
+  // have to wait; `createRentPlan` enforces them when the plan is opened.
+  if (policy.exposure) {
+    const funding = checkFunding(policy.exposure, Math.min(requested, limitCents), exposureContext);
+    snapshot.funding = funding;
+    if (!funding.ok) {
+      approvedReasons.push(
+        reason(
+          'FUNDING_QUEUE',
+          'Our capital pool is close to full, so the start of your plan may wait until capacity frees up.',
+          'INFO',
+        ),
+      );
+    }
+  }
+
+  snapshot.recommendation = {
     outcome: 'APPROVED',
-    approvedMonthlyLimitCents: capacity,
-    feeBps: pricing.feeBps,
-    reasons: [
+    approvedMonthlyLimitCents: limitCents,
+    feeBps,
+  };
+  const triggers = referTriggers(policy, {
+    flags,
+    score: card.score,
+    limitCents,
+    requestedCents: requested,
+    firstPlan: exposureContext.onTimePeriods === 0 && exposureContext.businessCommittedCents === 0,
+  });
+  if (triggers.length > 0) {
+    snapshot.referTriggers = triggers;
+    return finish('REFER', limitCents, feeBps, [
       reason(
-        'APPROVED',
-        `Grade ${card.grade} with a cash flow score of ${card.score}. Approved for up to ${formatCents(capacity, { showCents: false })} of monthly rent at a ${(pricing.feeBps / 100).toFixed(pricing.feeBps % 100 === 0 ? 0 : 1)}% fee.`,
-        'POSITIVE',
+        'IN_REVIEW',
+        'Your application needs a look from our team before we can confirm terms. We will come back to you, and we will ask if we need anything.',
+        'INFO',
       ),
       ...reasons,
-    ],
-  };
+    ]);
+  }
+  return finish('APPROVED', limitCents, feeBps, approvedReasons);
+}
+
+export interface ReferInput {
+  flags: readonly IntegrityFlag[];
+  score: number;
+  limitCents: number;
+  requestedCents: number;
+  /** No plan yet and no on time history. */
+  firstPlan: boolean;
+}
+
+/**
+ * Why an application that would otherwise be approved goes to a reviewer instead. Empty
+ * means decide automatically. The trigger names are internal: they are stored on the
+ * decision snapshot and shown in the review queue, never to the applicant.
+ */
+export function referTriggers(policy: CreditPolicy, input: ReferInput): string[] {
+  const triggers = flagsWithAction(input.flags, 'REFER').map((f) => `INTEGRITY:${f.code}`);
+  const rules = policy.escalation;
+  if (!rules) return triggers;
+  if (input.score < policy.minScore + rules.scoreBandAboveCutoff)
+    triggers.push('SCORE_NEAR_CUTOFF');
+  if (input.limitCents > rules.referAmountCents) triggers.push('AMOUNT_ABOVE_THRESHOLD');
+  if (
+    input.firstPlan &&
+    input.limitCents < input.requestedCents &&
+    Math.round((input.limitCents * 10_000) / input.requestedCents) < rules.referCounterOfferBelowBps
+  ) {
+    triggers.push('COUNTER_OFFER_FIRST_PLAN');
+  }
+  return triggers;
 }

@@ -46,8 +46,8 @@ async function main() {
     TRUNCATE TABLE
       "LedgerEntry", "LedgerTransaction", "LedgerAccount",
       "Repayment", "Installment", "LandlordPayout", "RentPlan",
-      "Lease", "UnderwritingDecision", "UnderwritingApplication", "BankLink", "CommerceLink",
-      "Business", "RefreshToken", "User", "JobRun"
+      "Lease", "UnderwritingDecision", "ApplicationReview", "UnderwritingApplication",
+      "BankLink", "CommerceLink", "Business", "RefreshToken", "User", "JobRun", "AuditEvent"
     RESTART IDENTITY CASCADE
   `);
   await ensureSystemAccounts(db);
@@ -144,13 +144,16 @@ async function main() {
       landlordPayoutToken: 'mock_landlord_harbor_view',
     },
   });
-  await createRentPlan(db, {
-    userId: demo.id,
-    leaseId: bakeryLease.id,
-    applicationId: bakeryApp.id,
-    installmentsPerMonth: 2,
-    asOf: planStart,
-  });
+  await createRentPlan(
+    { db, providers },
+    {
+      userId: demo.id,
+      leaseId: bakeryLease.id,
+      applicationId: bakeryApp.id,
+      installmentsPerMonth: 2,
+      asOf: planStart,
+    },
+  );
 
   // Replay history: run the jobs on each due date and each second-installment date up to today.
   let due = nextRentDueDate(1, planStart);

@@ -149,12 +149,32 @@ enum ApplicationStatus {
   APPROVED
   DECLINED
   NEEDS_INFO
+  /// Referred to a reviewer. Terms are not shown until a review is recorded.
+  IN_REVIEW
 }
 
 enum DecisionOutcome {
   APPROVED
   DECLINED
   NEEDS_INFO
+  /// The engine would not decide alone. A reviewer records the outcome.
+  REFER
+}
+
+/// Why a decision row exists.
+enum DecisionKind {
+  /// The underwriting engine ran on a submission.
+  ENGINE
+  /// A reviewer recorded an outcome.
+  REVIEW
+  /// The monthly re-underwriting job re-scored a business with an active plan.
+  PERIODIC_REVIEW
+}
+
+enum ReviewDecision {
+  APPROVE
+  DECLINE
+  REQUEST_INFO
 }
 
 model UnderwritingApplication {
@@ -173,16 +193,38 @@ model UnderwritingApplication {
   createdAt                 DateTime          @default(now())
   updatedAt                 DateTime          @updatedAt
 
-  decision  UnderwritingDecision?
+  /// Every decision ever made on the application, newest last. Append only: a new decision
+  /// supersedes the previous one, nothing is deleted. Read the current one through
+  /// `CURRENT_DECISION` in `src/services/decisions.ts`.
+  decisions UnderwritingDecision[]
+  reviews   ApplicationReview[]
   rentPlans RentPlan[]
 
   @@index([businessId])
 }
 
+/// One decision on an application. Rows are never deleted or rewritten: a later decision
+/// sets `supersededAt` on the one before it. A partial unique index (see the migration)
+/// guarantees at most one current origination decision per application.
 model UnderwritingDecision {
   id                              String                  @id @default(cuid())
-  applicationId                   String                  @unique
+  applicationId                   String
   application                     UnderwritingApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  kind                            DecisionKind            @default(ENGINE)
+  /// Version of the credit policy in force, for example "cashflow-v2".
+  policyVersion                   String                  @default("cashflow-v1")
+  /// Inputs summary, thresholds in force, integrity flags, fee build up with PD and expected
+  /// loss, exposure caps, referral triggers. Internal: never serialized to applicants.
+  snapshot                        Json?
+  /// Set when a later decision replaced this one. Null on the current decision.
+  supersededAt                    DateTime?
+  /// The review that produced this decision, for kind REVIEW.
+  reviewId                        String?
+  review                          ApplicationReview?      @relation(fields: [reviewId], references: [id])
+  /// A reviewer's outcome or terms differed from the engine's recommendation.
+  isOverride                      Boolean                 @default(false)
+  /// YYYY-MM the periodic review covers, for kind PERIODIC_REVIEW. One per application per month.
+  reviewPeriod                    String?
   outcome                         DecisionOutcome
   approvedMonthlyLimitCents       Int?
   feeBps                          Int?
@@ -196,6 +238,54 @@ model UnderwritingDecision {
   cashFlow                        Json?
   provider                        String
   decidedAt                       DateTime                @default(now())
+
+  @@unique([applicationId, reviewPeriod])
+  @@index([applicationId, supersededAt])
+}
+
+/// A reviewer's decision on a referred or reconsidered application. Append only.
+model ApplicationReview {
+  id                        String                  @id @default(cuid())
+  applicationId             String
+  application               UnderwritingApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  /// Who reviewed. Free text until admin authentication exists.
+  reviewer                  String
+  decision                  ReviewDecision
+  reasonCodes               String[]
+  notes                     String?
+  /// Terms the reviewer approved, when they approved.
+  approvedMonthlyLimitCents Int?
+  feeBps                    Int?
+  /// The outcome or terms differ from what the engine recommended.
+  isOverride                Boolean                 @default(false)
+  /// The decision the reviewer was looking at.
+  reviewedDecisionId        String
+  createdAt                 DateTime                @default(now())
+
+  decisions UnderwritingDecision[]
+
+  @@index([applicationId])
+}
+
+// ---------- Audit ----------
+
+/// Append only record of who did what to which record. A database trigger rejects UPDATE
+/// and DELETE on this table.
+model AuditEvent {
+  id          String   @id @default(cuid())
+  at          DateTime @default(now())
+  /// "system", "user", "reviewer", or "job".
+  actorType   String
+  actorId     String?
+  /// For example DECISION_MADE, REVIEW_RECORDED, PLAN_CREATED.
+  eventType   String
+  /// For example "application", "rent_plan".
+  subjectType String
+  subjectId   String
+  payload     Json
+
+  @@index([subjectType, subjectId])
+  @@index([eventType, at])
 }
 
 // ---------- Lease ----------
@@ -277,6 +367,11 @@ model RentPlan {
   monthlyRentCents     Int
   dueDayOfMonth        Int
   status               RentPlanStatus          @default(ACTIVE)
+  /// Set by the re-underwriting job when a periodic review falls below the watch threshold.
+  /// While set, no new rent period is generated or paid to the landlord. Periods already
+  /// paid out are still collected.
+  advanceFrozenAt      DateTime?
+  advanceFrozenReason  String?
   createdAt            DateTime                @default(now())
   updatedAt            DateTime                @updatedAt
 

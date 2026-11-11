@@ -1,6 +1,7 @@
 import type { CashFlowSummary } from '@cashflow/shared';
 import { describe, expect, it } from 'vitest';
 
+import { POLICY_V1, POLICY_V2 } from './policy.ts';
 import { curve, gradeFor, scoreCashFlow, WEIGHTS } from './scorecard.ts';
 
 export const strongProfile: CashFlowSummary = {
@@ -23,6 +24,7 @@ export const strongProfile: CashFlowSummary = {
   avgDailyBalance90Cents: 4_500_000,
   minBalance90Cents: 2_000_000,
   daysOfCashOnHand: 70,
+  lowPointDaysOfCash90: 28,
   negativeBalanceDays90: 0,
   nsfCount90: 0,
   nsfCount365: 0,
@@ -30,6 +32,13 @@ export const strongProfile: CashFlowSummary = {
   rentCoverageRatio: 176,
   monthly: [],
   commerce: null,
+  revenueTrend: {
+    recent4VsPrior12WeeksBps: 300,
+    recent12VsPrior12WeeksBps: 500,
+    yearOverYearBps: 800,
+    slope6Bps: 100,
+    compositeBps: 800,
+  },
 };
 
 describe('curve', () => {
@@ -47,6 +56,12 @@ describe('curve', () => {
 describe('scoreCashFlow', () => {
   it('weights sum to 100 and a strong profile grades A', () => {
     expect(Object.values(WEIGHTS).reduce((a, b) => a + b, 0)).toBe(100);
+    for (const policy of [POLICY_V1, POLICY_V2]) {
+      expect(Object.values(policy.weights).reduce((a, b) => a + b, 0)).toBe(100);
+      const scored = scoreCashFlow(strongProfile, policy);
+      expect(scored.factors.reduce((sum, f) => sum + f.maxPoints, 0)).toBe(100);
+      expect(scored.grade).toBe('A');
+    }
     const card = scoreCashFlow(strongProfile);
     expect(card.score).toBeGreaterThanOrEqual(85);
     expect(card.grade).toBe('A');
@@ -64,8 +79,8 @@ describe('scoreCashFlow', () => {
       rentCoverageRatio: 105,
       rentToRevenueBps: 3200,
     });
-    expect(weak.score).toBeLessThan(45);
-    expect(weak.grade).toBe('F');
+    expect(weak.score).toBeLessThan(50);
+    expect(['D', 'F']).toContain(weak.grade);
     const conduct = weak.factors.find((f) => f.code === 'ACCOUNT_CONDUCT');
     expect(conduct?.impact).toBe('NEGATIVE');
     expect(conduct?.message).toMatch(/2 overdraft fees/);
@@ -81,8 +96,75 @@ describe('scoreCashFlow', () => {
   });
 
   it('treats short history as a flat trend and unscorable stability', () => {
-    const young = scoreCashFlow({ ...strongProfile, monthsOfHistory: 4, revenueGrowthBps: -5000 });
+    const young = scoreCashFlow(
+      { ...strongProfile, monthsOfHistory: 4, revenueGrowthBps: -5000 },
+      POLICY_V1,
+    );
     const trend = young.factors.find((f) => f.code === 'REVENUE_TREND');
     expect(trend?.points).toBe(5);
+  });
+});
+
+describe('scorecard versions', () => {
+  const points = (card: ReturnType<typeof scoreCashFlow>, code: string) =>
+    card.factors.find((f) => f.code === code)!;
+
+  it('version 1 is unchanged: launch weights, quarter trend, buffer from today alone', () => {
+    const card = scoreCashFlow(strongProfile, POLICY_V1);
+    expect(points(card, 'RENT_TO_REVENUE').maxPoints).toBe(20);
+    expect(points(card, 'CASH_BUFFER')).toMatchObject({ points: 15, maxPoints: 15 });
+    expect(points(card, 'REVENUE_TREND').message).toMatch(/last three months/);
+    // A low point of zero and old overdrafts do not move the launch scorecard.
+    const fragile = scoreCashFlow(
+      { ...strongProfile, lowPointDaysOfCash90: 0, nsfCount365: 5 },
+      POLICY_V1,
+    );
+    expect(fragile.score).toBe(card.score);
+  });
+
+  it('version 2 moves weight from rent share to the cash buffer', () => {
+    const card = scoreCashFlow(strongProfile, POLICY_V2);
+    expect(points(card, 'RENT_TO_REVENUE').maxPoints).toBe(10);
+    expect(points(card, 'CASH_FLOW_COVERAGE').maxPoints).toBe(15);
+    expect(points(card, 'CASH_BUFFER').maxPoints).toBe(30);
+  });
+
+  it('version 2 blends the low point of the last 90 days into the buffer', () => {
+    const steady = scoreCashFlow({ ...strongProfile, lowPointDaysOfCash90: 40 }, POLICY_V2);
+    const dipped = scoreCashFlow({ ...strongProfile, lowPointDaysOfCash90: 0 }, POLICY_V2);
+    // 70 days today is full marks for 60% of the factor; a low point of zero forfeits the rest.
+    expect(points(steady, 'CASH_BUFFER').points).toBe(30);
+    expect(points(dipped, 'CASH_BUFFER').points).toBe(18);
+    expect(points(dipped, 'CASH_BUFFER').message).toMatch(/never fewer than 0/);
+  });
+
+  it('version 2 takes a point for each overdraft fee earlier in the year', () => {
+    const clean = scoreCashFlow(strongProfile, POLICY_V2);
+    const older = scoreCashFlow({ ...strongProfile, nsfCount365: 4 }, POLICY_V2);
+    expect(points(clean, 'ACCOUNT_CONDUCT').points - points(older, 'ACCOUNT_CONDUCT').points).toBe(
+      4,
+    );
+    expect(points(older, 'ACCOUNT_CONDUCT').message).toMatch(
+      /4 overdraft fees earlier in the year/,
+    );
+  });
+
+  it('version 2 scores the season adjusted trend, so a seasonal trough costs nothing', () => {
+    // Down 20% on the prior quarter, level with the same weeks last year.
+    const trough: CashFlowSummary = {
+      ...strongProfile,
+      revenueGrowthBps: -2000,
+      revenueTrend: { ...strongProfile.revenueTrend!, yearOverYearBps: 0, compositeBps: 0 },
+    };
+    const v1 = points(scoreCashFlow(trough, POLICY_V1), 'REVENUE_TREND');
+    const v2 = points(scoreCashFlow(trough, POLICY_V2), 'REVENUE_TREND');
+    expect(v1.points / v1.maxPoints).toBeLessThan(0.3);
+    expect(v2.points / v2.maxPoints).toBe(0.7);
+    expect(v2.message).toMatch(/same weeks a year ago/);
+  });
+
+  it('version 2 reads a decision stored before the new fields existed', () => {
+    const { revenueTrend: _t, lowPointDaysOfCash90: _l, ...old } = strongProfile;
+    expect(() => scoreCashFlow(old as CashFlowSummary, POLICY_V2)).not.toThrow();
   });
 });

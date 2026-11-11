@@ -28,6 +28,9 @@ export async function processPayout(
     if (payout.status === 'PAID' || payout.status === 'PROCESSING') return 'skipped';
     if (payout.scheduledFor > asOf) return 'skipped';
     if (payout.rentPlan.status !== 'ACTIVE') return 'skipped';
+    // Frozen by a periodic review: the next period is not advanced. The payout stays
+    // scheduled and goes out if a later review releases the freeze.
+    if (payout.rentPlan.advanceFrozenAt !== null) return 'skipped';
 
     const fail = async (reason: string): Promise<PayoutOutcome> => {
       await tx.landlordPayout.update({

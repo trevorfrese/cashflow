@@ -6,9 +6,10 @@ import type {
   DailySales,
   IsoDate,
   MonthlyCashFlow,
+  RevenueTrend,
   TransactionCategory,
 } from '@cashflow/shared';
-import { addDays, feeForRent, parseIsoDate, toIsoDate } from '@cashflow/shared';
+import { addDays, daysBetween, feeForRent, parseIsoDate, toIsoDate } from '@cashflow/shared';
 
 /**
  * Turn raw bank transactions, and platform sales when a POS is connected, into the
@@ -45,8 +46,16 @@ export interface FeatureInput {
   asOf: IsoDate;
   statedMonthlyRevenueCents: number;
   requestedMonthlyRentCents: number;
-  /** Fee assumed when measuring coverage before pricing is known. */
+  /**
+   * Fee included in the coverage ratio, in basis points of rent. The engine passes the
+   * policy's scoring fee for the first pass and the quoted fee when it restates the ratio.
+   */
   provisionalFeeBps?: number;
+  /**
+   * Credits to leave out of revenue: deposits the integrity checks matched to a transfer
+   * out of the same size a few days later. They are not sales.
+   */
+  excludeTransactionIds?: ReadonlySet<string>;
   /** Daily sales from a connected point of sale, if any. */
   commerce?: {
     platform: CommercePlatform;
@@ -119,8 +128,9 @@ function lastDayOfMonth(key: string): IsoDate {
 
 export function computeCashFlowFeatures(input: FeatureInput): CashFlowSummary {
   const feeBps = input.provisionalFeeBps ?? DEFAULT_PROVISIONAL_FEE_BPS;
+  const excluded = input.excludeTransactionIds;
   const txs = input.transactions
-    .filter((t) => !t.pending && t.date <= input.asOf)
+    .filter((t) => !t.pending && t.date <= input.asOf && !(excluded && excluded.has(t.id)))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
   // Daily net flow and daily ending balances, reconstructed backward from the current balance.
@@ -269,11 +279,20 @@ export function computeCashFlowFeatures(input: FeatureInput): CashFlowSummary {
           ? 365
           : 0;
 
+  const lowPointDaysOfCash90 =
+    balances90.length === 0
+      ? null
+      : avgDailyOutflow > 0
+        ? Math.max(0, Math.floor(Math.min(...balances90) / avgDailyOutflow))
+        : Math.min(...balances90) > 0
+          ? 365
+          : 0;
+
   // Affordability. CashFlow pays the rent, so the rent the business already pays is freed up.
-  const obligation =
-    input.requestedMonthlyRentCents + feeForRent(input.requestedMonthlyRentCents, feeBps);
   const freeCash = monthlyNetCashFlowCents + (observedRentCents ?? 0);
-  const rentCoverageRatio = obligation > 0 ? Math.round((freeCash * 100) / obligation) : 0;
+  const rentCoverageRatio = coverageRatio(freeCash, input.requestedMonthlyRentCents, feeBps);
+
+  const revenueTrend = computeRevenueTrend(txs, input.asOf, bankRevenues, revenueGrowthBps);
 
   return {
     asOf: input.asOf,
@@ -306,6 +325,7 @@ export function computeCashFlowFeatures(input: FeatureInput): CashFlowSummary {
     avgDailyBalance90Cents: balances90.length > 0 ? Math.round(mean(balances90)) : null,
     minBalance90Cents: balances90.length > 0 ? Math.min(...balances90) : null,
     daysOfCashOnHand,
+    lowPointDaysOfCash90,
     negativeBalanceDays90,
     nsfCount90,
     nsfCount365,
@@ -316,7 +336,106 @@ export function computeCashFlowFeatures(input: FeatureInput): CashFlowSummary {
     rentCoverageRatio,
     monthly,
     commerce,
+    revenueTrend,
   };
+}
+
+/** Free cash over rent plus fee, times 100. 125 means 1.25x. */
+export function coverageRatio(freeCashCents: number, rentCents: number, feeBps: number): number {
+  const obligation = rentCents + feeForRent(rentCents, feeBps);
+  return obligation > 0 ? Math.round((freeCashCents * 100) / obligation) : 0;
+}
+
+/** Free cash available for installments: net cash flow plus the rent CashFlow would now pay. */
+export function freeCashCents(s: CashFlowSummary): number {
+  return s.monthlyNetCashFlowCents + (s.observedRentCents ?? 0);
+}
+
+const WEEK = 7;
+
+/**
+ * Trend on daily windows of whole weeks, so weekday mix cancels out.
+ *
+ * The quarter over quarter figure on full calendar months lags a turn by up to a month and
+ * cannot tell a seasonal trough from a decline. Two things fix that. Windows that end on the
+ * as-of date see the most recent weeks. And a comparison with the same weeks a year earlier
+ * is season neutral: a seasonal business in its slow months is level with last year, a
+ * business in decline is not.
+ */
+export function computeRevenueTrend(
+  txs: readonly BankTransaction[],
+  asOf: IsoDate,
+  monthlyRevenues: readonly number[],
+  quarterGrowthBps: number,
+): RevenueTrend {
+  const first = txs[0]?.date;
+  const historyDays = first ? daysBetween(first, asOf) + 1 : 0;
+  const daily = new Map<IsoDate, number>();
+  for (const t of txs) {
+    if ((t.amountCents > 0 && REVENUE_IN.has(t.category)) || t.category === 'REFUND') {
+      daily.set(t.date, (daily.get(t.date) ?? 0) + t.amountCents);
+    }
+  }
+  /** Revenue over `days` days ending `endOffset` days before the as-of date. */
+  const window = (endOffset: number, days: number): number => {
+    let sum = 0;
+    for (let i = endOffset; i < endOffset + days; i++) sum += daily.get(addDays(asOf, -i)) ?? 0;
+    return Math.max(0, sum);
+  };
+  const change = (recent: number, base: number): number | null =>
+    base > 0 ? bps(recent - base, base) : null;
+
+  const recent4 = window(0, 4 * WEEK);
+  const recent12 = window(0, 12 * WEEK);
+  const recent4VsPrior12WeeksBps =
+    historyDays >= 16 * WEEK ? change(recent4 * 3, window(4 * WEEK, 12 * WEEK)) : null;
+  const recent12VsPrior12WeeksBps =
+    historyDays >= 24 * WEEK ? change(recent12, window(12 * WEEK, 12 * WEEK)) : null;
+
+  // The same four weeks a year earlier: 52 weeks back when the history reaches that far,
+  // otherwise as far back as it does, down to 48 weeks.
+  const lagWeeks = Math.min(52, Math.floor(historyDays / WEEK) - 4);
+  const yearOverYearBps =
+    lagWeeks >= 48 ? change(recent4, window(lagWeeks * WEEK, 4 * WEEK)) : null;
+
+  const last6 = monthlyRevenues.slice(-6);
+  let slope6Bps: number | null = null;
+  if (last6.length === 6 && mean(last6) > 0) {
+    const xBar = 2.5;
+    let num = 0;
+    let den = 0;
+    last6.forEach((y, x) => {
+      num += (x - xBar) * (y - mean(last6));
+      den += (x - xBar) ** 2;
+    });
+    slope6Bps = bps(num / den, mean(last6));
+  }
+
+  return {
+    recent4VsPrior12WeeksBps,
+    recent12VsPrior12WeeksBps,
+    yearOverYearBps,
+    slope6Bps,
+    compositeBps: compositeTrendBps({
+      yearOverYearBps,
+      recent12VsPrior12WeeksBps,
+      quarterGrowthBps,
+    }),
+  };
+}
+
+/**
+ * One trend figure for the scorecard. With a year of history it is the year over year
+ * change in the trailing four weeks, which a seasonal trough does not move. Without a year
+ * of history it is the trailing twelve weeks against the twelve before, and failing that the
+ * calendar quarter figure.
+ */
+export function compositeTrendBps(t: {
+  yearOverYearBps: number | null;
+  recent12VsPrior12WeeksBps: number | null;
+  quarterGrowthBps: number;
+}): number {
+  return t.yearOverYearBps ?? t.recent12VsPrior12WeeksBps ?? t.quarterGrowthBps;
 }
 
 interface SalesMonth {

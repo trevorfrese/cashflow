@@ -2,7 +2,7 @@ import { formatCents } from '@cashflow/shared';
 
 import { ASSUMPTIONS, STRESS } from './assumptions.ts';
 import { GATE_THRESHOLDS, type GateResult } from './gates.ts';
-import type { PortfolioMetrics, SegmentMetrics } from './metrics.ts';
+import type { PortfolioMetrics, SegmentMetrics, SwapSet } from './metrics.ts';
 import type { Evaluation } from './run.ts';
 
 /**
@@ -36,12 +36,18 @@ const dollars = (cents: number) => formatCents(Math.round(cents / 100) * 100, { 
 const pct = (bpsValue: number, digits = 1) => `${(bpsValue / 100).toFixed(digits)}%`;
 const count = (n: number) => n.toLocaleString('en-US');
 
-function gateValue(g: GateResult): string {
-  if (g.value === null) return 'not measurable';
-  if (g.unit === 'cents') return dollars(g.value);
-  if (g.unit === 'AUC') return g.value.toFixed(3);
-  if (g.unit.startsWith('bps of') && g.unit !== 'bps of volume') return pct(g.value);
-  return `${count(g.value)}`;
+function gateNumber(g: GateResult, v: number | null, digits = 1): string {
+  if (v === null) return 'not measurable';
+  if (g.unit === 'cents') return dollars(v);
+  if (g.unit === 'AUC') return v.toFixed(3);
+  if (g.unit.startsWith('bps of') && g.unit !== 'bps of volume') return pct(v, digits);
+  return `${count(v)}`;
+}
+
+function gateRange(g: GateResult): string {
+  if (g.min === null || g.max === null) return 'n/a';
+  if (g.min === g.max) return gateNumber(g, g.min);
+  return `${gateNumber(g, g.min)} to ${gateNumber(g, g.max)}`;
 }
 
 function gateThreshold(g: GateResult): string {
@@ -109,9 +115,13 @@ function headlineRows(m: PortfolioMetrics): [string, string][] {
   return [
     ['Applicants', count(o.applicants)],
     ['Approved', `${count(o.approved)} (${pct(o.approvalRateBps)})`],
+    ['Approved by the engine alone', count(o.autoApproved)],
+    ['Referred to a reviewer', `${count(o.referred)} (${pct(o.referRateBps)})`],
     ['Declined', `${count(o.declined)} (${pct(m.declineRateBps)})`],
     ['Needs info', `${count(o.needsInfo)} (${pct(m.needsInfoRateBps)})`],
     ['Plans funded', count(o.plans)],
+    ['Plans whose start waited for pool capacity', count(m.funding.plansDelayed)],
+    ['Approved but never funded', count(m.funding.plansNeverFunded)],
     ['Plan-months', count(o.planMonths)],
     ['Rent volume advanced', dollars(o.volumeCents)],
     ['Gross fee income', `${dollars(o.feeIncomeCents)} (${bpsOf(o.feeIncomeCents, o)} bps)`],
@@ -125,19 +135,9 @@ function headlineRows(m: PortfolioMetrics): [string, string][] {
     ['First payment default rate', pct(o.firstPaymentDefaultRateBps)],
     ['Customers who were net profitable', pct(o.profitableShareBps)],
     [
-      'AUC of score against bad',
-      m.rankOrdering.auc === null ? 'n/a' : m.rankOrdering.auc.toFixed(3),
-    ],
-    ['KS of score against bad', m.rankOrdering.ks === null ? 'n/a' : m.rankOrdering.ks.toFixed(3)],
-    [
       'Fraud archetype applicants approved',
       `${count(m.fraud.approved)} of ${count(m.fraud.applicants)} (${pct(m.fraud.approvalRateBps)})`,
     ],
-    ['Pool at start', dollars(m.pool.startCents)],
-    ['Peak monthly payouts', dollars(m.pool.peakMonthlyPayoutsCents)],
-    ['Minimum pool cash', dollars(m.pool.minCents)],
-    ['Peak pool utilization', pct(m.pool.peakUtilizationBps)],
-    ['Payouts the pool could not fund on the due date', count(m.pool.unfundedPayouts)],
     [
       'Largest industry by volume',
       `${m.concentration.topIndustry ?? 'n/a'} (${pct(m.concentration.topShareBps)}, HHI ${count(m.concentration.hhi)})`,
@@ -199,24 +199,224 @@ function poolTable(m: PortfolioMetrics): string {
   );
 }
 
+/** Mean across seeds with the lowest and highest seed, formatted by `fmt`. */
+function meanRange(
+  runs: readonly PortfolioMetrics[],
+  pick: (m: PortfolioMetrics) => number | null,
+  fmt: (v: number) => string,
+): string {
+  const values = runs.map(pick).filter((v): v is number => v !== null);
+  if (values.length === 0) return 'n/a';
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  if (values.length === 1) return fmt(mean);
+  return `${fmt(mean)} (${fmt(Math.min(...values))} to ${fmt(Math.max(...values))})`;
+}
+
+interface Column {
+  name: string;
+  base: readonly PortfolioMetrics[];
+  mild: readonly PortfolioMetrics[] | null;
+  gates: readonly GateResult[] | null;
+}
+
+function columns(e: Evaluation): Column[] {
+  return [
+    ...e.comparisons.map((c) => ({
+      name: c.name,
+      base: c.baseBySeed,
+      mild: c.mildBySeed,
+      gates: c.gates,
+    })),
+    { name: 'v2_standard (gated)', base: e.baseBySeed, mild: e.mildBySeed, gates: e.gates },
+  ];
+}
+
+function comparisonTable(e: Evaluation): string {
+  const cols = columns(e);
+  const bpsPct = (v: number) => pct(v);
+  const whole = (v: number) => String(Math.round(v));
+  const row = (
+    label: string,
+    pick: (m: PortfolioMetrics) => number | null,
+    fmt: (v: number) => string,
+  ) => [label, ...cols.map((c) => meanRange(c.base, pick, fmt))];
+  return markdownTable(
+    ['Metric (mean, lowest to highest seed)', ...cols.map((c) => c.name)],
+    [
+      row('Approval rate', (m) => m.overall.approvalRateBps, bpsPct),
+      row('Refer rate', (m) => m.overall.referRateBps, bpsPct),
+      row('Decline rate', (m) => m.declineRateBps, bpsPct),
+      row('Needs info rate', (m) => m.needsInfoRateBps, bpsPct),
+      row('Rent volume', (m) => m.overall.volumeCents, dollars),
+      row('Bad rate', (m) => m.overall.badRateBps, bpsPct),
+      row('First payment default rate', (m) => m.overall.firstPaymentDefaultRateBps, bpsPct),
+      row('Fee income, bps of volume', (m) => bpsOf(m.overall.feeIncomeCents, m.overall), whole),
+      row('Net loss, bps of volume', (m) => m.overall.netLossBps, whole),
+      row('Net margin, bps of volume', (m) => m.overall.netMarginBps, whole),
+      row('Net margin', (m) => m.overall.netMarginCents, dollars),
+      [
+        'Net margin, mild stress',
+        ...cols.map((c) =>
+          c.mild ? meanRange(c.mild, (m) => m.overall.netMarginCents, dollars) : 'not run',
+        ),
+      ],
+      row('Profitable customers', (m) => m.overall.profitableShareBps, bpsPct),
+      row(
+        'AUC',
+        (m) => m.rankOrdering.auc,
+        (v) => v.toFixed(3),
+      ),
+      row('Fraud applicants approved', (m) => m.fraud.approvalRateBps, bpsPct),
+      row('Peak pool utilization', (m) => m.pool.peakUtilizationBps, bpsPct),
+      row('Unfunded payouts', (m) => m.pool.unfundedPayouts, whole),
+    ],
+    ['left', ...cols.map(() => 'right' as Align)],
+  );
+}
+
+function gateComparisonTable(e: Evaluation): string {
+  const cols = columns(e).filter((c) => c.gates !== null);
+  return markdownTable(
+    ['Gate', 'Threshold', ...cols.map((c) => c.name)],
+    e.gates.map((g) => [
+      g.id,
+      gateThreshold(g),
+      ...cols.map((c) => {
+        const other = c.gates!.find((x) => x.id === g.id)!;
+        return `${gateNumber(other, other.value)} ${other.pass ? 'PASS' : 'FAIL'}`;
+      }),
+    ]),
+    ['left', 'right', ...cols.map(() => 'right' as Align)],
+  );
+}
+
+function beforeAfterTable(
+  before: Record<string, SegmentMetrics>,
+  after: Record<string, SegmentMetrics>,
+  first: string,
+): string {
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
+  const cell = (m: SegmentMetrics | undefined, f: (m: SegmentMetrics) => string) =>
+    m && m.plans > 0 ? f(m) : m ? '0' : 'n/a';
+  return markdownTable(
+    [
+      first,
+      'Applicants',
+      'Approved before',
+      'Approved after',
+      'Plans before',
+      'Plans after',
+      'Bad rate before',
+      'Bad rate after',
+      'Margin bps before',
+      'Margin bps after',
+    ],
+    keys.map((k) => {
+      const b = before[k];
+      const a = after[k];
+      return [
+        k,
+        count((a ?? b)!.applicants),
+        b ? pct(b.approvalRateBps, 0) : 'n/a',
+        a ? pct(a.approvalRateBps, 0) : 'n/a',
+        cell(b, (m) => count(m.plans)),
+        cell(a, (m) => count(m.plans)),
+        cell(b, (m) => pct(m.badRateBps)),
+        cell(a, (m) => pct(m.badRateBps)),
+        cell(b, (m) => String(m.netMarginBps)),
+        cell(a, (m) => String(m.netMarginBps)),
+      ];
+    }),
+    ['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
+  );
+}
+
+function calibrationTable(m: PortfolioMetrics): string {
+  return markdownTable(
+    [
+      'Score',
+      'Plans',
+      'Expected bad rate',
+      'Realized bad rate',
+      'Expected loss bps',
+      'Realized loss bps',
+    ],
+    m.calibration.map((r) => [
+      r.band,
+      count(r.plans),
+      pct(r.expectedBadRateBps),
+      pct(r.realizedBadRateBps),
+      String(r.expectedLossBps),
+      String(r.realizedLossBps),
+    ]),
+    ['left', 'right', 'right', 'right', 'right', 'right'],
+  );
+}
+
+function swapRow(name: string, s: SwapSet): string[] {
+  return [
+    name,
+    count(s.swapIn.count),
+    s.swapIn.plans > 0 ? pct(s.swapIn.badRateBps) : 'n/a',
+    dollars(s.swapIn.netMarginCents),
+    count(s.swapOut.count),
+    s.swapOut.plans > 0 ? pct(s.swapOut.badRateBps) : 'n/a',
+    dollars(s.swapOut.netMarginCents),
+  ];
+}
+
+const SWAP_HEADERS = [
+  'Comparison',
+  'Swap in',
+  'Swap in bad rate',
+  'Swap in net margin',
+  'Swap out',
+  'Swap out bad rate',
+  'Swap out net margin',
+];
+const SWAP_ALIGN: Align[] = ['left', 'right', 'right', 'right', 'right', 'right', 'right'];
+
+function swapSection(e: Evaluation): string[] {
+  const rows = e.comparisons
+    .filter((c) => c.swapSet !== null)
+    .map((c) => swapRow(`${c.name} to v2_standard`, c.swapSet!));
+  if (rows.length === 0) return [];
+  return [
+    '## Swap sets against the earlier configurations',
+    '',
+    'Who the gated configuration approves that each comparison did not (swap in, judged on how',
+    'they performed under the gated configuration), and who it no longer approves (swap out,',
+    'judged on how they performed under the comparison). A good policy change swaps out plans',
+    'that lost money and swaps in few or none.',
+    '',
+    markdownTable(SWAP_HEADERS, rows, SWAP_ALIGN),
+    '',
+  ];
+}
+
 function challengerSection(e: Evaluation): string[] {
   if (e.challengers.length === 0) return [];
-  const row = (name: string, m: PortfolioMetrics) => [
+  const row = (name: string, m: PortfolioMetrics, bySeed: readonly PortfolioMetrics[]) => [
     name,
     pct(m.overall.approvalRateBps),
+    pct(m.overall.referRateBps),
     dollars(m.overall.volumeCents),
     pct(m.overall.badRateBps),
     String(m.overall.netLossBps),
-    dollars(m.overall.netMarginCents),
     String(m.overall.netMarginBps),
-    count(m.pool.unfundedPayouts),
+    meanRange(
+      bySeed,
+      (x) => x.rankOrdering.auc,
+      (v) => v.toFixed(3),
+    ),
+    pct(m.fraud.approvalRateBps),
   ];
-  const lines = [
-    '## Challengers (illustrative, not gated)',
+  return [
+    '## Challengers (not gated)',
     '',
-    'Each challenger changes one thing and runs on the same applicants in the base case. They',
-    'show that the comparison machinery works and how sensitive the result is. They are not',
-    'policy proposals.',
+    'Each challenger changes one thing about the gated configuration and runs on the same',
+    'applicants in the base case. Swap ins are judged on the challenger run, swap outs on the',
+    'gated run.',
     '',
     ...e.challengers.map((c) => `- \`${c.name}\`: ${c.description}`),
     '',
@@ -224,66 +424,82 @@ function challengerSection(e: Evaluation): string[] {
       [
         'Run',
         'Approval',
+        'Refer',
         'Volume',
         'Bad rate',
         'Net loss bps',
-        'Net margin',
         'Margin bps',
-        'Unfunded payouts',
+        'AUC (mean, range)',
+        'Fraud approved',
       ],
-      [row('champion', e.base), ...e.challengers.map((c) => row(c.name, c.metrics))],
-      ['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
+      [
+        row('v2_standard (gated)', e.base, e.baseBySeed),
+        ...e.challengers.map((c) => row(c.name, c.metrics, c.metricsBySeed)),
+      ],
+      ['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'right'],
     ),
     '',
-    'Swap sets against the champion. Swap ins are judged on the challenger run, swap outs on the',
-    'champion run.',
-    '',
     markdownTable(
-      [
-        'Challenger',
-        'Swap in',
-        'Swap in bad rate',
-        'Swap out',
-        'Swap out bad rate',
-        'Swap out net margin',
-      ],
-      e.challengers.map((c) => [
-        c.name,
-        count(c.swapSet.swapIn.count),
-        c.swapSet.swapIn.plans > 0 ? pct(c.swapSet.swapIn.badRateBps) : 'n/a',
-        count(c.swapSet.swapOut.count),
-        c.swapSet.swapOut.plans > 0 ? pct(c.swapSet.swapOut.badRateBps) : 'n/a',
-        dollars(c.swapSet.swapOut.netMarginCents),
-      ]),
-      ['left', 'right', 'right', 'right', 'right', 'right'],
+      SWAP_HEADERS,
+      e.challengers.map((c) => swapRow(`v2_standard to ${c.name}`, c.swapSet)),
+      SWAP_ALIGN,
     ),
     '',
   ];
-  return lines;
 }
 
 export function renderMarkdown(e: Evaluation): string {
   const passed = e.gates.filter((g) => g.pass).length;
+  const v1 = e.comparisons.find((c) => c.name === 'v1_baseline');
+  const seedList = e.run.seeds.map((s) => `\`${s}\``).join(', ');
+  const many = e.run.seeds.length > 1;
   const lines = [
     '# Portfolio evaluation',
     '',
     'Generated by `pnpm --filter @cashflow/api eval:portfolio`. Do not edit by hand.',
     '',
-    `Run: ${count(e.run.n)} synthetic applicants, seed \`${e.run.seed}\`, arriving over ${e.run.arrivalMonths} months at ${pct(e.run.monthlyGrowthBps, 0)} monthly growth. Each approved plan is played forward ${e.run.horizonMonths} rent periods under the \`${e.run.servicingPolicy}\` servicing policy, from a capital pool of ${dollars(e.run.poolSizeCents)}.`,
+    `Run: ${count(e.run.n)} synthetic applicants per seed, ${many ? `seeds ${seedList}` : `seed ${seedList}`}, arriving over ${e.run.arrivalMonths} months at ${pct(e.run.monthlyGrowthBps, 0)} monthly growth. Each approved plan is played forward ${e.run.horizonMonths} rent periods from a capital pool of ${dollars(e.run.poolSizeCents)} per seed.`,
+    '',
+    `Gated configuration: credit policy \`${e.run.policyVersion}\` under the \`${e.run.servicingPolicy}\` servicing policy. ${many ? `The gates are judged on the mean of the ${e.run.seeds.length} seeds; tables of counts pool the seeds into one book.` : 'One seed: the gates are judged on that seed alone.'}`,
     '',
     `Gates passed: ${passed} of ${e.gates.length}.`,
-    '',
-    '## Headline (base case)',
-    '',
-    markdownTable(['Metric', 'Value'], headlineRows(e.base), ['left', 'right']),
     '',
     '## Gates (Balanced risk appetite)',
     '',
     markdownTable(
-      ['Gate', 'Measured', 'Threshold', 'Result'],
-      e.gates.map((g) => [g.description, gateValue(g), gateThreshold(g), g.pass ? 'PASS' : 'FAIL']),
-      ['left', 'right', 'right', 'left'],
+      ['Gate', 'Mean', 'Lowest to highest seed', 'Threshold', 'Result'],
+      e.gates.map((g) => [
+        g.description,
+        gateNumber(g, g.value),
+        gateRange(g),
+        gateThreshold(g),
+        g.pass ? 'PASS' : 'FAIL',
+      ]),
+      ['left', 'right', 'right', 'right', 'left'],
     ),
+    '',
+    'Grade inversions are counted on bad rates pooled across seeds, and unfunded payouts are',
+    'summed across seeds. Every other gate is the mean of the per seed values.',
+    '',
+    '## What underwriting bought and what servicing bought',
+    '',
+    'The same applicants under four configurations. Reading left to right along the top:',
+    'changing only servicing (`v1_baseline` to `v1_standard`), changing only the credit policy',
+    '(`v1_baseline` to `v2_baseline`), and both (`v2_standard`, the gated configuration).',
+    '',
+    ...e.comparisons.map((c) => `- \`${c.name}\`: ${c.description}`),
+    '',
+    comparisonTable(e),
+    '',
+    'The gates, applied to each configuration that was also run under mild stress. Only the',
+    'last column decides whether the policy ships.',
+    '',
+    gateComparisonTable(e),
+    '',
+    ...swapSection(e),
+    '## Headline (gated configuration, base case, seeds pooled)',
+    '',
+    markdownTable(['Metric', 'Value'], headlineRows(e.base), ['left', 'right']),
     '',
     '## By grade (base case)',
     '',
@@ -293,6 +509,15 @@ export function renderMarkdown(e: Evaluation): string {
     '',
     segmentTable(e.base.byScoreBand, 'Score', true),
     '',
+    '## Calibration: expected against realized (base case)',
+    '',
+    'Expected bad rate is the PD the fee was priced on, from the table calibrated on separate',
+    'seeds. Expected loss is the per period expected loss in the fee build up. Realized figures',
+    'are what happened in this run. A realized loss well above expected in a band means the',
+    'fee floor, not the loss estimate, is what is keeping that band profitable.',
+    '',
+    e.base.calibration.length > 0 ? calibrationTable(e.base) : 'Not priced on expected loss.',
+    '',
     '## By archetype (base case)',
     '',
     'The fraud archetypes are the rows `bust_out`, `inflated_revenue`, and `round_trip`.',
@@ -300,6 +525,17 @@ export function renderMarkdown(e: Evaluation): string {
     '',
     segmentTable(e.base.bySegment, 'Archetype'),
     '',
+    ...(v1
+      ? [
+          '## By archetype, before and after',
+          '',
+          'Before is `v1_baseline`. After is the gated configuration. The `seasonal` row is the',
+          'check that earlier decline detection does not punish a normal seasonal trough.',
+          '',
+          beforeAfterTable(v1.base.bySegment, e.base.bySegment, 'Archetype'),
+          '',
+        ]
+      : []),
     '## By industry (base case)',
     '',
     segmentTable(e.base.byIndustry, 'Industry'),
@@ -310,12 +546,12 @@ export function renderMarkdown(e: Evaluation): string {
     '',
     stressTable(e),
     '',
-    '## Capital pool by month (base case)',
+    `## Capital pool by month (base case, seed \`${e.run.seeds[0]}\`)`,
     '',
     'Min pool cash is measured right after the landlord payouts on the first, before any',
     'installment is collected. Peak use is receivables as a share of pool cash plus receivables.',
     '',
-    poolTable(e.base),
+    poolTable(e.baseBySeed[0]!),
     '',
     ...challengerSection(e),
     '## Assumptions',
@@ -332,6 +568,14 @@ export function renderMarkdown(e: Evaluation): string {
           `${formatCents(ASSUMPTIONS.servicingCostCentsPerPlanMonth)} per plan-month`,
         ],
         ['Recovery on written off principal', pct(ASSUMPTIONS.recoveryRateBps, 0)],
+        [
+          'Manual review',
+          `catches and declines ${pct(e.run.reviewFraudCatchRateBps, 0)} of referred fraud applicants; approves every other referral at the engine's terms`,
+        ],
+        [
+          'Funding wait',
+          `a plan the pool cannot take waits up to ${ASSUMPTIONS.maxFundingWaitMonths} rent dates`,
+        ],
         [
           'Loss measurement',
           `unpaid ${ASSUMPTIONS.measurementChargeOffDays} days past due at the end of observation`,
@@ -358,34 +602,51 @@ export function renderMarkdown(e: Evaluation): string {
     'It cannot tell you how real businesses will perform. Every applicant here is synthetic. The',
     'hazard rates, the link between hidden health and what a bank statement shows, the fraud',
     'share, and the fraud behaviors are choices documented in `evals/README.md`, not',
-    'measurements. Loss rates in this report are therefore conditional on those choices. A',
-    'passing gate means the policy is internally consistent under them. It is not evidence that',
-    'the policy is safe to fund with real capital, and nothing here should be read that way.',
+    'measurements. Loss rates in this report are therefore conditional on those choices. The',
+    'fraud behaviors are three scripts, and an integrity check written after reading a script',
+    'will catch it: the fraud numbers show that the checks work as designed, not how much real',
+    'fraud they would stop. A passing gate means the policy is internally consistent under',
+    'these assumptions. It is not evidence that the policy is safe to fund with real capital,',
+    'and nothing here should be read that way.',
     '',
   ];
   return lines.join('\n');
 }
 
-export function renderJson(e: Evaluation): string {
-  return `${JSON.stringify(
-    {
-      run: e.run,
-      assumptions: ASSUMPTIONS,
-      stress: STRESS,
-      gateThresholds: GATE_THRESHOLDS,
-      gates: e.gates,
-      scenarios: { base: e.base, mild: e.mild, severe: e.severe },
-      challengers: e.challengers,
-    },
-    null,
-    2,
-  )}\n`;
+/**
+ * JSON laid out the way the formatter lays it out, so the checked in files pass the format
+ * check as written: two space indent, objects one key per line, and an array of plain
+ * values on one line when it fits inside the print width.
+ */
+export function stableJson(value: unknown, printWidth = 100): string {
+  const render = (v: unknown, indent: string, keyWidth: number): string => {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
+    const inner = `${indent}  `;
+    if (Array.isArray(v)) {
+      if (v.length === 0) return '[]';
+      if (v.every((x) => x === null || typeof x !== 'object')) {
+        const oneLine = `[${v.map((x) => JSON.stringify(x) ?? 'null').join(', ')}]`;
+        // Room is needed for the key before it and the comma after it.
+        if (indent.length + keyWidth + oneLine.length + 1 <= printWidth) return oneLine;
+      }
+      return `[\n${v.map((x) => `${inner}${render(x, inner, 0)}`).join(',\n')}\n${indent}]`;
+    }
+    const entries = Object.entries(v as Record<string, unknown>).filter(([, x]) => x !== undefined);
+    if (entries.length === 0) return '{}';
+    return `{\n${entries
+      .map(([k, x]) => {
+        const key = `${JSON.stringify(k)}: `;
+        return `${inner}${key}${render(x, inner, key.length)}`;
+      })
+      .join(',\n')}\n${indent}}`;
+  };
+  return `${render(value, '', 0)}\n`;
 }
 
-/** Headline numbers and gate results: small enough to review as a diff. */
-export function renderBaseline(e: Evaluation): string {
-  const headline = (m: PortfolioMetrics) => ({
+function headline(m: PortfolioMetrics) {
+  return {
     approvalRateBps: m.overall.approvalRateBps,
+    referRateBps: m.overall.referRateBps,
     declineRateBps: m.declineRateBps,
     needsInfoRateBps: m.needsInfoRateBps,
     plans: m.overall.plans,
@@ -413,21 +674,75 @@ export function renderBaseline(e: Evaluation): string {
         .filter(([, g]) => g.plans > 0)
         .map(([grade, g]) => [grade, g.badRateBps]),
     ),
+  };
+}
+
+const gateSummary = (gates: readonly GateResult[]) =>
+  gates.map((g) => ({
+    id: g.id,
+    value: g.value,
+    min: g.min,
+    max: g.max,
+    comparator: g.comparator,
+    threshold: g.threshold,
+    unit: g.unit,
+    pass: g.pass,
+  }));
+
+export function renderJson(e: Evaluation): string {
+  return stableJson({
+    run: e.run,
+    assumptions: ASSUMPTIONS,
+    stress: STRESS,
+    gateThresholds: GATE_THRESHOLDS,
+    gates: e.gates,
+    scenarios: { base: e.base, mild: e.mild, severe: e.severe },
+    bySeed: e.run.seeds.map((seed, i) => ({
+      seed,
+      base: headline(e.baseBySeed[i]!),
+      mild: headline(e.mildBySeed[i]!),
+      severe: headline(e.severeBySeed[i]!),
+    })),
+    comparisons: e.comparisons.map((c) => ({
+      name: c.name,
+      description: c.description,
+      policyVersion: c.policyVersion,
+      servicingPolicy: c.servicingPolicy,
+      gates: c.gates,
+      swapSet: c.swapSet,
+      base: c.base,
+      mild: c.mild,
+    })),
+    challengers: e.challengers.map((c) => ({
+      name: c.name,
+      description: c.description,
+      swapSet: c.swapSet,
+      metrics: c.metrics,
+    })),
   });
-  return `${JSON.stringify(
-    {
-      run: e.run,
-      headline: { base: headline(e.base), mild: headline(e.mild), severe: headline(e.severe) },
-      gates: e.gates.map((g) => ({
-        id: g.id,
-        value: g.value,
-        comparator: g.comparator,
-        threshold: g.threshold,
-        unit: g.unit,
-        pass: g.pass,
-      })),
-    },
-    null,
-    2,
-  )}\n`;
+}
+
+/**
+ * Headline numbers and gate results for every configuration: small enough to review as a
+ * diff. Headlines pool the seeds into one book; gates carry the per seed mean and range.
+ */
+export function renderBaseline(e: Evaluation): string {
+  const configurations: Record<string, unknown> = {};
+  for (const c of e.comparisons) {
+    configurations[c.name] = {
+      policyVersion: c.policyVersion,
+      servicingPolicy: c.servicingPolicy,
+      gated: false,
+      headline: { base: headline(c.base), ...(c.mild ? { mild: headline(c.mild) } : {}) },
+      ...(c.gates ? { gates: gateSummary(c.gates) } : {}),
+    };
+  }
+  configurations.v2_standard = {
+    policyVersion: e.run.policyVersion,
+    servicingPolicy: e.run.servicingPolicy,
+    gated: true,
+    headline: { base: headline(e.base), mild: headline(e.mild), severe: headline(e.severe) },
+    gates: gateSummary(e.gates),
+  };
+  return stableJson({ run: e.run, configurations });
 }

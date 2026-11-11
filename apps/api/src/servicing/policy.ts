@@ -11,7 +11,8 @@ import { daysBetween, type IsoDate } from '@cashflow/shared';
  * collection and payout services can ask the same questions of the same object.
  *
  * `BASELINE_SERVICING_POLICY` describes what the services do today. It is a description, not
- * a recommendation.
+ * a recommendation. `STANDARD_SERVICING_POLICY` is the policy the services are being moved to
+ * (Phase R3) and the one the credit policy is evaluated under.
  */
 export interface ServicingPolicy {
   /** Short name used in reports. */
@@ -52,6 +53,37 @@ export const BASELINE_SERVICING_POLICY: ServicingPolicy = {
   holdPayoutPastDueDays: null,
   chargeOffAfterDays: null,
   recoveryRateBps: 1000,
+};
+
+/**
+ * The servicing policy that ships with credit policy version 2. The portfolio evals gate on
+ * it. The collection and payout services do not implement it yet: that is Phase R3.
+ *
+ *   - Late after 3 days of grace, as today.
+ *   - Hold the next landlord payout while anything is more than 3 days past due. This is the
+ *     rule that bounds a loss at one rent period: Phase R1 measured net loss falling from
+ *     310 to 34 basis points of volume from this change alone, with identical decisions.
+ *   - Three collection attempts per installment: the first on the due date and two retries,
+ *     three days apart (days 0, 3, and 6). Three is the ACH network's limit for
+ *     re-presenting a debit returned for insufficient funds (the original entry plus two
+ *     reinitiations). Three days is about as soon as a retry can know the previous one
+ *     was returned, since returns take up to two banking days, and it puts the second
+ *     attempt on the last day of grace, so a business that was short by a day or two cures
+ *     before it is marked late or has a payout held. Retrying daily without limit, as the
+ *     baseline does, collects almost nothing more (measured: 31 against 35 basis points of
+ *     net loss on the same book) and would breach the network rule on a real rail. After
+ *     the third return nothing more is debited automatically: the balance waits for a
+ *     manual payment, which the evals conservatively assume never comes.
+ *   - Charge off at 90 days past due and close the plan.
+ *   - Recovery as in the baseline.
+ */
+export const STANDARD_SERVICING_POLICY: ServicingPolicy = {
+  name: 'standard',
+  lateGraceDays: 3,
+  retry: { intervalDays: 3, maxAttempts: 3 },
+  holdPayoutPastDueDays: 3,
+  chargeOffAfterDays: 90,
+  recoveryRateBps: BASELINE_SERVICING_POLICY.recoveryRateBps,
 };
 
 /** Whole days an obligation due on `dueDate` is overdue on `asOf`. Never negative. */

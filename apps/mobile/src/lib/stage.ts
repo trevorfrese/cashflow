@@ -7,6 +7,7 @@ import type { Lease, RentPlan, UnderwritingApplication } from '@cashflow/shared'
 export type Stage =
   | { kind: 'NEEDS_APPLICATION' }
   | { kind: 'NEEDS_INFO'; application: UnderwritingApplication }
+  | { kind: 'IN_REVIEW'; application: UnderwritingApplication }
   | { kind: 'DECLINED'; application: UnderwritingApplication }
   | { kind: 'APPROVED_NO_LEASE'; application: UnderwritingApplication }
   | { kind: 'LEASE_NO_PLAN'; application: UnderwritingApplication; lease: Lease }
@@ -25,6 +26,7 @@ export function deriveStage(input: {
   const current = latest(input.applications);
   if (!current || current.status === 'DRAFT') return { kind: 'NEEDS_APPLICATION' };
   if (current.status === 'NEEDS_INFO') return { kind: 'NEEDS_INFO', application: current };
+  if (current.status === 'IN_REVIEW') return { kind: 'IN_REVIEW', application: current };
   if (current.status === 'DECLINED') return { kind: 'DECLINED', application: current };
   if (current.status === 'SUBMITTED') return { kind: 'NEEDS_APPLICATION' };
 

@@ -25,8 +25,11 @@ import {
   type ServicingPolicy,
 } from '../servicing/policy.ts';
 import { decide, type EngineInput, type EngineResult } from '../underwriting/engine.ts';
+import { checkFunding, type ExposureContext } from '../underwriting/exposure.ts';
+import { CURRENT_POLICY, type ExposurePolicy } from '../underwriting/policy.ts';
 import { ASSUMPTIONS, poolSizeFor, type StressScenario } from './assumptions.ts';
 import type { Applicant, FraudType, Industry } from './population.ts';
+import { hash32 } from './random.ts';
 
 /**
  * Portfolio simulator.
@@ -62,6 +65,21 @@ export interface PortfolioConfig {
   measurementChargeOffDays: number;
   /** Days past due at which a plan is flagged bad. */
   badDaysPastDue: number;
+  /**
+   * How a human reviewer treats a referred application: this share of fraud applicants is
+   * caught and declined, in basis points. Every other referral is approved at the terms the
+   * engine recommended. The reviewer has no information the engine lacks about honest
+   * applicants, so review neither helps nor hurts them here.
+   */
+  reviewFraudCatchRateBps: number;
+  /**
+   * Exposure rules applied when a plan is about to start: the pool utilization ceiling and
+   * the industry and single name caps. A plan that fails waits and is tried again at the
+   * next rent date, up to `maxWaitMonths`. Null (policy version 1) starts every plan. When
+   * `decide` is replaced with another policy's engine, pass that policy's `exposure` too.
+   */
+  exposure: ExposurePolicy | null;
+  maxWaitMonths: number;
 }
 
 export function defaultPortfolioConfig(n: number): PortfolioConfig {
@@ -76,6 +94,9 @@ export function defaultPortfolioConfig(n: number): PortfolioConfig {
     runoffDays: ASSUMPTIONS.runoffDays,
     measurementChargeOffDays: ASSUMPTIONS.measurementChargeOffDays,
     badDaysPastDue: ASSUMPTIONS.badDaysPastDue,
+    reviewFraudCatchRateBps: ASSUMPTIONS.reviewFraudCatchRateBps,
+    exposure: CURRENT_POLICY.exposure,
+    maxWaitMonths: ASSUMPTIONS.maxFundingWaitMonths,
   };
 }
 
@@ -88,10 +109,22 @@ export interface CustomerResult {
   arrivalMonth: number;
   applicationDate: IsoDate;
   latentHealth: number;
+  /** The final outcome: the engine's, or the reviewer's when the engine referred. */
   outcome: DecisionOutcome;
+  /** What the engine returned. REFER when it sent the application to a reviewer. */
+  engineOutcome: DecisionOutcome;
+  /** The engine referred this application. */
+  referred: boolean;
+  /** Rent periods the plan waited for pool capacity before it started. */
+  fundingWaitMonths: number;
+  /** Approved, but the pool never had room within the wait limit. No plan was opened. */
+  neverFunded: boolean;
   score: number | null;
   grade: CreditGrade | null;
   feeBps: number | null;
+  /** PD and expected loss per period the fee was priced on. Null without expected loss pricing. */
+  pdBps: number | null;
+  expectedLossBps: number | null;
   approvedLimitCents: number | null;
   requestedRentCents: number;
   /** Rent fronted each period: the lower of the request and the approved limit. */
@@ -150,6 +183,10 @@ export interface PortfolioResult {
   unfundedPayouts: number;
   /** Payout-days spent waiting for the pool. */
   unfundedPayoutDays: number;
+  /** Plans whose start waited at least one rent date for pool capacity. */
+  plansDelayed: number;
+  /** Approved applicants never funded because the pool had no room within the wait limit. */
+  plansNeverFunded: number;
   pool: PoolMonth[];
   customers: CustomerResult[];
 }
@@ -178,6 +215,10 @@ interface ActivePlan {
   outstandingCents: number;
   /** Last day this plan is observed. Set once the final period is known. */
   endDate: IsoDate | null;
+  /** False until the first payout has passed the funding rules. */
+  started: boolean;
+  /** The plan's rent is counted in committed exposure. */
+  committed: boolean;
 }
 
 function emptyResult(applicant: Applicant, decision: EngineResult): CustomerResult {
@@ -190,9 +231,15 @@ function emptyResult(applicant: Applicant, decision: EngineResult): CustomerResu
     applicationDate: applicant.applicationDate,
     latentHealth: applicant.latentHealth,
     outcome: decision.outcome,
+    engineOutcome: decision.outcome,
+    referred: decision.outcome === 'REFER',
+    fundingWaitMonths: 0,
+    neverFunded: false,
     score: decision.score,
     grade: decision.grade,
     feeBps: decision.feeBps,
+    pdBps: decision.snapshot.pricing?.pdBps ?? null,
+    expectedLossBps: decision.snapshot.pricing?.expectedLossBps ?? null,
     approvedLimitCents: decision.approvedMonthlyLimitCents,
     requestedRentCents: applicant.requestedRentCents,
     planRentCents: 0,
@@ -248,11 +295,13 @@ function stressedParams(
 export function underwrite(
   applicant: Applicant,
   config: Pick<PortfolioConfig, 'decide' | 'stress' | 'startDate'>,
+  exposureContext: ExposureContext | null = null,
 ): { decision: EngineResult; sim: BusinessSimulation | null } {
   const base = {
     statedMonthlyRevenueCents: applicant.statedMonthlyRevenueCents,
     timeInBusinessMonths: applicant.timeInBusinessMonths,
     requestedMonthlyRentCents: applicant.requestedRentCents,
+    exposureContext,
   };
   if (applicant.historyDays <= 0) {
     return { decision: config.decide({ ...base, bankData: null }), sim: null };
@@ -315,8 +364,28 @@ export function runPortfolio(
   let receivableCents = 0;
   let unfundedPayouts = 0;
   let unfundedPayoutDays = 0;
+  let plansDelayed = 0;
+  let plansNeverFunded = 0;
   let month: PoolMonth | null = null;
   let cursor = 0;
+  // Monthly rent committed on plans that have started and are still being funded, in total
+  // and by industry. This is the state the exposure rules read.
+  let committedCents = 0;
+  const committedByIndustry = new Map<Industry, number>();
+  const commit = (plan: ActivePlan, sign: 1 | -1) => {
+    const rent = plan.result.planRentCents * sign;
+    committedCents += rent;
+    committedByIndustry.set(
+      plan.applicant.industry,
+      (committedByIndustry.get(plan.applicant.industry) ?? 0) + rent,
+    );
+  };
+  const exposureFor = (industry: Industry): ExposureContext => ({
+    businessCommittedCents: 0,
+    onTimePeriods: 0,
+    industryCommittedCents: committedByIndustry.get(industry) ?? 0,
+    pool: { cashCents: poolCents, receivableCents, committedCents },
+  });
 
   const chargeOff = (plan: ActivePlan, inst: Installment) => {
     const recovery = expectedRecoveryCents(policy, inst.principalCents);
@@ -351,6 +420,8 @@ export function runPortfolio(
       poolMinCents,
       unfundedPayouts,
       unfundedPayoutDays,
+      plansDelayed,
+      plansNeverFunded,
       pool,
       customers,
     };
@@ -376,11 +447,42 @@ export function runPortfolio(
 
     // 1. Landlord payouts, before any collection, as the jobs run in production.
     for (const plan of active) {
-      if (plan.periodsLeft === 0 && plan.nextDueDate === date) {
+      if (plan.started && plan.periodsLeft === 0 && plan.nextDueDate === date) {
         // The observed periods are over: the business pays its own rent again.
         plan.sim.setExternalRent(0);
+        if (plan.committed) {
+          plan.committed = false;
+          commit(plan, -1);
+        }
       }
-      if (plan.periodsLeft > 0 && plan.nextDueDate === date) {
+      if (!plan.started && plan.nextDueDate === date) {
+        // First rent date: the plan starts only if the pool can take it under the exposure
+        // rules. Otherwise it waits a month, and gives up after the wait limit.
+        const funding = config.exposure
+          ? checkFunding(
+              config.exposure,
+              plan.result.planRentCents,
+              exposureFor(plan.applicant.industry),
+            )
+          : null;
+        if (funding && !funding.ok) {
+          if (plan.result.fundingWaitMonths === 0) plansDelayed += 1;
+          plan.result.fundingWaitMonths += 1;
+          if (plan.result.fundingWaitMonths > config.maxWaitMonths) {
+            plan.result.neverFunded = true;
+            plansNeverFunded += 1;
+            plan.periodsLeft = 0;
+            plan.endDate = date;
+          } else {
+            plan.nextDueDate = followingDueDate(date, 1);
+          }
+        } else {
+          plan.started = true;
+          plan.committed = true;
+          commit(plan, 1);
+        }
+      }
+      if (plan.started && plan.periodsLeft > 0 && plan.nextDueDate === date) {
         plan.periodsLeft -= 1;
         const oldest = plan.unpaid.length > 0 ? plan.unpaid[0]!.dueDate : null;
         if (shouldHoldPayout(policy, oldest, date)) {
@@ -492,6 +594,10 @@ export function runPortfolio(
             chargeOff(plan, inst);
             // A written off plan is closed: no further landlord payouts.
             plan.pendingPayouts = [];
+            if (plan.committed) {
+              plan.committed = false;
+              commit(plan, -1);
+            }
             if (plan.periodsLeft > 0) {
               plan.periodsLeft = 0;
               plan.sim.setExternalRent(0);
@@ -512,6 +618,10 @@ export function runPortfolio(
           plan.pendingPayouts.length === 0 &&
           (date >= plan.endDate || plan.unpaid.length === 0)
         ) {
+          if (plan.committed) {
+            plan.committed = false;
+            commit(plan, -1);
+          }
           finish(plan, date);
           anyFinished = true;
           plan.periodsLeft = -1;
@@ -523,10 +633,18 @@ export function runPortfolio(
     // 3. Today's applications. An approved plan starts on the next first of the month.
     while (cursor < applicants.length && applicants[cursor]!.applicationDate === date) {
       const applicant = applicants[cursor++]!;
-      const { decision, sim } = underwrite(applicant, config);
+      const { decision, sim } = underwrite(applicant, config, exposureFor(applicant.industry));
       const result = emptyResult(applicant, decision);
       customers.push(result);
-      if (decision.outcome !== 'APPROVED' || !sim) continue;
+      if (decision.outcome === 'REFER') {
+        // The reviewer catches a fixed share of fraud and declines it. Which applicants are
+        // caught depends only on the applicant, so every run reviews them the same way.
+        const caught =
+          applicant.fraud !== null &&
+          hash32(`review/${applicant.seedHex}`) % 10_000 < config.reviewFraudCatchRateBps;
+        result.outcome = caught ? 'DECLINED' : 'APPROVED';
+      }
+      if (result.outcome !== 'APPROVED' || !sim) continue;
       result.planRentCents = Math.min(
         applicant.requestedRentCents,
         decision.approvedMonthlyLimitCents ?? 0,
@@ -544,6 +662,8 @@ export function runPortfolio(
         unpaid: [],
         outstandingCents: 0,
         endDate: null,
+        started: false,
+        committed: false,
       });
     }
 
@@ -565,6 +685,8 @@ export function runPortfolio(
     poolMinCents,
     unfundedPayouts,
     unfundedPayoutDays,
+    plansDelayed,
+    plansNeverFunded,
     pool,
     customers,
   };

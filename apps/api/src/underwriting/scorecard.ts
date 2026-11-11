@@ -1,11 +1,17 @@
 import type { CashFlowSummary, CreditGrade, DecisionReason } from '@cashflow/shared';
 import { COMMERCE_PLATFORM_LABELS as PLATFORM_LABEL, formatCents } from '@cashflow/shared';
 
+import { CURRENT_POLICY, type CreditPolicy } from './policy.ts';
+
 /**
  * Transparent scorecard. Each factor maps one feature onto points through a piecewise
  * linear curve. Weights sum to 100, so the score is a percentage of the best possible
  * profile. Every factor also yields a reason so the applicant can see what helped and
  * what hurt.
+ *
+ * The weights and grade floors come from the credit policy (`policy.ts`). The curves below
+ * are drawn for the version 1 weights; under another policy each factor is scaled to its
+ * weight.
  */
 
 export interface Factor {
@@ -37,7 +43,12 @@ export function curve(value: number, points: ReadonlyArray<readonly [number, num
   return last[1];
 }
 
-export const WEIGHTS = {
+/** Weights and grade floors of the current policy. */
+export const WEIGHTS = CURRENT_POLICY.weights;
+export const GRADE_FLOORS = CURRENT_POLICY.gradeFloors;
+
+/** Points each curve below tops out at. A policy weight is applied as a scale on these. */
+const CURVE_MAX = {
   rentAffordability: 20,
   cashFlowCoverage: 20,
   cashBuffer: 15,
@@ -48,16 +59,8 @@ export const WEIGHTS = {
   dataDepth: 5,
 } as const;
 
-export const GRADE_FLOORS: ReadonlyArray<readonly [CreditGrade, number]> = [
-  ['A', 80],
-  ['B', 68],
-  ['C', 55],
-  ['D', 45],
-  ['F', 0],
-];
-
-export function gradeFor(score: number): CreditGrade {
-  return GRADE_FLOORS.find(([, floor]) => score >= floor)![0];
+export function gradeFor(score: number, policy: CreditPolicy = CURRENT_POLICY): CreditGrade {
+  return policy.gradeFloors.find(([, floor]) => score >= floor)![0];
 }
 
 function pct(bpsValue: number): string {
@@ -70,12 +73,26 @@ function impactFor(points: number, max: number): DecisionReason['impact'] {
   return 'INFO';
 }
 
-export function scoreCashFlow(s: CashFlowSummary): Scorecard {
+export function scoreCashFlow(
+  s: CashFlowSummary,
+  policy: CreditPolicy = CURRENT_POLICY,
+): Scorecard {
   const factors: Factor[] = [];
-  const add = (code: string, label: string, raw: number, max: number, message: string) => {
+  const add = (
+    code: string,
+    label: string,
+    rawOnCurve: number,
+    factor: keyof typeof CURVE_MAX,
+    message: string,
+  ) => {
+    const max = policy.weights[factor];
+    const scale = max / CURVE_MAX[factor];
+    const raw = scale === 1 ? rawOnCurve : rawOnCurve * scale;
     const points = Math.round(Math.min(max, Math.max(0, raw)));
     factors.push({ code, label, points, maxPoints: max, impact: impactFor(points, max), message });
   };
+
+  const v2 = policy.scorecard >= 2;
 
   // 1. Rent as a share of verified revenue (payment to income).
   const rentPct = s.rentToRevenueBps;
@@ -90,7 +107,7 @@ export function scoreCashFlow(s: CashFlowSummary): Scorecard {
       [3000, 3],
       [3500, 0],
     ]),
-    WEIGHTS.rentAffordability,
+    'rentAffordability',
     `Requested rent is ${pct(rentPct)} of verified monthly revenue (${formatCents(s.verifiedMonthlyRevenueCents, { showCents: false })}).`,
   );
 
@@ -105,17 +122,18 @@ export function scoreCashFlow(s: CashFlowSummary): Scorecard {
       [150, 15],
       [200, 20],
     ]),
-    WEIGHTS.cashFlowCoverage,
+    'cashFlowCoverage',
     cov > 0
-      ? `Free cash flow covers rent and fee ${(cov / 100).toFixed(2)} times over.`
+      ? `Free cash flow covers ${policy.scoredCoverageFeeBps > 0 ? 'rent and fee' : 'the rent'} ${(cov / 100).toFixed(2)} times over.`
       : 'Monthly outflows currently exceed inflows, leaving no free cash flow for rent.',
   );
 
-  // 3. Cash buffer in days of operating outflows.
+  // 3. Cash buffer in days of outflows. Version 2 blends in the low point of the last 90
+  // days (40% of the factor): a debit fails on the day the balance is short, so the lowest
+  // the balance has been says more about that risk than where it happens to stand today.
   const days = s.daysOfCashOnHand;
-  add(
-    'CASH_BUFFER',
-    'Cash buffer',
+  const low = s.lowPointDaysOfCash90 ?? null;
+  const todayPoints =
     days === null
       ? 0
       : curve(days, [
@@ -123,23 +141,44 @@ export function scoreCashFlow(s: CashFlowSummary): Scorecard {
           [14, 6],
           [30, 11],
           [60, 15],
-        ]),
-    WEIGHTS.cashBuffer,
+        ]);
+  const lowPoints =
+    low === null
+      ? 0
+      : curve(low, [
+          [0, 0],
+          [5, 6],
+          [15, 11],
+          [30, 15],
+        ]);
+  add(
+    'CASH_BUFFER',
+    'Cash buffer',
+    v2 ? 0.6 * todayPoints + 0.4 * lowPoints : todayPoints,
+    'cashBuffer',
     days === null
       ? 'Current balance was not available, so no cash buffer could be verified.'
-      : `${days} days of operating expenses on hand (${formatCents(s.currentBalanceCents ?? 0, { showCents: false })}).`,
+      : `${days} days of operating expenses on hand (${formatCents(s.currentBalanceCents ?? 0, { showCents: false })})${
+          v2 && low !== null ? `, and never fewer than ${low} over the last 90 days` : ''
+        }.`,
   );
 
-  // 4. Account conduct: overdrafts and negative balance days in the last 90 days.
-  const conductPenalty = s.nsfCount90 * 6 + s.negativeBalanceDays90 * 1.5;
+  // 4. Account conduct: overdrafts and negative balance days in the last 90 days. Version 2
+  // also takes a point for each overdraft fee earlier in the year.
+  const olderNsf = v2 ? Math.max(0, s.nsfCount365 - s.nsfCount90) : 0;
+  const conductPenalty = s.nsfCount90 * 6 + s.negativeBalanceDays90 * 1.5 + olderNsf;
   add(
     'ACCOUNT_CONDUCT',
     'Account conduct',
-    WEIGHTS.accountConduct - conductPenalty,
-    WEIGHTS.accountConduct,
-    s.nsfCount90 === 0 && s.negativeBalanceDays90 === 0
+    CURVE_MAX.accountConduct - conductPenalty,
+    'accountConduct',
+    s.nsfCount90 === 0 && s.negativeBalanceDays90 === 0 && olderNsf === 0
       ? 'No overdrafts or negative balance days in the last 90 days.'
-      : `${s.nsfCount90} overdraft fee${s.nsfCount90 === 1 ? '' : 's'} and ${s.negativeBalanceDays90} negative balance day${s.negativeBalanceDays90 === 1 ? '' : 's'} in the last 90 days.`,
+      : `${s.nsfCount90} overdraft fee${s.nsfCount90 === 1 ? '' : 's'} and ${s.negativeBalanceDays90} negative balance day${s.negativeBalanceDays90 === 1 ? '' : 's'} in the last 90 days${
+          olderNsf > 0
+            ? `, and ${olderNsf} overdraft fee${olderNsf === 1 ? '' : 's'} earlier in the year`
+            : ''
+        }.`,
   );
 
   // 5. Revenue stability: coefficient of variation of monthly revenue.
@@ -156,14 +195,17 @@ export function scoreCashFlow(s: CashFlowSummary): Scorecard {
           [5000, 1],
           [6000, 0],
         ]),
-    WEIGHTS.revenueStability,
+    'revenueStability',
     s.monthsOfHistory < 3
       ? 'Not enough months to measure revenue stability.'
       : `Monthly ${s.commerce ? 'sales' : 'revenue'} vary by ${pct(vol)} around the average${s.commerce ? `, measured from ${PLATFORM_LABEL[s.commerce.platform]}` : ''}.`,
   );
 
-  // 6. Revenue trend: last three months versus the prior three.
-  const growth = s.revenueGrowthBps;
+  // 6. Revenue trend. Version 1 reads the last three full months against the prior three.
+  // From version 2 it reads the season adjusted composite, so a seasonal trough costs
+  // nothing and a real decline is seen sooner.
+  const composite = v2 && s.revenueTrend != null;
+  const growth = composite ? s.revenueTrend!.compositeBps : s.revenueGrowthBps;
   add(
     'REVENUE_TREND',
     'Revenue trend',
@@ -176,10 +218,12 @@ export function scoreCashFlow(s: CashFlowSummary): Scorecard {
           [0, 7],
           [1000, 10],
         ]),
-    WEIGHTS.revenueTrend,
+    'revenueTrend',
     s.monthsOfHistory < 6
       ? 'Less than six months of history, so the trend is treated as flat.'
-      : `Revenue over the last three months is ${growth >= 0 ? 'up' : 'down'} ${pct(Math.abs(growth))} versus the prior three.`,
+      : composite
+        ? trendMessage(s)
+        : `Revenue over the last three months is ${growth >= 0 ? 'up' : 'down'} ${pct(Math.abs(growth))} versus the prior three.`,
   );
 
   // 7. Existing debt service as a share of revenue.
@@ -193,7 +237,7 @@ export function scoreCashFlow(s: CashFlowSummary): Scorecard {
       [1500, 1],
       [2000, 0],
     ]),
-    WEIGHTS.debtLoad,
+    'debtLoad',
     debt === 0
       ? 'No loan or merchant cash advance payments detected.'
       : `Existing loan and advance payments take ${pct(debt)} of monthly revenue (${formatCents(s.monthlyDebtServiceCents, { showCents: false })} a month).`,
@@ -211,7 +255,7 @@ export function scoreCashFlow(s: CashFlowSummary): Scorecard {
       [9, 3],
       [12, 4],
     ]) + (posMonths >= 3 ? 1 : 0),
-    WEIGHTS.dataDepth,
+    'dataDepth',
     `${s.monthsOfHistory} month${s.monthsOfHistory === 1 ? '' : 's'} of bank history reviewed${
       posMonths >= 3
         ? `, plus ${posMonths} month${posMonths === 1 ? '' : 's'} of ${PLATFORM_LABEL[s.commerce!.platform]} sales.`
@@ -226,5 +270,18 @@ export function scoreCashFlow(s: CashFlowSummary): Scorecard {
       factors.reduce((sum, f) => sum + f.points, 0),
     ),
   );
-  return { score, grade: gradeFor(score), factors };
+  return { score, grade: gradeFor(score, policy), factors };
+}
+
+function trendMessage(s: CashFlowSummary): string {
+  const t = s.revenueTrend!;
+  const growth = t.compositeBps;
+  const direction = growth >= 0 ? 'up' : 'down';
+  if (t.yearOverYearBps !== null) {
+    return `Revenue over the last four weeks is ${direction} ${pct(Math.abs(growth))} on the same weeks a year ago.`;
+  }
+  if (t.recent12VsPrior12WeeksBps !== null) {
+    return `Revenue over the last twelve weeks is ${direction} ${pct(Math.abs(growth))} versus the twelve before.`;
+  }
+  return `Revenue over the last three months is ${direction} ${pct(Math.abs(growth))} versus the prior three.`;
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { generateHistory, parseScenario, type Scenario } from '../providers/bank-link/synthetic.ts';
 import { generateSales, parseCommerceScenario } from '../providers/commerce/synthetic.ts';
 import { capacityCents, decide, POLICY, recommendInstallments } from './engine.ts';
+import { POLICY_V1, POLICY_VERSION } from './policy.ts';
 import { strongProfile } from './scorecard.test.ts';
 
 const AS_OF = '2026-11-09';
@@ -38,12 +39,15 @@ describe('underwriting engine', () => {
     expect(r.cashFlow).toBeNull();
   });
 
-  it('approves a healthy business with grade A or B and a limit above the request', () => {
+  it('approves a healthy business with grade A or B for exactly what it asked', () => {
     const r = run('healthy_rev_48000_rent_6200');
     expect(r.outcome).toBe('APPROVED');
     expect(['A', 'B']).toContain(r.grade);
-    expect(r.approvedMonthlyLimitCents).toBeGreaterThanOrEqual(620_000);
+    // The limit is the lease in front of us, never more.
+    expect(r.approvedMonthlyLimitCents).toBe(620_000);
     expect(r.feeBps).toBe(POLICY.pricing[r.grade!].feeBps);
+    expect(r.policyVersion).toBe(POLICY_VERSION);
+    expect(r.snapshot.policyVersion).toBe(POLICY_VERSION);
     expect(r.cashFlow?.monthsOfHistory).toBeGreaterThanOrEqual(11);
     expect(r.cashFlow?.monthly.length).toBe(r.cashFlow?.monthsOfHistory);
     expect(r.reasons[0]?.impact).toBe('POSITIVE');
@@ -97,7 +101,7 @@ describe('underwriting engine', () => {
     const debt = run('heavy_debt_rev_48000_rent_6200');
     expect(debt.score!).toBeLessThan(healthy.score!);
     expect(debt.cashFlow!.debtToRevenueBps).toBeGreaterThan(1200);
-    if (debt.outcome === 'APPROVED') {
+    if (debt.outcome === 'APPROVED' || debt.outcome === 'REFER') {
       expect(debt.feeBps!).toBeGreaterThanOrEqual(healthy.feeBps!);
       expect(debt.approvedMonthlyLimitCents!).toBeLessThanOrEqual(
         healthy.approvedMonthlyLimitCents!,
@@ -167,8 +171,33 @@ describe('underwriting engine', () => {
     ];
     for (const s of scenarios) {
       const r = run(`${s}_rev_40000`);
-      expect(['APPROVED', 'DECLINED', 'NEEDS_INFO']).toContain(r.outcome);
+      expect(['APPROVED', 'DECLINED', 'NEEDS_INFO', 'REFER']).toContain(r.outcome);
+      expect(r.policyVersion).toBe(POLICY_VERSION);
     }
+  });
+
+  it('still runs the launch policy when asked, with a limit that may exceed the request', () => {
+    const spec = parseScenario('healthy_rev_48000_rent_6200');
+    const history = generateHistory(spec, 'abcdef123456', AS_OF);
+    const r = decide(
+      {
+        statedMonthlyRevenueCents: spec.monthlyRevenueCents,
+        timeInBusinessMonths: 48,
+        requestedMonthlyRentCents: spec.rentCents,
+        bankData: {
+          transactions: history.transactions,
+          currentBalanceCents: history.currentBalanceCents,
+          asOf: AS_OF,
+        },
+      },
+      POLICY_V1,
+    );
+    expect(r.outcome).toBe('APPROVED');
+    expect(r.policyVersion).toBe('cashflow-v1');
+    expect(r.approvedMonthlyLimitCents!).toBeGreaterThan(620_000);
+    expect(r.feeBps).toBe(POLICY_V1.pricing[r.grade!].feeBps);
+    expect(r.snapshot.integrityFlags).toEqual([]);
+    expect(r.snapshot.pricing).toBeNull();
   });
 });
 
@@ -177,6 +206,8 @@ describe('capacity and cadence', () => {
     // Revenue cap for grade A: 30% of 48,000 = 14,400. Coverage cap: (500,000 + 620,000)
     // free cash / (1.25 * 1.015) = 882,758 -> 8,800. Coverage binds.
     expect(capacityCents(strongProfile, 'A')).toBe(880_000);
+    // A higher fee leaves less room under the same coverage test: / (1.25 * 1.04) -> 8,600.
+    expect(capacityCents(strongProfile, 'A', POLICY, 400)).toBe(860_000);
     expect(capacityCents({ ...strongProfile, monthlyNetCashFlowCents: 5_000_000 }, 'A')).toBe(
       1_440_000,
     );

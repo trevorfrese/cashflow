@@ -7,6 +7,7 @@ import type {
   Lease as LeaseDto,
   RentPlan as RentPlanDto,
   Repayment as RepaymentDto,
+  ApplicationReview as ReviewDto,
   UnderwritingApplication as ApplicationDto,
   UnderwritingDecision as DecisionDto,
   User as UserDto,
@@ -21,6 +22,7 @@ import type {
   Lease,
   RentPlan,
   Repayment,
+  ApplicationReview,
   UnderwritingApplication,
   UnderwritingDecision,
   User,
@@ -77,18 +79,26 @@ export const toCommerceLink = (l: CommerceLink): CommerceLinkDto => ({
   createdAt: iso(l.createdAt),
 });
 
+/**
+ * The applicant's view of a decision. The stored snapshot (thresholds, PD, expected loss,
+ * integrity flags, referral triggers) is internal and is never included. While an
+ * application is referred, the limit and fee on the row are only the engine's
+ * recommendation to the reviewer, so they are withheld until a review approves.
+ */
 export const toDecision = (d: UnderwritingDecision): DecisionDto => ({
   id: d.id,
   applicationId: d.applicationId,
   outcome: d.outcome,
-  approvedMonthlyLimitCents: d.approvedMonthlyLimitCents,
-  feeBps: d.feeBps,
+  approvedMonthlyLimitCents: d.outcome === 'APPROVED' ? d.approvedMonthlyLimitCents : null,
+  feeBps: d.outcome === 'APPROVED' ? d.feeBps : null,
   score: d.score,
   grade: (d.grade as DecisionDto['grade']) ?? null,
   recommendedInstallmentsPerMonth: d.recommendedInstallmentsPerMonth,
   reasons: (d.reasons as DecisionDto['reasons']) ?? [],
   cashFlow: (d.cashFlow as DecisionDto['cashFlow']) ?? null,
   provider: d.provider,
+  policyVersion: d.policyVersion,
+  kind: d.kind,
   decidedAt: iso(d.decidedAt),
 });
 
@@ -145,6 +155,7 @@ export const toRentPlan = (p: RentPlan): RentPlanDto => ({
   monthlyRentCents: p.monthlyRentCents,
   dueDayOfMonth: p.dueDayOfMonth,
   status: p.status,
+  advanceFrozen: p.advanceFrozenAt !== null,
   createdAt: iso(p.createdAt),
   updatedAt: iso(p.updatedAt),
 });
@@ -183,5 +194,18 @@ export const toRepayment = (r: Repayment): RepaymentDto => ({
   providerRef: r.providerRef,
   status: r.status,
   failureReason: r.failureReason,
+  createdAt: iso(r.createdAt),
+});
+
+export const toReview = (r: ApplicationReview): ReviewDto => ({
+  id: r.id,
+  applicationId: r.applicationId,
+  reviewer: r.reviewer,
+  decision: r.decision,
+  reasonCodes: r.reasonCodes,
+  notes: r.notes,
+  approvedMonthlyLimitCents: r.approvedMonthlyLimitCents,
+  feeBps: r.feeBps,
+  isOverride: r.isOverride,
   createdAt: iso(r.createdAt),
 });

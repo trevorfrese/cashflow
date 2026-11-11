@@ -9,6 +9,7 @@ import {
   shouldAttemptCollection,
   shouldChargeOff,
   shouldHoldPayout,
+  STANDARD_SERVICING_POLICY,
   type ServicingPolicy,
 } from './policy.ts';
 
@@ -74,5 +75,35 @@ describe('servicing policy', () => {
     expect(shouldChargeOff(strict, '2026-01-01', '2026-03-31')).toBe(false);
     expect(shouldChargeOff(strict, '2026-01-01', '2026-04-01')).toBe(true);
     expect(expectedRecoveryCents(strict, 123_456)).toBe(12_346);
+  });
+
+  it('standard holds payouts past grace, caps retries at three, and writes off at 90 days', () => {
+    const standard = STANDARD_SERVICING_POLICY;
+    expect(standard).toMatchObject({
+      name: 'standard',
+      lateGraceDays: 3,
+      retry: { intervalDays: 3, maxAttempts: 3 },
+      holdPayoutPastDueDays: 3,
+      chargeOffAfterDays: 90,
+      recoveryRateBps: baseline.recoveryRateBps,
+    });
+    // Attempts on the due date, then days 3 and 6, and no more after that.
+    const state = { dueDate: '2026-03-01', attempts: 0, lastAttemptDate: null as string | null };
+    const attempted: string[] = [];
+    for (let day = 1; day <= 31; day++) {
+      const date = `2026-03-${String(day).padStart(2, '0')}`;
+      if (shouldAttemptCollection(standard, state, date)) {
+        attempted.push(date);
+        state.attempts += 1;
+        state.lastAttemptDate = date;
+      }
+    }
+    expect(attempted).toEqual(['2026-03-01', '2026-03-04', '2026-03-07']);
+    // Three days past due is still grace. The fourth day holds the next payout.
+    expect(shouldHoldPayout(standard, '2026-03-01', '2026-03-04')).toBe(false);
+    expect(shouldHoldPayout(standard, '2026-03-01', '2026-03-05')).toBe(true);
+    expect(shouldHoldPayout(standard, null, '2026-04-01')).toBe(false);
+    expect(shouldChargeOff(standard, '2026-03-01', '2026-05-29')).toBe(false);
+    expect(shouldChargeOff(standard, '2026-03-01', '2026-05-30')).toBe(true);
   });
 });

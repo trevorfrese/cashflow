@@ -57,6 +57,8 @@ export function statusPill(status: string): { label: string; tone: PillTone } {
       return { label: title(status), tone: 'late' };
     case 'NEEDS_INFO':
       return { label: 'Needs info', tone: 'gold' };
+    case 'IN_REVIEW':
+      return { label: 'In review', tone: 'due' };
     case 'DRAFT':
       return { label: 'Draft', tone: 'draft' };
     default:

@@ -24,6 +24,13 @@ export interface SegmentMetrics {
   approved: number;
   declined: number;
   needsInfo: number;
+  /** Applicants the engine sent to a reviewer. Their final outcome is counted above. */
+  referred: number;
+  referRateBps: number;
+  /** Approved without a reviewer. */
+  autoApproved: number;
+  /** Approved, but the pool had no room within the wait limit. */
+  neverFunded: number;
   approvalRateBps: number;
   /** Approved applicants with at least one landlord payout. */
   plans: number;
@@ -77,11 +84,28 @@ export interface Concentration {
   hhi: number;
 }
 
+/** Expected against realized, for one score band. */
+export interface CalibrationRow {
+  band: string;
+  plans: number;
+  /** Mean PD the plans were priced on. */
+  expectedBadRateBps: number;
+  realizedBadRateBps: number;
+  /** Expected loss per period the plans were priced on, weighted by volume. */
+  expectedLossBps: number;
+  /** Net loss as a share of volume. */
+  realizedLossBps: number;
+}
+
 export interface PortfolioMetrics {
   label: string;
   stress: string;
   servicingPolicy: string;
   overall: SegmentMetrics;
+  /** Plans whose start waited for pool capacity, and approvals never funded. */
+  funding: { plansDelayed: number; plansNeverFunded: number };
+  /** Empty when the policy does not price on expected loss. */
+  calibration: CalibrationRow[];
   declineRateBps: number;
   needsInfoRateBps: number;
   byGrade: Record<string, SegmentMetrics>;
@@ -126,6 +150,10 @@ export function segmentMetrics(
     approved: 0,
     declined: 0,
     needsInfo: 0,
+    referred: 0,
+    referRateBps: 0,
+    autoApproved: 0,
+    neverFunded: 0,
     approvalRateBps: 0,
     plans: 0,
     planMonths: 0,
@@ -151,6 +179,9 @@ export function segmentMetrics(
     if (c.outcome === 'APPROVED') m.approved += 1;
     else if (c.outcome === 'DECLINED') m.declined += 1;
     else m.needsInfo += 1;
+    if (c.referred) m.referred += 1;
+    else if (c.outcome === 'APPROVED') m.autoApproved += 1;
+    if (c.neverFunded) m.neverFunded += 1;
     if (c.payoutCount === 0) continue;
     m.plans += 1;
     m.planMonths += c.payoutCount;
@@ -166,6 +197,7 @@ export function segmentMetrics(
     if (customerNetMarginCents(c, costs) > 0) profitable += 1;
   }
   m.approvalRateBps = bps(m.approved, m.applicants);
+  m.referRateBps = bps(m.referred, m.applicants);
   m.netLossCents = m.chargeOffCents - m.recoveryCents;
   m.netLossBps = bps(m.netLossCents, m.volumeCents);
   m.netMarginCents = m.feeIncomeCents - m.costOfFundsCents - m.servicingCostCents - m.netLossCents;
@@ -255,6 +287,69 @@ export function rankOrdering(customers: readonly CustomerResult[]): RankOrdering
   };
 }
 
+/** Five point bands from 45 up, the grain the PD table is calibrated on. */
+export function calibrationBand(score: number): string {
+  if (score < 45) return '0-44';
+  if (score >= 95) return '95-100';
+  const lo = Math.floor(score / 5) * 5;
+  return `${lo}-${lo + 4}`;
+}
+
+/**
+ * Expected against realized by score band, over funded plans that were priced on expected
+ * loss. Expected bad rate is the mean PD. Expected loss is the per period expected loss in
+ * the fee build up, weighted by volume, so it compares directly with net loss over volume.
+ */
+export function calibration(customers: readonly CustomerResult[]): CalibrationRow[] {
+  const groups = new Map<string, CustomerResult[]>();
+  for (const c of customers) {
+    if (c.payoutCount === 0 || c.score === null || c.pdBps === null) continue;
+    const band = calibrationBand(c.score);
+    const list = groups.get(band);
+    if (list) list.push(c);
+    else groups.set(band, [c]);
+  }
+  return [...groups.entries()]
+    .sort((a, b) => parseInt(a[0], 10) - parseInt(b[0], 10))
+    .map(([band, list]) => {
+      const volume = list.reduce((sum, c) => sum + c.payoutCents, 0);
+      const netLoss = list.reduce((sum, c) => sum + c.chargedOffCents - c.recoveredCents, 0);
+      const expectedLoss = list.reduce(
+        (sum, c) => sum + (c.payoutCents * (c.expectedLossBps ?? 0)) / 10_000,
+        0,
+      );
+      return {
+        band,
+        plans: list.length,
+        expectedBadRateBps: Math.round(list.reduce((sum, c) => sum + c.pdBps!, 0) / list.length),
+        realizedBadRateBps: bps(list.filter((c) => c.bad).length, list.length),
+        expectedLossBps: bps(expectedLoss, volume),
+        realizedLossBps: bps(netLoss, volume),
+      };
+    });
+}
+
+/**
+ * Several runs of the same configuration on different seeds, as one book. Customers are
+ * concatenated, so every cut (grade, band, archetype) is computed on all of them. Pool
+ * figures are not additive across independent pools: the monthly series is the first run's,
+ * the minimum is the lowest of any run, and shortfalls are summed.
+ */
+export function poolResults(results: readonly PortfolioResult[]): PortfolioResult {
+  const first = results[0]!;
+  return {
+    ...first,
+    poolMinCents: Math.min(...results.map((r) => r.poolMinCents)),
+    unfundedPayouts: results.reduce((sum, r) => sum + r.unfundedPayouts, 0),
+    unfundedPayoutDays: results.reduce((sum, r) => sum + r.unfundedPayoutDays, 0),
+    plansDelayed: results.reduce((sum, r) => sum + r.plansDelayed, 0),
+    plansNeverFunded: results.reduce((sum, r) => sum + r.plansNeverFunded, 0),
+    customers: results.flatMap((r, i) =>
+      r.customers.map((c) => ({ ...c, applicantId: `${i}:${c.applicantId}` })),
+    ),
+  };
+}
+
 export function concentration(byIndustry: Record<string, SegmentMetrics>): Concentration {
   const total = Object.values(byIndustry).reduce((sum, m) => sum + m.volumeCents, 0);
   let topShareBps = 0;
@@ -283,6 +378,8 @@ export function computeMetrics(
     stress: result.stress,
     servicingPolicy: result.servicingPolicy,
     overall,
+    funding: { plansDelayed: result.plansDelayed, plansNeverFunded: result.plansNeverFunded },
+    calibration: calibration(customers),
     declineRateBps: bps(overall.declined, overall.applicants),
     needsInfoRateBps: bps(overall.needsInfo, overall.applicants),
     byGrade: cut(customers, costs, (c) => (c.payoutCount > 0 ? c.grade : null), GRADES),

@@ -39,8 +39,8 @@ export async function resetDb(db: Db): Promise<void> {
     TRUNCATE TABLE
       "LedgerEntry", "LedgerTransaction", "LedgerAccount",
       "Repayment", "Installment", "LandlordPayout", "RentPlan",
-      "Lease", "UnderwritingDecision", "UnderwritingApplication", "BankLink", "CommerceLink",
-      "Business", "RefreshToken", "User", "JobRun"
+      "Lease", "UnderwritingDecision", "ApplicationReview", "UnderwritingApplication",
+      "BankLink", "CommerceLink", "Business", "RefreshToken", "User", "JobRun", "AuditEvent"
     RESTART IDENTITY CASCADE
   `);
   await ensureSystemAccounts(db);
@@ -76,6 +76,15 @@ export function client(app: FastifyInstance, session?: Session) {
     post: <T = unknown>(url: string, body?: unknown) => call<T>('POST', url, body),
     patch: <T = unknown>(url: string, body?: unknown) => call<T>('PATCH', url, body),
   };
+}
+
+/** Add capital to the pool through the operator route. */
+export async function fundPool(app: FastifyInstance, amountCents: number): Promise<void> {
+  const res = await client(app).post('/v1/admin/capital/fund', {
+    amountCents,
+    description: 'test funding',
+  });
+  if (res.status !== 200) throw new Error(`fund failed: ${res.status} ${JSON.stringify(res.body)}`);
 }
 
 let counter = 0;

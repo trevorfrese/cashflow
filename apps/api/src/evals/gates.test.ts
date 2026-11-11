@@ -56,6 +56,8 @@ function passingMetrics(): PortfolioMetrics {
     poolMinCents: 5_000_000,
     unfundedPayouts: 0,
     unfundedPayoutDays: 0,
+    plansDelayed: 0,
+    plansNeverFunded: 0,
     pool: [],
     customers,
   });
@@ -85,6 +87,7 @@ describe('gates', () => {
       'fraud_approval',
       'pool_funding',
       'approval_floor',
+      'refer_rate',
     ]);
     expect(gates.filter((g) => !g.pass)).toEqual([]);
     expect(allGatesPass(gates)).toBe(true);
@@ -144,5 +147,75 @@ describe('gates', () => {
       'approval_floor',
     ]);
     expect(gatesWith((b) => (b.overall.approvalRateBps = 2999)).failed).toEqual(['approval_floor']);
+  });
+
+  it('holds referrals to 5% of applicants', () => {
+    expect(gatesWith((b) => (b.overall.referRateBps = 500)).failed).toEqual([]);
+    const over = gatesWith((b) => (b.overall.referRateBps = 501));
+    expect(over.failed).toEqual(['refer_rate']);
+    expect(over.byId.refer_rate).toMatchObject({ value: 501, threshold: 500, comparator: '<=' });
+  });
+
+  it('did not loosen any threshold from the first evaluation', () => {
+    expect(GATE_THRESHOLDS).toMatchObject({
+      maxNetLossBps: 75,
+      minNetMarginCents: 0,
+      minAuc: 0.7,
+      monotonicMinPlans: 30,
+      monotonicToleranceBps: 100,
+      maxFraudApprovalBps: 500,
+      minApprovalRateBps: 3000,
+    });
+  });
+});
+
+describe('gates across seeds', () => {
+  const seeds = (change: (runs: PortfolioMetrics[]) => void) => {
+    const base = [passingMetrics(), passingMetrics(), passingMetrics()];
+    const mild = [passingMetrics(), passingMetrics(), passingMetrics()];
+    change(base);
+    const gates = evaluateGates({ base, mild });
+    return Object.fromEntries(gates.map((g) => [g.id, g]));
+  };
+
+  it('judges the mean and reports the lowest and highest seed', () => {
+    const byId = seeds((runs) => {
+      runs[0]!.overall.netLossBps = 30;
+      runs[1]!.overall.netLossBps = 60;
+      runs[2]!.overall.netLossBps = 120;
+    });
+    expect(byId.net_loss_base).toMatchObject({ value: 70, min: 30, max: 120, pass: true });
+  });
+
+  it('fails on the mean even when most seeds pass', () => {
+    const byId = seeds((runs) => {
+      runs[0]!.rankOrdering.auc = 0.72;
+      runs[1]!.rankOrdering.auc = 0.71;
+      runs[2]!.rankOrdering.auc = 0.6;
+    });
+    expect(byId.auc).toMatchObject({ value: 0.677, min: 0.6, max: 0.72, pass: false });
+  });
+
+  it('cannot be measured when any seed cannot be', () => {
+    const byId = seeds((runs) => (runs[1]!.rankOrdering.auc = null));
+    expect(byId.auc).toMatchObject({ value: null, pass: false });
+  });
+
+  it('counts grade inversions on bad rates pooled across seeds', () => {
+    // One seed has A worse than B. Pooled over three seeds A is still better than B.
+    const noisy = seeds((runs) => {
+      runs[0]!.byGrade.A!.badRateBps = runs[0]!.byGrade.B!.badRateBps + 250;
+    });
+    expect(noisy.bad_rate_monotonic).toMatchObject({ value: 0, min: 0, max: 1, pass: true });
+    // When every seed is inverted, so is the pool.
+    const real = seeds((runs) => {
+      for (const m of runs) m.byGrade.A!.badRateBps = m.byGrade.B!.badRateBps + 250;
+    });
+    expect(real.bad_rate_monotonic).toMatchObject({ value: 1, pass: false });
+  });
+
+  it('sums unfunded payouts: one on any seed fails', () => {
+    const byId = seeds((runs) => (runs[2]!.pool.unfundedPayouts = 1));
+    expect(byId.pool_funding).toMatchObject({ value: 1, min: 0, max: 1, pass: false });
   });
 });

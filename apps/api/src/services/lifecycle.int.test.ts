@@ -2,7 +2,7 @@ import { feeForRent } from '@cashflow/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ACCOUNTS, receivableCode } from '../ledger/accounts.ts';
-import { accountBalance } from '../ledger/service.ts';
+import { accountBalance, postTransaction } from '../ledger/service.ts';
 import {
   approvedBusiness,
   client,
@@ -160,7 +160,9 @@ describe('rent payment lifecycle', () => {
   });
 
   it('fails the payout when the pool is short and recovers after funding', async () => {
-    await fundPool(100_000); // far less than one month's rent
+    // A plan can only be opened against a pool with room for it. The pool is then drawn
+    // down, as it would be by other payouts, before this one falls due.
+    await fundPool(25_000_000);
     const session = await registerUser(h.app);
     const api = client(h.app, session);
     const { businessId, applicationId } = await approvedBusiness(h.app, session);
@@ -170,6 +172,17 @@ describe('rent payment lifecycle', () => {
       applicationId,
       installmentsPerMonth: 2,
     });
+    expect(plan.status).toBe(201);
+    await h.db.$transaction((tx) =>
+      postTransaction(tx, {
+        description: 'Test: capital withdrawn',
+        referenceType: 'capital_withdrawal',
+        entries: [
+          { accountCode: ACCOUNTS.POOL_EQUITY, direction: 'DEBIT', amountCents: 24_900_000 },
+          { accountCode: ACCOUNTS.CAPITAL_POOL, direction: 'CREDIT', amountCents: 24_900_000 },
+        ],
+      }),
+    ); // $1,000 left: far less than one month's rent
     const detail = await api.get<{ payouts: Array<{ scheduledFor: string }> }>(
       `/v1/rent-plans/${plan.body.id}`,
     );

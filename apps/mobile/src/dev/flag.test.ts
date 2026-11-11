@@ -38,7 +38,6 @@ describe('the dev components with the flag off', () => {
   it.each([
     ['DevToolsProvider', 'return <>{children}</>;'],
     ['DevTapTarget', 'return <>{children}</>;'],
-    ['DevIndicator', 'return null;'],
   ])('%s returns before doing anything', (name, inert) => {
     const start = source.indexOf(`export function ${name}(`);
     expect(start).toBeGreaterThan(-1);
@@ -49,13 +48,7 @@ describe('the dev components with the flag off', () => {
   it('exports no other component that could run without the guard', () => {
     const exported = [...source.matchAll(/^export function (\w+)/gm)].map((m) => m[1]);
     expect(exported.sort()).toEqual(
-      [
-        'DevIndicator',
-        'DevTapTarget',
-        'DevToolsProvider',
-        'useDevTools',
-        'useDevWalkthrough',
-      ].sort(),
+      ['DevTapTarget', 'DevToolsProvider', 'useDevTools', 'useDevWalkthrough'].sort(),
     );
   });
 });

@@ -10,6 +10,7 @@ import {
   Linking,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   useWindowDimensions,
@@ -20,7 +21,6 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { IconButton } from '@/components/IconButton';
-import { ListRow } from '@/components/ListRow';
 import { Notice } from '@/components/Notice';
 import { Pill } from '@/components/Pill';
 import { Text } from '@/components/Text';
@@ -170,14 +170,12 @@ export function DevMenu() {
             {notice ? <Notice tone="success" message={notice} /> : null}
 
             <View style={[styles.columns, wide && styles.columnsWide]}>
-              <Card style={styles.column}>
+              <Card style={wide && styles.column}>
                 <Text variant="label">You are</Text>
                 {active ? (
                   <>
-                    <View style={styles.rowBetween}>
-                      <Text variant="heading" style={{ flex: 1 }}>
-                        {active.title}
-                      </Text>
+                    <Text variant="heading">{active.title}</Text>
+                    <View style={styles.pills}>
                       <Pill label={active.state.label} tone={active.state.tone} />
                     </View>
                     <Text variant="caption" tone="muted">
@@ -235,7 +233,7 @@ export function DevMenu() {
                 ) : null}
               </Card>
 
-              <Card tone="gold" style={styles.column}>
+              <Card tone="gold" style={wide && styles.column}>
                 <Text variant="label">Simulated clock</Text>
                 <Text variant="number">{clock ? formatDate(clock.today) : '…'}</Text>
                 <Text variant="caption">
@@ -301,20 +299,14 @@ export function DevMenu() {
                 <Text variant="title">{group.title}</Text>
                 <View style={[styles.columns, wide && styles.columnsWide]}>
                   {group.sections.map((section) => (
-                    <Card key={section.title} style={styles.column}>
+                    <Card key={section.title} style={wide && styles.column}>
                       <Text variant="label">{section.title}</Text>
                       {section.personas.map((p, i) => (
-                        <ListRow
+                        <PersonaRow
                           key={p.key}
-                          title={p.title}
-                          subtitle={p.demonstrates}
+                          persona={p}
+                          current={p.key === dev.persona?.key}
                           onPress={busy ? undefined : () => void signInAs(p)}
-                          right={
-                            <>
-                              <Pill label={p.state.label} tone={p.state.tone} />
-                              {p.key === dev.persona?.key ? <Pill label="You" tone="gold" /> : null}
-                            </>
-                          }
                           last={i === section.personas.length - 1}
                         />
                       ))}
@@ -375,6 +367,41 @@ export function DevMenu() {
   );
 }
 
+/**
+ * One persona in the menu. Stacked, not side by side: the name, then its state, then what it
+ * demonstrates, so the text keeps the full width of a phone screen.
+ */
+function PersonaRow({
+  persona,
+  current,
+  onPress,
+  last,
+}: {
+  persona: DevPersona;
+  current: boolean;
+  onPress?: () => void;
+  last: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Sign in as ${persona.title}`}
+      style={({ pressed }) => [styles.persona, !last && styles.divider, pressed && styles.pressed]}
+    >
+      <Text variant="bodyStrong">{persona.title}</Text>
+      <View style={styles.pills}>
+        <Pill label={persona.state.label} tone={persona.state.tone} />
+        {current ? <Pill label="You" tone="gold" /> : null}
+      </View>
+      <Text variant="caption" tone="muted">
+        {persona.demonstrates}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
   header: {
@@ -416,7 +443,10 @@ const styles = StyleSheet.create({
   columnsWide: { flexDirection: 'row', alignItems: 'flex-start' },
   column: { flex: 1, minWidth: 0 },
   group: { gap: spacing.smd, marginTop: spacing.sm },
-  rowBetween: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  pills: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
+  persona: { gap: 6, paddingVertical: 12 },
+  divider: { borderBottomWidth: border.thin, borderBottomColor: colors.ink },
+  pressed: { opacity: 0.6 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs },
   result: {
     gap: 2,

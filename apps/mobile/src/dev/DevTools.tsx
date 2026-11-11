@@ -12,7 +12,6 @@ import {
   type ReactNode,
 } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text } from '@/components/Text';
 import { useAuth } from '@/lib/auth';
@@ -71,7 +70,7 @@ function land(landing: DevSession['landing']) {
 
 /**
  * Mounted once, inside the auth provider. With the flag off it renders its children and
- * nothing else. With it on it owns the menu, the persona indicator, the toast, the web
+ * nothing else. With it on it owns the menu, the toast, the web
  * keyboard shortcut, and the `?devPersona=` link the dev home page uses.
  */
 export function DevToolsProvider({ children }: { children: ReactNode }) {
@@ -242,33 +241,6 @@ function EnabledTapTarget({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * The persistent indicator while impersonating: a small tag in the top corner with the
- * persona's name. Tapping it reopens the menu. Rendered inside the phone frame.
- */
-export function DevIndicator() {
-  if (!DEV_TOOLS) return null;
-  return <EnabledIndicator />;
-}
-
-function EnabledIndicator() {
-  const dev = useDevTools();
-  const insets = useSafeAreaInsets();
-  if (!dev?.persona) return null;
-  return (
-    <Pressable
-      onPress={dev.openMenu}
-      accessibilityRole="button"
-      accessibilityLabel={`Dev mode: signed in as ${dev.persona.title}. Open the dev menu`}
-      style={[styles.indicator, { top: insets.top + 6 }]}
-    >
-      <Text style={styles.indicatorText} numberOfLines={1}>
-        DEV · {dev.persona.title}
-      </Text>
-    </Pressable>
-  );
-}
-
 function DevToast({ message }: { message: string }) {
   return (
     <View pointerEvents="none" style={styles.toastWrap}>
@@ -281,25 +253,6 @@ function DevToast({ message }: { message: string }) {
 
 const styles = StyleSheet.create({
   tapTarget: { alignSelf: 'flex-start' },
-  indicator: {
-    position: 'absolute',
-    right: 8,
-    maxWidth: 190,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radii.chip,
-    borderWidth: border.thin,
-    borderColor: colors.ink,
-    backgroundColor: colors.night,
-    zIndex: 50,
-  },
-  indicatorText: {
-    fontFamily: fonts.bold,
-    fontSize: 10,
-    lineHeight: 14,
-    letterSpacing: 1,
-    color: colors.gold,
-  },
   toastWrap: {
     position: 'absolute',
     left: 0,

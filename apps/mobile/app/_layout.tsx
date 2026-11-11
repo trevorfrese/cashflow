@@ -7,7 +7,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { DevIndicator, DevToolsProvider } from '@/dev/DevTools';
+import { DevToolsProvider } from '@/dev/DevTools';
 import { AuthProvider } from '@/lib/auth';
 import { BusinessProvider } from '@/lib/business';
 import { border, colors, fontAssets, hardShadow, radii } from '@/theme';
@@ -61,7 +61,6 @@ export default function RootLayout() {
                   <Stack.Screen name="connections/authorize" />
                   <Stack.Screen name="connections/seat" />
                 </Stack>
-                <DevIndicator />
               </DevToolsProvider>
             </PhoneFrame>
           </BusinessProvider>

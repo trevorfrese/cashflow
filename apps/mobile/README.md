@@ -32,14 +32,13 @@ with `ENABLE_DEV_TOOLS=true`. Open it with five quick taps on the coin in the ho
 on the CashFlow wordmark on the welcome screen (that screen has no coin), or with Ctrl+`on
 web. It is a full screen modal: pick a persona to sign in as, move the simulated clock (one
 day, one week, to the persona's next event) and read what changed, reset the persona or
-everything, sign out, and jump to the ops console or the dev home page. While you are a
-persona a small`DEV` tag sits in the top corner; tapping it reopens the menu.
+everything, sign out, and jump to the ops console or the dev home page.
 
 Fresh applicant personas prefill the business form, preselect the sandbox bank scenario, and
 fill in months and rent, each with a notice saying so. Switching persona replaces the session
 through `replaceSession` in `src/dev/session.ts`, which empties the query cache before the
-app learns who the new user is. With the flag off `DevToolsProvider`, `DevTapTarget` and
-`DevIndicator` return their children untouched: no listener, no request, no menu.
+app learns who the new user is. With the flag off `DevToolsProvider` and `DevTapTarget`
+return their children untouched: no listener, no request, no menu.
 
 ## Layout
 

@@ -1,7 +1,24 @@
 import { createHash } from 'node:crypto';
 
-import type { BankTransaction, IsoDate, TransactionCategory } from '@cashflow/shared';
-import { addDays, parseIsoDate } from '@cashflow/shared';
+import type { BankTransaction, IsoDate } from '@cashflow/shared';
+import { addDays } from '@cashflow/shared';
+
+import {
+  BusinessSimulation,
+  mulberry32,
+  seedFromHex,
+  type BusinessParams,
+  type HazardEvent,
+} from './business-sim.ts';
+
+export {
+  simulateBusiness,
+  type ExternalDebit,
+  type ForwardParams,
+  type HazardEvent,
+  type SimulateHooks,
+  type SimulatedBusiness,
+} from './business-sim.ts';
 
 /**
  * Deterministic synthetic business bank history for the mock bank provider.
@@ -11,6 +28,10 @@ import { addDays, parseIsoDate } from '@cashflow/shared';
  * utilities, insurance, software, quarterly taxes, owner draws, and any debt service. It
  * tracks the running balance and charges an NSF fee whenever a debit overdraws the account,
  * so account conduct emerges from the scenario rather than being hard coded.
+ *
+ * The day by day mechanics live in `business-sim.ts`. This file maps the named scenarios onto
+ * that core over a window ending at the as-of date; `simulateBusiness` drives the same core
+ * forward from a start date for the portfolio evals.
  *
  * Scenarios are selected by keywords in the public token. Revenue and rent can be pinned with
  * `rev_<dollars>` and `rent_<dollars>` so the data lines up with what the applicant stated.
@@ -72,27 +93,10 @@ export function decodeItemId(itemId: string): { spec: ScenarioSpec; seedHex: str
   };
 }
 
-interface Params {
+/** Scenario parameter set: the business ratios plus how the sandbox window is shaped. */
+interface Params extends Omit<BusinessParams, 'monthlyRevenueCents' | 'rentCents'> {
   /** Annual revenue trend, as a fraction. 0.4 means revenue ends the year 40% above where it started. */
   trend: number;
-  /** Seasonal amplitude, as a fraction of revenue. */
-  seasonality: number;
-  /** Day to day noise on sales (log scale sigma). */
-  dailyNoise: number;
-  /** Month to month noise on the revenue level. */
-  monthlyNoise: number;
-  /** Outflow ratios, as fractions of monthly revenue. */
-  payroll: number;
-  supplier: number;
-  utilities: number;
-  insurance: number;
-  software: number;
-  taxQuarterly: number;
-  ownerDraw: number;
-  loan: number;
-  mcaDaily: number;
-  /** Opening balance in months of revenue. */
-  openingBalanceMonths: number;
   /** Days of history to generate. */
   days: number;
   /** Number of unplanned large debits in the last 90 days. */
@@ -152,41 +156,25 @@ const PARAMS: Record<Scenario, Params> = {
   no_balance: { ...BASE, days: 0 },
   // Card sales are settled every other week, so monthly deposits swing with the number of
   // settlement days in the month even though daily sales are steady.
-  batched: BASE,
+  batched: { ...BASE, batchedSettlement: true },
 };
 
-/** Small deterministic PRNG so every token yields the same history. */
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+/**
+ * The ratios of a named scenario as continuous business parameters, for callers that want to
+ * start from an archetype and vary it.
+ */
+export function scenarioParams(
+  scenario: Scenario,
+): Omit<BusinessParams, 'monthlyRevenueCents' | 'rentCents'> {
+  const {
+    trend: _trend,
+    days: _days,
+    shocks: _shocks,
+    collapse: _collapse,
+    ...rest
+  } = PARAMS[scenario];
+  return rest;
 }
-
-function normal(rand: () => number): number {
-  const u = Math.max(rand(), 1e-12);
-  const v = rand();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-}
-
-function weekday(iso: IsoDate): number {
-  const { year, month, day } = parseIsoDate(iso);
-  return new Date(Date.UTC(year, month - 1, day)).getUTCDay(); // 0 Sunday .. 6 Saturday
-}
-
-function dayOfYear(iso: IsoDate): number {
-  const { year, month, day } = parseIsoDate(iso);
-  const start = Date.UTC(year, 0, 1);
-  return Math.floor((Date.UTC(year, month - 1, day) - start) / 86_400_000);
-}
-
-// Sales mix by weekday, closed Mondays. Normalized so a week sums to the weekly target.
-const WEEKDAY_WEIGHT = [1.1, 0, 0.8, 0.8, 0.9, 1.4, 1.5];
-const WEEK_WEIGHT_SUM = WEEKDAY_WEIGHT.reduce((a, b) => a + b, 0);
 
 export interface SyntheticHistory {
   transactions: BankTransaction[];
@@ -201,135 +189,38 @@ export function generateHistory(
   const p = PARAMS[spec.scenario];
   if (p.days === 0) return { transactions: [], currentBalanceCents: null };
 
-  const rand = mulberry32(parseInt(seedHex.slice(0, 8), 16) || 1);
-  const txs: BankTransaction[] = [];
-  let n = 0;
-  const push = (
-    date: IsoDate,
-    amountCents: number,
-    description: string,
-    category: TransactionCategory,
-  ) => {
-    if (amountCents === 0) return;
-    txs.push({ id: `${seedHex}-${++n}`, date, amountCents, description, category, pending: false });
-  };
-
-  const weeklyRevenue = (spec.monthlyRevenueCents * 12) / 52;
-  let balance = Math.round(spec.monthlyRevenueCents * p.openingBalanceMonths);
-  let negativeStreak = 0;
-  let monthLevel = 1;
-  let currentMonth = '';
-  let pendingSettlement = 0;
+  const rand = mulberry32(seedFromHex(seedHex));
   const start = addDays(asOf, -(p.days - 1));
+  // Unplanned repair bills land on random days in the last 85 days of the window.
   const shockDays = new Set<number>();
   for (let i = 0; i < p.shocks; i++) shockDays.add(p.days - 1 - Math.floor(rand() * 85));
+  const events: HazardEvent[] = [...shockDays].map((i) => ({
+    kind: 'expense',
+    date: addDays(start, i),
+    shareOfMonthly: 0.18,
+  }));
 
-  for (let i = 0; i < p.days; i++) {
-    const date = addDays(start, i);
-    const { day, month } = parseIsoDate(date);
-    const monthKey = date.slice(0, 7);
-    if (monthKey !== currentMonth) {
-      currentMonth = monthKey;
-      monthLevel = Math.exp(normal(rand) * p.monthlyNoise);
+  // The sandbox trend is defined relative to the window, so the as-of date always sits at the
+  // same point of the story whatever day the token is linked.
+  const span = Math.max(p.days - 1, 1);
+  const collapse = p.collapse;
+  const trendFactor = (i: number): number => {
+    const progress = i / span;
+    let factor = 1 + p.trend * (progress - 0.5);
+    if (collapse && progress > collapse.at) {
+      factor *= 1 - (collapse.depth * (progress - collapse.at)) / (1 - collapse.at);
     }
-    const progress = i / Math.max(p.days - 1, 1);
-    let trendFactor = 1 + p.trend * (progress - 0.5);
-    if (p.collapse && progress > p.collapse.at) {
-      trendFactor *= 1 - (p.collapse.depth * (progress - p.collapse.at)) / (1 - p.collapse.at);
-    }
-    const seasonFactor =
-      1 + p.seasonality * Math.sin(((dayOfYear(date) - 105) / 365) * 2 * Math.PI);
-    const level = trendFactor * seasonFactor * monthLevel;
-    const dow = weekday(date);
-    const monthly = spec.monthlyRevenueCents * level;
+    return factor;
+  };
 
-    // Inflows
-    const dayShare = WEEKDAY_WEIGHT[dow]! / WEEK_WEIGHT_SUM;
-    if (dayShare > 0) {
-      const sales = weeklyRevenue * level * dayShare * Math.exp(normal(rand) * p.dailyNoise);
-      if (spec.scenario === 'batched') {
-        pendingSettlement += Math.round(sales * 0.85);
-      } else {
-        push(date, Math.round(sales * 0.85), 'SQUARE INC SETTLEMENT', 'CARD_SETTLEMENT');
-        balance += Math.round(sales * 0.85);
-      }
-      if (dow === 2) {
-        const cash = Math.round(weeklyRevenue * level * 0.15);
-        push(date, cash, 'CASH DEPOSIT BRANCH 0142', 'CASH_DEPOSIT');
-        balance += cash;
-      }
-    }
-
-    if (
-      spec.scenario === 'batched' &&
-      dow === 4 &&
-      Math.floor(i / 7) % 2 === 1 &&
-      pendingSettlement > 0
-    ) {
-      push(date, pendingSettlement, 'SQUARE INC BIWEEKLY SETTLEMENT', 'CARD_SETTLEMENT');
-      balance += pendingSettlement;
-      pendingSettlement = 0;
-    }
-
-    // Outflows. A debit that overdraws the account draws one NSF fee for the day.
-    let nsfChargedToday = false;
-    const debit = (amount: number, description: string, category: TransactionCategory) => {
-      const cents = -Math.round(amount);
-      if (cents === 0) return;
-      push(date, cents, description, category);
-      balance += cents;
-      if (balance < 0 && !nsfChargedToday) {
-        push(date, -3500, 'NSF FEE', 'NSF_FEE');
-        balance -= 3500;
-        nsfChargedToday = true;
-      }
-    };
-
-    if (dow === 5 && Math.floor(i / 7) % 2 === 0) {
-      debit(((monthly * p.payroll) / 26) * 12, 'GUSTO PAYROLL', 'PAYROLL');
-    }
-    if (day === 1) debit(spec.rentCents, 'RENT - HARBOR VIEW PROPERTIES', 'RENT');
-    if (dow === 1 || dow === 3 || dow === 5) {
-      debit(
-        ((monthly * p.supplier) / 13) * Math.exp(normal(rand) * 0.2),
-        dow === 3 ? 'SYSCO FOODS' : 'RESTAURANT DEPOT',
-        'SUPPLIER',
-      );
-    }
-    if (day === 10) debit(monthly * p.utilities, 'CITY POWER & GAS', 'UTILITIES');
-    if (day === 15) debit(monthly * p.insurance, 'HARTFORD BUSINESS INS', 'INSURANCE');
-    if (day === 5) debit(monthly * p.software, 'TOAST POS SUBSCRIPTION', 'SOFTWARE');
-    if (day === 28) debit(2500, 'MONTHLY SERVICE FEE', 'BANK_FEE');
-    if (day === 15 && [1, 4, 6, 9].includes(month)) {
-      debit(monthly * p.taxQuarterly * 3, 'IRS EFTPS PAYMENT', 'TAX');
-    }
-    if (day === 20) debit(monthly * p.ownerDraw, 'OWNER DRAW - TRANSFER', 'OWNER_DRAW');
-    if (day === 3 && p.loan > 0) debit(monthly * p.loan, 'LOAN PMT - SBA 7A', 'LOAN_PAYMENT');
-    if (p.mcaDaily > 0 && dow >= 1 && dow <= 5) {
-      debit((monthly * p.mcaDaily) / 22, 'MCA DAILY ACH - RAPID FUNDING', 'MCA_PAYMENT');
-    }
-    if (dow === 4 && rand() < 0.5) {
-      debit(monthly * 0.004 * rand(), 'REFUND - CUSTOMER', 'REFUND');
-    }
-    if (shockDays.has(i)) {
-      debit(monthly * 0.18, 'EQUIPMENT REPAIR - ACE HVAC', 'OTHER_EXPENSE');
-    }
-
-    // Owners do not leave an account overdrawn for long. After two negative days the owner
-    // moves money in from personal savings, which is why conduct problems show up as a
-    // pattern of fees and short negative stretches rather than a permanently negative balance.
-    if (balance < 0) {
-      negativeStreak += 1;
-      if (negativeStreak >= 2) {
-        const topUp = -balance + Math.round(monthly * 0.03);
-        push(date, topUp, 'OWNER CAPITAL CONTRIBUTION', 'TRANSFER_IN');
-        balance += topUp;
-        negativeStreak = 0;
-      }
-    } else {
-      negativeStreak = 0;
-    }
-  }
-
-  return { transactions: txs, currentBalanceCents: balance };
+  const sim = new BusinessSimulation({
+    params: { ...p, monthlyRevenueCents: spec.monthlyRevenueCents, rentCents: spec.rentCents },
+    seedHex,
+    start,
+    rand,
+    trendFactor,
+    events,
+  });
+  for (let i = 0; i < p.days; i++) sim.step();
+  return { transactions: sim.transactions, currentBalanceCents: sim.balanceCents };
 }

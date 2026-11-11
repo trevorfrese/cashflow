@@ -1,0 +1,172 @@
+{
+  "run": {
+    "n": 2000,
+    "seed": "1",
+    "horizonMonths": 12,
+    "arrivalMonths": 12,
+    "monthlyGrowthBps": 1000,
+    "poolSizeCents": 750000000,
+    "servicingPolicy": "baseline"
+  },
+  "headline": {
+    "base": {
+      "approvalRateBps": 6860,
+      "declineRateBps": 2415,
+      "needsInfoRateBps": 725,
+      "plans": 1372,
+      "volumeCents": 7068240000,
+      "feeIncomeCents": 120863150,
+      "costOfFundsCents": 37115932,
+      "servicingCostCents": 19756800,
+      "chargeOffCents": 243845000,
+      "recoveryCents": 24384500,
+      "netLossCents": 219460500,
+      "netLossBps": 310,
+      "netMarginCents": -155470082,
+      "netMarginBps": -220,
+      "badRateBps": 678,
+      "firstPaymentDefaultRateBps": 95,
+      "profitableShareBps": 8980,
+      "auc": 0.769,
+      "ks": 0.421,
+      "fraudApprovalRateBps": 4681,
+      "poolMinCents": 155007473,
+      "poolPeakUtilizationBps": 8048,
+      "unfundedPayouts": 0,
+      "badRateBpsByGrade": {
+        "A": 286,
+        "B": 1167,
+        "C": 1304,
+        "D": 3750
+      }
+    },
+    "mild": {
+      "approvalRateBps": 6245,
+      "declineRateBps": 2790,
+      "needsInfoRateBps": 965,
+      "plans": 1249,
+      "volumeCents": 6199080000,
+      "feeIncomeCents": 106955254,
+      "costOfFundsCents": 33737244,
+      "servicingCostCents": 17985600,
+      "chargeOffCents": 225363750,
+      "recoveryCents": 22536375,
+      "netLossCents": 202827375,
+      "netLossBps": 327,
+      "netMarginCents": -147594965,
+      "netMarginBps": -238,
+      "badRateBps": 737,
+      "firstPaymentDefaultRateBps": 104,
+      "profitableShareBps": 8935,
+      "auc": 0.79,
+      "ks": 0.473,
+      "fraudApprovalRateBps": 3830,
+      "poolMinCents": 214183747,
+      "poolPeakUtilizationBps": 7297,
+      "unfundedPayouts": 0,
+      "badRateBpsByGrade": {
+        "A": 209,
+        "B": 1033,
+        "C": 1912,
+        "D": 3158
+      }
+    },
+    "severe": {
+      "approvalRateBps": 4980,
+      "declineRateBps": 2970,
+      "needsInfoRateBps": 2050,
+      "plans": 996,
+      "volumeCents": 4915200000,
+      "feeIncomeCents": 83261612,
+      "costOfFundsCents": 35713033,
+      "servicingCostCents": 14342400,
+      "chargeOffCents": 277482500,
+      "recoveryCents": 27748250,
+      "netLossCents": 249734250,
+      "netLossBps": 508,
+      "netMarginCents": -216528071,
+      "netMarginBps": -441,
+      "badRateBps": 1627,
+      "firstPaymentDefaultRateBps": 131,
+      "profitableShareBps": 8273,
+      "auc": 0.856,
+      "ks": 0.617,
+      "fraudApprovalRateBps": 3191,
+      "poolMinCents": 253593528,
+      "poolPeakUtilizationBps": 6860,
+      "unfundedPayouts": 0,
+      "badRateBpsByGrade": {
+        "A": 307,
+        "B": 1813,
+        "C": 4914,
+        "D": 5610
+      }
+    }
+  },
+  "gates": [
+    {
+      "id": "net_loss_base",
+      "value": 310,
+      "comparator": "<=",
+      "threshold": 75,
+      "unit": "bps of volume",
+      "pass": false
+    },
+    {
+      "id": "net_margin_base",
+      "value": -155470082,
+      "comparator": ">",
+      "threshold": 0,
+      "unit": "cents",
+      "pass": false
+    },
+    {
+      "id": "net_margin_mild_stress",
+      "value": -147594965,
+      "comparator": ">",
+      "threshold": 0,
+      "unit": "cents",
+      "pass": false
+    },
+    {
+      "id": "bad_rate_monotonic",
+      "value": 0,
+      "comparator": "=",
+      "threshold": 0,
+      "unit": "inversions",
+      "pass": true
+    },
+    {
+      "id": "auc",
+      "value": 0.769,
+      "comparator": ">=",
+      "threshold": 0.7,
+      "unit": "AUC",
+      "pass": true
+    },
+    {
+      "id": "fraud_approval",
+      "value": 4681,
+      "comparator": "<",
+      "threshold": 500,
+      "unit": "bps of fraud applicants",
+      "pass": false
+    },
+    {
+      "id": "pool_funding",
+      "value": 0,
+      "comparator": "=",
+      "threshold": 0,
+      "unit": "unfunded payouts",
+      "pass": true
+    },
+    {
+      "id": "approval_floor",
+      "value": 6860,
+      "comparator": ">=",
+      "threshold": 3000,
+      "unit": "bps of applicants",
+      "pass": true
+    }
+  ]
+}

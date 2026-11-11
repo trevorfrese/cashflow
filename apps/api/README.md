@@ -31,6 +31,7 @@ pnpm --filter @cashflow/api db:reset       # drop, migrate, seed
 pnpm --filter @cashflow/api db:studio      # Prisma Studio
 pnpm --filter @cashflow/api job:run        # run jobs once as of today
 pnpm --filter @cashflow/api job:run -- --as-of 2026-12-01
+pnpm --filter @cashflow/api eval:portfolio # portfolio simulation and gates, see evals/README.md
 ```
 
 ## Layout

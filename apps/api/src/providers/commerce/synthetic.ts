@@ -7,6 +7,7 @@ import {
   parseIsoDate,
 } from '@cashflow/shared';
 
+import { WEEKDAY_WEIGHT, WEEK_WEIGHT_SUM, mulberry32, normal } from '../bank-link/business-sim.ts';
 import {
   SCENARIOS,
   parseScenario,
@@ -102,21 +103,9 @@ export function decodeCommerceItemId(itemId: string): { spec: CommerceSpec; seed
   };
 }
 
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function normal(rand: () => number): number {
-  const u = Math.max(rand(), 1e-12);
-  const v = rand();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+export interface SyntheticSales {
+  dailySales: DailySales[];
+  connectedSince: IsoDate;
 }
 
 function weekday(iso: IsoDate): number {
@@ -129,13 +118,42 @@ function dayOfYear(iso: IsoDate): number {
   return Math.floor((Date.UTC(year, month - 1, day) - Date.UTC(year, 0, 1)) / 86_400_000);
 }
 
-// Same weekly shape as the sandbox bank: closed Mondays, busiest at the weekend.
-const WEEKDAY_WEIGHT = [1.1, 0, 0.8, 0.8, 0.9, 1.4, 1.5];
-const WEEK_WEIGHT_SUM = WEEKDAY_WEIGHT.reduce((a, b) => a + b, 0);
+/** The platform's seed stream: different from the bank's so the two do not agree tick for tick. */
+function platformRand(seedHex: string): () => number {
+  return mulberry32(parseInt(seedHex.slice(0, 8), 16) ^ 0x5a17e5 || 1);
+}
 
-export interface SyntheticSales {
-  dailySales: DailySales[];
-  connectedSince: IsoDate;
+function averageTicketCents(rand: () => number): number {
+  return 2400 + Math.floor(rand() * 4000);
+}
+
+interface RowParams {
+  refundRate: number;
+  chargebackRate: number;
+  cardShare: number;
+}
+
+/**
+ * One day as the platform reports it, given that day's gross sales. Shared by the sandbox
+ * generator and the forward generator so both describe a day the same way.
+ */
+function salesRow(
+  rand: () => number,
+  date: IsoDate,
+  gross: number,
+  avgTicket: number,
+  p: RowParams,
+): DailySales {
+  const refunds = rand() < 0.6 ? Math.round(gross * p.refundRate * (0.5 + rand())) : 0;
+  const chargebacks = rand() < 0.08 ? Math.round(gross * p.chargebackRate * 8) : 0;
+  return {
+    date,
+    grossCents: gross,
+    refundsCents: refunds,
+    chargebacksCents: chargebacks,
+    orderCount: Math.max(1, Math.round(gross / avgTicket)),
+    cardShareBps: Math.round(10_000 * Math.min(1, Math.max(0, p.cardShare + normal(rand) * 0.03))),
+  };
 }
 
 export function generateSales(spec: CommerceSpec, seedHex: string, asOf: IsoDate): SyntheticSales {
@@ -143,10 +161,9 @@ export function generateSales(spec: CommerceSpec, seedHex: string, asOf: IsoDate
   const start = addDays(asOf, -Math.max(p.days - 1, 0));
   if (p.days === 0) return { dailySales: [], connectedSince: asOf };
 
-  // A different seed stream from the bank so the two sources agree in shape but not tick for tick.
-  const rand = mulberry32(parseInt(seedHex.slice(0, 8), 16) ^ 0x5a17e5 || 1);
+  const rand = platformRand(seedHex);
   const weeklyRevenue = (spec.monthlyRevenueCents * 12) / 52;
-  const avgTicket = 2400 + Math.floor(rand() * 4000);
+  const avgTicket = averageTicketCents(rand);
   const out: DailySales[] = [];
   let monthLevel = 1;
   let currentMonth = '';
@@ -173,18 +190,30 @@ export function generateSales(spec: CommerceSpec, seedHex: string, asOf: IsoDate
       weeklyRevenue * level * dayShare * Math.exp(normal(rand) * p.dailyNoise),
     );
     if (gross <= 0) continue;
-    const refunds = rand() < 0.6 ? Math.round(gross * p.refundRate * (0.5 + rand())) : 0;
-    const chargebacks = rand() < 0.08 ? Math.round(gross * p.chargebackRate * 8) : 0;
-    out.push({
-      date,
-      grossCents: gross,
-      refundsCents: refunds,
-      chargebacksCents: chargebacks,
-      orderCount: Math.max(1, Math.round(gross / avgTicket)),
-      cardShareBps: Math.round(
-        10_000 * Math.min(1, Math.max(0, p.cardShare + normal(rand) * 0.03)),
-      ),
-    });
+    out.push(salesRow(rand, date, gross, avgTicket, p));
   }
   return { dailySales: out, connectedSince: start };
+}
+
+/**
+ * Platform sales for a business whose sales path is already known, for example the
+ * `dailySales` of `simulateBusiness`. Gross sales are the same sales the bank deposits come
+ * from, so the two sources reconcile; refunds, chargebacks, order counts, and card share come
+ * from the platform's own seed stream. Because rows are produced in date order from that
+ * stream, the sales up to any date are a prefix of a longer path.
+ */
+export function generateSalesFromPath(
+  path: ReadonlyArray<{ date: IsoDate; grossCents: number }>,
+  seedHex: string,
+): SyntheticSales {
+  const first = path[0];
+  if (!first) return { dailySales: [], connectedSince: '1970-01-01' };
+  const rand = platformRand(seedHex);
+  const avgTicket = averageTicketCents(rand);
+  const dailySales: DailySales[] = [];
+  for (const day of path) {
+    if (day.grossCents <= 0) continue;
+    dailySales.push(salesRow(rand, day.date, day.grossCents, avgTicket, BASE));
+  }
+  return { dailySales, connectedSince: first.date };
 }

@@ -1,5 +1,11 @@
-import type { GraduationOffer, Installment, Lease, PassThroughPeriod } from '@cashflow/shared';
-import { formatBps, formatCents } from '@cashflow/shared';
+import type {
+  GraduationOffer,
+  Installment,
+  Lease,
+  PassThroughPeriod,
+  UnderwritingApplication,
+} from '@cashflow/shared';
+import { formatBps } from '@cashflow/shared';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
@@ -19,7 +25,7 @@ import {
 import { DevTapTarget } from '@/dev/DevTools';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
-import { formatDate, formatPeriod, ordinal, todayIso } from '@/lib/forms';
+import { formatDate, formatMoney, formatPeriod, ordinal, plural, todayIso } from '@/lib/forms';
 import {
   currentGraduationOffer,
   isMissedPeriod,
@@ -155,7 +161,7 @@ function StageCard({ stage, leases }: { stage: Stage; leases: Lease[] }) {
             {stage.application.decision?.reasons[0]?.message}
           </Text>
           <Button
-            title="Continue"
+            title="See what we need"
             icon="arrow-right"
             onPress={() =>
               router.push({ pathname: '/application/[id]', params: { id: stage.application.id } })
@@ -188,14 +194,10 @@ function StageCard({ stage, leases }: { stage: Stage; leases: Lease[] }) {
           <Pill label="Approved" tone="paid" />
           <Text variant="title">
             Approved for up to{' '}
-            {formatCents(stage.application.decision?.approvedMonthlyLimitCents ?? 0, {
-              showCents: false,
-            })}{' '}
-            a month
+            {formatMoney(stage.application.decision?.approvedMonthlyLimitCents ?? 0)} a month
           </Text>
           <Text variant="body" tone="muted">
-            {formatBps(stage.application.decision?.feeBps ?? 0)} fee per month. Link your lease to
-            start.
+            {approvedLine(stage.application)}
           </Text>
           <Button
             title="Link your lease"
@@ -217,8 +219,7 @@ function StageCard({ stage, leases }: { stage: Stage; leases: Lease[] }) {
           <Pill label="Lease linked" tone="paid" />
           <Text variant="title">Start your rent plan</Text>
           <Text variant="body" tone="muted">
-            {stage.lease.landlordName},{' '}
-            {formatCents(stage.lease.monthlyRentCents, { showCents: false })} due on the{' '}
+            {stage.lease.landlordName}, {formatMoney(stage.lease.monthlyRentCents)} due on the{' '}
             {ordinal(stage.lease.dueDayOfMonth)}.
           </Text>
           <Button
@@ -226,6 +227,23 @@ function StageCard({ stage, leases }: { stage: Stage; leases: Lease[] }) {
             icon="arrow-right"
             onPress={() =>
               router.push({ pathname: '/plan/new', params: { leaseId: stage.lease.id } })
+            }
+          />
+        </Card>
+      );
+    case 'RENT_OVER_LIMIT':
+      return (
+        <Card>
+          <Pill label="Approved for less" tone="due" />
+          <Text variant="title">Your rent is above your limit</Text>
+          <Text variant="body" tone="muted">
+            {`We can pay up to ${formatMoney(stage.application.decision?.approvedMonthlyLimitCents ?? 0)} a month, and the rent on your lease with ${stage.lease.landlordName} is ${formatMoney(stage.lease.monthlyRentCents)}. We pay a whole month's rent or none of it, so a plan cannot start on this lease.`}
+          </Text>
+          <Button
+            title="See your options"
+            icon="arrow-right"
+            onPress={() =>
+              router.push({ pathname: '/application/[id]', params: { id: stage.application.id } })
             }
           />
         </Card>
@@ -247,6 +265,15 @@ function StageCard({ stage, leases }: { stage: Stage; leases: Lease[] }) {
         />
       );
   }
+}
+
+/** The fee, and when the limit is below the rent asked for, that the lease must fit it. */
+function approvedLine(a: UnderwritingApplication): string {
+  const fee = `${formatBps(a.decision?.feeBps ?? 0)} fee per month.`;
+  const limit = a.decision?.approvedMonthlyLimitCents ?? 0;
+  if (a.requestedMonthlyRentCents > limit)
+    return `${fee} That is less than the ${formatMoney(a.requestedMonthlyRentCents)} rent you asked for, so link a lease with rent at or below it.`;
+  return `${fee} Link your lease to start.`;
 }
 
 /** A declined application, with the free pass-through plan when it is offered. */
@@ -330,12 +357,10 @@ function PassThroughSummary({
           {next ? `${formatPeriod(next.periodMonth)} rent` : 'Free pass-through plan'}
         </Text>
         <Text variant="money" numberOfLines={1} adjustsFontSizeToFit>
-          {formatCents(next?.amountCents ?? d.monthlyRentCents, { showCents: false })}
+          {formatMoney(next?.amountCents ?? d.monthlyRentCents)}
         </Text>
         {next ? (
           <>
-            <Text variant="body">{`We collect it from your bank on ${formatDate(next.collectOn)}.`}</Text>
-            <Text variant="body">{`${capitalize(landlord)} is paid on ${formatDate(next.dueDate)}.`}</Text>
             <PeriodStatus period={next} />
             <Text variant="body">{next.message}</Text>
           </>
@@ -349,9 +374,7 @@ function PassThroughSummary({
           <Text variant="heading">{formatPeriod(finished.periodMonth)}</Text>
           <PeriodStatus period={finished} />
           <Text variant="body" tone="muted">
-            {finished.landlordPaid && finished.paidOn
-              ? `Paid to ${landlord} on ${formatDate(finished.paidOn)}. ${finished.message}`
-              : finished.message}
+            {finished.message}
           </Text>
         </Card>
       ) : null}
@@ -362,7 +385,8 @@ function PassThroughSummary({
         </Text>
         {history.data ? (
           <Text variant="caption" tone="muted">
-            {onTimeLine(history.data)}
+            {/* With an offer on screen, the countdown to a review would contradict it. */}
+            {onTimeLine(offer ? { ...history.data, monthsUntilReview: null } : history.data)}
           </Text>
         ) : null}
       </View>
@@ -409,7 +433,7 @@ function GraduationCard({ offer, onDone }: { offer: GraduationOffer; onDone: () 
       {open ? (
         <>
           <Text variant="body" tone="muted">
-            {`Fee: ${formatCents(offer.feeCentsPerMonth)} a month (${formatBps(offer.feeBps)} of rent), repaid in ${offer.installmentsPerMonth} ${offer.installmentsPerMonth === 1 ? 'payment' : 'payments'} a month.`}
+            {`The fee is ${formatBps(offer.feeBps)} of rent, and you repay in ${plural(offer.installmentsPerMonth, 'payment')} a month.`}
           </Text>
           <Text variant="caption" tone="muted">
             {`Offer open until ${formatDate(offer.expiresOn)}.`}
@@ -425,10 +449,6 @@ function GraduationCard({ offer, onDone }: { offer: GraduationOffer; onDone: () 
       ) : null}
     </Card>
   );
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function PlanSummary({ planId, lease }: { planId: string; lease: Lease | undefined }) {
@@ -460,7 +480,7 @@ function PlanSummary({ planId, lease }: { planId: string; lease: Lease | undefin
       <Card tone="gold" shadow="l">
         <Text variant="label">{period ? `${formatPeriod(period)} rent` : 'Rent'}</Text>
         <Text variant="money" numberOfLines={1} adjustsFontSizeToFit>
-          {formatCents(d.monthlyRentCents, { showCents: false })}
+          {formatMoney(d.monthlyRentCents)}
         </Text>
         <Text variant="body">{payoutLine(periodPayout, lease, d.dueDayOfMonth)}</Text>
       </Card>
@@ -475,13 +495,14 @@ function PlanSummary({ planId, lease }: { planId: string; lease: Lease | undefin
               count={periodItems.length}
               planId={planId}
               payable={periodPayout?.status === 'PAID'}
+              held={periodPayout?.status === 'HELD'}
               last={idx === periodItems.length - 1}
             />
           ))}
           {feeCents > 0 ? (
             <Text variant="caption" tone="muted">
-              Includes the {formatCents(feeCents, { showCents: false })} CashFlow fee (
-              {formatBps(d.feeBps)}), split across the payments.
+              Includes the {formatMoney(feeCents)} CashFlow fee ({formatBps(d.feeBps)}), split
+              across the payments.
             </Text>
           ) : null}
         </Card>
@@ -501,12 +522,15 @@ function InstallmentRow({
   count,
   planId,
   payable,
+  held,
   last,
 }: {
   installment: Installment;
   count: number;
   planId: string;
   payable: boolean;
+  /** The landlord payout for this month is on hold, so nothing is collected yet. */
+  held: boolean;
   last: boolean;
 }) {
   const pay = usePayInstallment(planId);
@@ -519,6 +543,7 @@ function InstallmentRow({
       i.status === 'LATE' ||
       i.status === 'CHARGED_OFF');
   const paid = i.status === 'PAID';
+  const behind = i.status === 'FAILED' || i.status === 'LATE' || i.status === 'CHARGED_OFF';
 
   const onPay = async () => {
     if (!confirming) {
@@ -545,16 +570,16 @@ function InstallmentRow({
           </Text>
         </View>
         <View style={{ alignItems: 'flex-end', gap: 4 }}>
-          <Text variant="heading">{formatCents(i.principalCents, { showCents: false })}</Text>
-          <Pill {...(paid ? { label: 'Paid', tone: 'paid' } : nextPill(i))} />
+          <Text variant="heading">{formatMoney(i.totalCents)}</Text>
+          <Pill {...(paid ? { label: 'Paid', tone: 'paid' } : nextPill(i, held))} />
         </View>
       </View>
       {error ? <Notice tone="danger" message={error} /> : null}
       {canPay ? (
         <View style={{ gap: spacing.sm }}>
           <Button
-            title={confirming ? `Confirm ${formatCents(i.totalCents)} from your bank` : 'Pay now'}
-            variant={confirming ? 'primary' : 'secondary'}
+            title={confirming ? `Confirm ${formatMoney(i.totalCents)} from your bank` : 'Pay now'}
+            variant={confirming || behind ? 'primary' : 'secondary'}
             size="sm"
             onPress={() => void onPay()}
             loading={pay.isPending}
@@ -591,8 +616,12 @@ function payoutLine(
   return `Goes to ${landlord} in full on ${formatDate(payout.scheduledFor)}`;
 }
 
-function nextPill(i: Installment): { label: string; tone: 'due' | 'late' | 'info' | 'paid' } {
+function nextPill(
+  i: Installment,
+  held: boolean,
+): { label: string; tone: 'due' | 'late' | 'info' | 'paid' } {
   const today = todayIso();
+  if (i.status === 'SCHEDULED' && held) return { label: 'Waiting', tone: 'due' };
   if (i.status === 'SCHEDULED') {
     if (i.dueDate < today) return { label: 'Overdue', tone: 'late' };
     const days = daysBetween(today, i.dueDate);

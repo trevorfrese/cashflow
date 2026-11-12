@@ -77,12 +77,15 @@ export function leaseForPassThrough(leases: Lease[] | undefined): Lease | null {
   return leases?.find((l) => l.status === 'ACTIVE') ?? null;
 }
 
-/** "On-time months: 2. 1 more before we look at a split rent plan again." */
+const months = (n: number) => `${n} ${n === 1 ? 'month' : 'months'}`;
+
+/** "2 months on time in a row. After 1 more on-time month, we look at a split rent plan for you." */
 export function onTimeLine(history: Pick<PaymentHistory, 'summary' | 'monthsUntilReview'>): string {
   const streak = history.summary.currentOnTimeStreak;
-  const base = `On-time months in a row: ${streak}.`;
+  const base =
+    streak === 0 ? 'No on-time months in a row yet.' : `${months(streak)} on time in a row.`;
   const left = history.monthsUntilReview;
   if (left === null) return base;
   if (left === 0) return `${base} We are looking at a split rent plan for you.`;
-  return `${base} ${left} more before we look at a split rent plan again.`;
+  return `${base} After ${left} more on-time ${left === 1 ? 'month' : 'months'}, we look at a split rent plan for you.`;
 }

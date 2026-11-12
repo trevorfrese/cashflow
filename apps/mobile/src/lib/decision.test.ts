@@ -1,7 +1,7 @@
 import { findJargon } from '@cashflow/shared';
 import { describe, expect, it } from 'vitest';
 
-import { APPLICATION_DISCLOSURE, longDate, NOTICE_KIND_LABEL } from './decision';
+import { APPLICATION_DISCLOSURE, longDate, needsInfoStep, NOTICE_KIND_LABEL } from './decision';
 
 describe('decision copy', () => {
   it('discloses the data used and the right to specific reasons, in plain words', () => {
@@ -15,5 +15,18 @@ describe('decision copy', () => {
     expect(Object.keys(NOTICE_KIND_LABEL)).toHaveLength(4);
     expect(longDate('2026-11-12')).toBe('November 12, 2026');
     expect(longDate('2026-11-12T23:30:00.000Z')).toBe('November 12, 2026');
+  });
+});
+
+describe('needsInfoStep', () => {
+  it('asks for a bank account when none is linked or one is missing', () => {
+    expect(needsInfoStep([], false)).toBe('CONNECT_BANK');
+    expect(needsInfoStep(['PAYOUT_ACCOUNT_NOT_CONNECTED'], true)).toBe('CONNECT_BANK');
+  });
+  it('sends a connection problem to the connections screen', () => {
+    expect(needsInfoStep(['RECONNECT_REQUIRED'], true)).toBe('CONNECTIONS');
+  });
+  it('runs the decision again when nothing is left to connect', () => {
+    expect(needsInfoStep(['BUSINESS_DETAILS_NEEDED'], true)).toBe('RUN_AGAIN');
   });
 });

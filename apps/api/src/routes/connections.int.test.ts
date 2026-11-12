@@ -240,7 +240,7 @@ describe('direct OAuth connections', () => {
     const square = list.body.connections.find((c) => c.kind === 'COMMERCE')!;
     expect(square.actions.map((a) => a.code)).toEqual(['CONNECT_PAYOUT_ACCOUNT']);
     expect(square.checks).toContainEqual({
-      label: 'Sales are paid into a connected account',
+      label: 'Sales are paid into an account that is not connected',
       ok: false,
     });
   });

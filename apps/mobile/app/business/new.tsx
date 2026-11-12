@@ -13,6 +13,7 @@ import {
   dollarsToCents,
   normalizeMonthInput,
   percentToBps,
+  fieldError,
 } from '@/lib/forms';
 import { useCreateBusiness } from '@/lib/queries';
 import { colors, fonts, spacing } from '@/theme';
@@ -88,7 +89,7 @@ export default function NewBusiness() {
     if (!parsed.success) {
       for (const issue of parsed.error.issues) {
         const key = issue.path[issue.path.length - 1];
-        if (key && !next[String(key)]) next[String(key)] = issue.message;
+        if (key && !next[String(key)]) next[String(key)] = fieldError(issue);
       }
     }
     if (Object.keys(next).length > 0) {

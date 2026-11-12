@@ -1,4 +1,4 @@
-import { parseIsoDate, toIsoDate } from '@cashflow/shared';
+import { formatCents, parseIsoDate, toIsoDate } from '@cashflow/shared';
 
 /**
  * Parse a dollars string typed by a person ("2,450", "$2450.50") into integer cents.
@@ -99,4 +99,73 @@ export function ordinal(n: number): string {
   const s = ['th', 'st', 'nd', 'rd'] as const;
   const v = n % 100;
   return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
+}
+
+/**
+ * Money for an owner to read: whole dollars when there are no cents ("$4,800"), and the
+ * cents when there are ("$58.50"), so an amount owed or paid is never rounded away.
+ */
+export function formatMoney(cents: number): string {
+  return formatCents(cents, { showCents: cents % 100 !== 0 });
+}
+
+/** "1 day", "3 days": a count and its noun, singular only for exactly one. */
+export function plural(n: number, singular: string, pluralForm = `${singular}s`): string {
+  return `${n} ${n === 1 ? singular : pluralForm}`;
+}
+
+/** What each form field is called in an error, by the last key of its schema path. */
+const FIELD_NAMES: Record<string, string> = {
+  landlordName: 'landlord or property manager',
+  landlordEmail: 'landlord email',
+  line1: 'street address',
+  city: 'city',
+  postalCode: 'ZIP code',
+  accountHolderName: 'account holder name',
+  legalName: 'legal name',
+  dba: 'business name',
+  fullName: 'name',
+  title: 'title',
+  email: 'email',
+  password: 'password',
+};
+
+/** The parts of a Zod issue a form message needs. */
+export interface FieldIssue {
+  code: string;
+  path: readonly PropertyKey[];
+  message: string;
+  minimum?: number | bigint;
+  format?: string;
+}
+
+/**
+ * A validation issue in words an owner can act on. Schema messages written for people
+ * ("Enter the last 4 digits") pass through; Zod's own ("Too small: expected string to have
+ * >=1 characters") are replaced, so no form shows a validator's wording.
+ */
+export function fieldError(issue: FieldIssue): string {
+  const key = String(issue.path[issue.path.length - 1] ?? '');
+  const name = FIELD_NAMES[key] ?? 'value';
+  const raw = /^(Too small|Too big|Invalid|Expected)/i.test(issue.message);
+  if (!raw) return issue.message;
+  if (key === 'state') return 'Use the two letter state code, like OR.';
+  if (issue.code === 'invalid_format' && issue.format === 'email')
+    return 'Enter an email address, like name@example.com.';
+  if (issue.code === 'too_small') {
+    if (key === 'password' && issue.minimum !== undefined)
+      return `Use at least ${String(issue.minimum)} characters.`;
+    return Number(issue.minimum ?? 1) <= 1 ? `Enter the ${name}.` : `The ${name} is too short.`;
+  }
+  if (issue.code === 'too_big') return `The ${name} is too long.`;
+  return `Check the ${name}.`;
+}
+
+/** The first day of each of the next `count` months after today: "2026-12-01", "2027-01-01". */
+export function upcomingMonthStarts(today: string, count = 3): string[] {
+  const { year, month } = parseIsoDate(today);
+  return Array.from({ length: count }, (_, i) => {
+    const index = month + i; // zero based month of the next month onwards
+    return toIsoDate(year + Math.floor(index / 12), (index % 12) + 1, 1);
+  });
 }

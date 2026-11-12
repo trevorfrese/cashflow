@@ -26,6 +26,7 @@ describe('connection wording', () => {
     });
     expect(healthPill({ health: 'HEALTHY', status: 'DISCONNECTED' }).label).toBe('Disconnected');
     expect(trustLabel('HIGH')).toBe('Verified at the source');
+    expect(trustLabel('LOW')).toBe('Still being checked');
   });
 
   it('collects actions once each, connection actions first', () => {

@@ -89,7 +89,9 @@ export default function SeatInstructions() {
       {error ? <Notice tone="warning" message={error} /> : null}
       <Card>
         <Text variant="label">Add this user</Text>
-        <Text variant="heading">{invitation?.serviceUserEmail ?? 'CashFlow Reports'}</Text>
+        <Text variant="bodyStrong" selectable>
+          {invitation?.serviceUserEmail ?? existing?.seatServiceUser ?? 'CashFlow Reports'}
+        </Text>
         <Text variant="body" tone="muted">
           Role: {invitation?.role ?? 'Read-only reports'}
         </Text>

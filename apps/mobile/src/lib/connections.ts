@@ -47,7 +47,7 @@ export function trustLabel(tier: Connection['trustTier']): string {
     case 'MEDIUM':
       return 'Verified';
     case 'LOW':
-      return 'Under review';
+      return 'Still being checked';
     default:
       return 'Not in use';
   }

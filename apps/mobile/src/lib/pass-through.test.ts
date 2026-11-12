@@ -63,8 +63,19 @@ describe('onTimeLine', () => {
   const summary = { currentOnTimeStreak: 2 } as never;
   it('counts down to the review', () => {
     expect(onTimeLine({ summary, monthsUntilReview: 1 })).toBe(
-      'On-time months in a row: 2. 1 more before we look at a split rent plan again.',
+      '2 months on time in a row. After 1 more on-time month, we look at a split rent plan for you.',
     );
-    expect(onTimeLine({ summary, monthsUntilReview: null })).toBe('On-time months in a row: 2.');
+    expect(onTimeLine({ summary, monthsUntilReview: 3 })).toBe(
+      '2 months on time in a row. After 3 more on-time months, we look at a split rent plan for you.',
+    );
+    expect(onTimeLine({ summary, monthsUntilReview: null })).toBe('2 months on time in a row.');
+  });
+  it('says one month and no months plainly', () => {
+    const one = { currentOnTimeStreak: 1 } as never;
+    const none = { currentOnTimeStreak: 0 } as never;
+    expect(onTimeLine({ summary: one, monthsUntilReview: null })).toBe('1 month on time in a row.');
+    expect(onTimeLine({ summary: none, monthsUntilReview: 0 })).toBe(
+      'No on-time months in a row yet. We are looking at a split rent plan for you.',
+    );
   });
 });

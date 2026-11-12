@@ -1,7 +1,7 @@
 import { formatCents } from '@cashflow/shared';
 import { router } from 'expo-router';
 
-import { Button, Card, ListRow, Pill, Screen, Text } from '@/components';
+import { Button, Card, ListRow, Pill, Screen, Text, statusPill } from '@/components';
 import { useBusiness } from '@/lib/business';
 import { useBankLinks } from '@/lib/queries';
 
@@ -31,12 +31,7 @@ export default function BankSettings() {
               key={l.id}
               title={l.institutionName}
               subtitle={`Ending ${l.accountMask}${l.availableBalanceCents !== null ? ` · ${formatCents(l.availableBalanceCents, { showCents: false })} available` : ''}`}
-              right={
-                <Pill
-                  label={l.status === 'LINKED' ? 'Linked' : l.status}
-                  tone={l.status === 'LINKED' ? 'paid' : 'late'}
-                />
-              }
+              right={<Pill {...statusPill(l.status)} />}
               last={idx === rows.length - 1}
             />
           ))

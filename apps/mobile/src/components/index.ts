@@ -14,4 +14,5 @@ export { SplashView } from './SplashView';
 export { TabBar } from './TabBar';
 export { Text } from './Text';
 export { TextField } from './TextField';
+export { TitleRow } from './TitleRow';
 export { Toggle } from './Toggle';

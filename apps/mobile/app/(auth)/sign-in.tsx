@@ -77,7 +77,7 @@ export default function SignIn() {
         <Text variant="body" tone="muted">
           New here?{' '}
         </Text>
-        <Link href="/(auth)/register">
+        <Link href="/(auth)/register" style={styles.link}>
           <Text variant="bodyStrong" tone="link">
             Create an account
           </Text>
@@ -88,5 +88,13 @@ export default function SignIn() {
 }
 
 const styles = StyleSheet.create({
-  footer: { flexDirection: 'row', justifyContent: 'center', paddingTop: spacing.md },
+  footer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: spacing.sm,
+  },
+  // A full 44 point touch target around the link text.
+  link: { paddingVertical: 11 },
 });

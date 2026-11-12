@@ -25,6 +25,24 @@ Sign in with the demo account (`demo@cashflow.local` / `demo-password-123`) or t
 "Use the demo account": Blue Door Bakery, with an active plan and three months of history.
 Every other state has its own login, reached through the dev menu.
 
+## Previewing on a phone size
+
+The owner reviews the app at phone width. With `./dev` running, open
+`http://localhost:4100/phone?persona=<key>&device=iphone-15` (393 x 852) or
+`device=iphone-se` (375 x 667): it frames the Expo web app and signs in as that persona
+(`./dev personas` lists the keys). The sidebar's "Dev menu" button opens the in-app dev menu.
+
+Layout rules the screens follow, so nothing squeezes at 375 px:
+
+- A title and its tag go in `TitleRow`: they share a line when both fit and wrap when they
+  do not. Long text never sits in a column beside a pill, gauge or button.
+- `ListRow` keeps its right side (a pill, an amount, a chevron) short; long descriptions go
+  in the subtitle, not on the right.
+- Money an owner reads goes through `formatMoney` (cents only when there are any), dates
+  through `formatDate`, `longDate` or `formatPeriod`, counts through `plural`. Form errors go
+  through `fieldError`, so no validator wording reaches the screen.
+- Touch targets are at least 44 points (`Toggle`, buttons, links).
+
 ## Dev menu
 
 Hidden unless `EXPO_PUBLIC_DEV_TOOLS=true` (which `./dev` writes into `.env`) and the API runs
@@ -50,19 +68,33 @@ app/                 Expo Router routes
   business/new       business profile, tax id last 4, one owner
   bank/connect       sandbox bank picker (Plaid Link in production)
   application/new    underwriting application
-  application/[id]   decision: score, grade, terms, reasons, cash flow summary
-  lease/new          landlord, property, rent, payout details
-  plan/new           installment cadence and first period preview
+  application/[id]   decision: score, grade, terms, reasons, the free plan, notices, cash flow
+  notice/[id]        the stored text of an adverse action notice or notice of incompleteness
+  connections/       connected data, point of sale connect, sandbox consent page, Toast seat
+  lease/new          landlord, property, rent, first month, payout details
+  plan/new           payments per month and first month preview
 src/
-  components/        Button, TextField, Card, Pill, Screen, TabBar, ScoreGauge, CoinMark, ...
+  components/        Button, TextField, Card, Pill, TitleRow, ListRow, Screen, TabBar, ...
   lib/api.ts         typed fetch with Zod validation and token refresh
   lib/auth.tsx       session provider backed by expo-secure-store
   lib/queries.ts     TanStack Query hooks, one per endpoint
   lib/stage.ts       where a business is in the journey, drives the home screen
-  lib/forms.ts       money and date parsing for inputs
+  lib/forms.ts       money and date parsing for inputs, formatMoney, plural, fieldError
+  lib/decision.ts    decision screen words, and the one next step when information is needed
   dev/               the dev menu: flag, tap detector, persona grouping, session switch, UI
   theme.ts           colors, fonts, type scale, hard shadows, from the shared brand tokens
 ```
+
+## Home
+
+Home shows one card for where the business is (`deriveStage` in `src/lib/stage.ts`), each
+with one primary action: set up the business, start an application, see what is needed, in
+review, not approved (with the free plan when it is offered), approved (link your lease),
+lease linked (choose a repayment schedule), approved for less than the lease rent (see your
+options), and the running plan: the month's rent, what you pay back with Pay now, and any
+past due, held payout, written off, missed pass-through month or graduation offer notice
+above it. Connection actions (for example connect the account your sales are paid into)
+show above everything.
 
 ## Sandbox bank scenarios
 

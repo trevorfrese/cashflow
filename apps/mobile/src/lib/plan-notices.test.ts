@@ -21,7 +21,7 @@ describe('pastDueNotice', () => {
     );
     expect(n?.tone).toBe('warning');
     expect(n?.title).toBe('Payment past due');
-    expect(n?.message).toContain('$1,550.00 is 1 day past due.');
+    expect(n?.message).toContain('$1,550 is 1 day past due.');
     expect(n?.message).toContain('will be held');
   });
 
@@ -30,7 +30,7 @@ describe('pastDueNotice', () => {
       standing({ delinquencyStatus: 'DELINQUENT', daysPastDue: 12, pastDueCents: 310_000 }),
     );
     expect(n?.tone).toBe('danger');
-    expect(n?.message).toContain('$3,100.00 is 12 days past due.');
+    expect(n?.message).toContain('$3,100 is 12 days past due.');
     expect(n?.message).toContain('on hold until it is paid');
   });
 
@@ -53,6 +53,13 @@ describe('pastDueNotice', () => {
     expect(n?.tone).toBe('danger');
     expect(n?.message).toContain('still owed');
   });
+
+  it('states the unpaid balance of a charged off plan when it is known', () => {
+    const n = pastDueNotice(
+      standing({ delinquencyStatus: 'CHARGED_OFF', daysPastDue: 95, pastDueCents: 197925 }),
+    );
+    expect(n?.message).toContain('The unpaid balance of $1,979.25 is still owed');
+  });
 });
 
 describe('heldPayoutNotice', () => {
@@ -63,12 +70,12 @@ describe('heldPayoutNotice', () => {
 
   it('shows the API message and the release deadline', () => {
     const n = heldPayoutNotice({
-      heldMessage: 'An earlier installment is past due.',
+      heldMessage: 'An earlier payment is past due.',
       releaseBy: '2026-12-06',
       periodMonth: '2026-12',
     });
     expect(n?.title).toBe('December 2026 rent payment on hold');
-    expect(n?.message).toContain('An earlier installment is past due.');
+    expect(n?.message).toContain('An earlier payment is past due.');
     expect(n?.message).toContain('through Dec 6, 2026');
     expect(n?.message).toContain('pay your landlord directly for December 2026');
   });

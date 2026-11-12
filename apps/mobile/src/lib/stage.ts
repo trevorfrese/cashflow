@@ -11,6 +11,8 @@ export type Stage =
   | { kind: 'DECLINED'; application: UnderwritingApplication }
   | { kind: 'APPROVED_NO_LEASE'; application: UnderwritingApplication }
   | { kind: 'LEASE_NO_PLAN'; application: UnderwritingApplication; lease: Lease }
+  /** Approved, but for less than the linked lease's rent, so no plan can start on it. */
+  | { kind: 'RENT_OVER_LIMIT'; application: UnderwritingApplication; lease: Lease }
   | { kind: 'ACTIVE_PLAN'; application: UnderwritingApplication; plan: RentPlan };
 
 export function deriveStage(input: {
@@ -39,6 +41,9 @@ export function deriveStage(input: {
 
   const lease = input.leases.find((l) => l.status !== 'ENDED');
   if (!lease) return { kind: 'APPROVED_NO_LEASE', application: current };
+  const limit = current.decision?.approvedMonthlyLimitCents;
+  if (typeof limit === 'number' && lease.monthlyRentCents > limit)
+    return { kind: 'RENT_OVER_LIMIT', application: current, lease };
   return { kind: 'LEASE_NO_PLAN', application: current, lease };
 }
 

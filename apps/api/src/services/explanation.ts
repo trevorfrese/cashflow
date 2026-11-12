@@ -222,21 +222,14 @@ export function buildExplanation(
     };
   }
   if (approved && decision.feeBps !== null) {
-    const headline = reasons.find((r) =>
-      ['APPROVED', 'APPROVED_AFTER_REVIEW', 'LIMIT_BELOW_REQUEST'].includes(r.code),
-    );
-    const helping = out.factors.filter((f) => f.status === 'HELPING').map((f) => f.label);
+    // The score, limit and helping factors are each shown on their own already, so this
+    // only says what sets the fee rather than repeating them.
     out.terms = {
       requestedMonthlyRentCents: requested,
       approvedMonthlyLimitCents: limit,
       feeBps: decision.feeBps,
       installmentsPerMonth: decision.recommendedInstallmentsPerMonth ?? 2,
-      why: [
-        headline?.message ?? `Approved for up to ${usd(limit)} a month.`,
-        helping.length > 0
-          ? `The fee reflects your cash flow. Helping most: ${helping.slice(0, 3).join(', ')}.`
-          : 'The fee reflects your cash flow.',
-      ].join(' '),
+      why: 'The fee is set by your cash flow: the stronger it is, the lower the fee.',
     };
   }
 

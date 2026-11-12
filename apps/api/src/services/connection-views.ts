@@ -36,6 +36,7 @@ const isoOrNull = (d: Date | null) => (d ? d.toISOString() : null);
 export function methodDescription(link: {
   accessMethod: string;
   platform?: string | null;
+  status?: string;
 }): string {
   const name = link.platform
     ? COMMERCE_PLATFORM_LABELS[link.platform as keyof typeof COMMERCE_PLATFORM_LABELS]
@@ -44,6 +45,9 @@ export function methodDescription(link: {
     case 'DIRECT_OAUTH':
       return `You approved read-only access on ${name}'s site. We never see your password.`;
     case 'DELEGATED_SEAT':
+      // A seat that is still waiting has not been added yet: say what to do, not what was done.
+      if (link.status === 'PENDING')
+        return `You add CashFlow's own read-only reports user to your ${name} account. We never see your password.`;
       return `You added CashFlow's own read-only reports user to your ${name} account. We never see your password.`;
     default:
       return 'Connected through our bank data partner with read-only access. We never see your bank password.';
@@ -148,7 +152,7 @@ function commerceChecks(
     checks.push({ label: 'Business name matches your profile', ok: true });
   }
   if (has(findings, 'PAYOUT_ACCOUNT_NOT_CONNECTED', 'PAYOUTS_PARTLY_TO_UNSEEN_ACCOUNT')) {
-    checks.push({ label: 'Sales are paid into a connected account', ok: false });
+    checks.push({ label: 'Sales are paid into an account that is not connected', ok: false });
   } else if (verified) {
     checks.push({ label: 'Payouts match deposits in your connected bank', ok: true });
   }
@@ -212,6 +216,7 @@ export function toConnection(
     lastPulledAt: isoOrNull(link.lastPulledAt),
     checks: link.status === 'DISCONNECTED' ? [] : commerceChecks(link, findings, verified),
     actions: link.status === 'DISCONNECTED' ? [] : actionsFor(findings, link.health),
+    seatServiceUser: link.accessMethod === 'DELEGATED_SEAT' ? link.seatServiceUser : null,
   };
 }
 

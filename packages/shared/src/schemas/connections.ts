@@ -225,6 +225,8 @@ export const Connection = z.object({
   lastPulledAt: IsoDateTimeSchema.nullable(),
   checks: z.array(ConnectionCheckView),
   actions: z.array(ConnectionActionView),
+  /** A read-only seat: the CashFlow service user the owner adds, so the steps can name it. */
+  seatServiceUser: z.string().nullable().optional(),
 });
 export type Connection = z.infer<typeof Connection>;
 

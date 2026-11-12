@@ -41,8 +41,10 @@ export function statusPill(status: string): { label: string; tone: PillTone } {
       return { label: 'Paid', tone: 'paid' };
     case 'APPROVED':
     case 'ACTIVE':
-    case 'LINKED':
       return { label: title(status), tone: 'paid' };
+    // The same word the connections screen uses for a working connection.
+    case 'LINKED':
+      return { label: 'Connected', tone: 'paid' };
     case 'SCHEDULED':
       return { label: title(status), tone: 'info' };
     case 'PENDING':
@@ -57,7 +59,7 @@ export function statusPill(status: string): { label: string; tone: PillTone } {
     case 'RETURNED':
       return { label: title(status), tone: 'late' };
     case 'CHARGED_OFF':
-      return { label: 'Written off', tone: 'late' };
+      return { label: 'Unpaid', tone: 'late' };
     case 'CANCELLED':
       return { label: 'Cancelled', tone: 'neutral' };
     case 'VOIDED':

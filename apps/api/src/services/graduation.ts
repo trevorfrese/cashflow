@@ -528,19 +528,29 @@ export async function completeAcceptedOffers(ctx: AppContext, asOf: IsoDate) {
   return counts;
 }
 
+/** "2026-12" to "December 2026", in UTC. */
+function monthName(period: string): string {
+  return new Date(`${period}-01T12:00:00.000Z`).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 /** The offer as the owner sees it, with the fee in dollars at the lease rent. */
 export function graduationMessage(
   offer: Pick<GraduationOffer, 'status' | 'feeBps' | 'expiresOn' | 'effectivePeriod'>,
   monthlyRentCents: number,
 ): string {
   const fee = feeForRent(monthlyRentCents, offer.feeBps);
+  const feeText = formatCents(fee, { showCents: fee % 100 !== 0 });
   switch (offer.status) {
     case 'OFFERED':
-      return `Your on-time months qualify you to split your rent. We would pay your landlord in full each month and you repay in installments, for a fee of ${formatCents(fee)} a month. It starts with your next rent month.`;
+      return `Your on-time months qualify you to split your rent. We would pay your landlord in full each month and you repay in installments, for a fee of ${feeText} a month. It starts with your next rent month.`;
     case 'ACCEPTED':
       return 'Accepted. Your split plan starts once this month on the free plan is done.';
     case 'COMPLETED':
-      return `Your split plan started${offer.effectivePeriod ? ` with ${offer.effectivePeriod}` : ''}.`;
+      return `Your split plan started${offer.effectivePeriod ? ` with ${monthName(offer.effectivePeriod)}` : ''}.`;
     case 'EXPIRED':
       return 'This offer expired. We will look again after more on time months.';
     case 'WITHDRAWN':

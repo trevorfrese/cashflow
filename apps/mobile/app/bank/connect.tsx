@@ -3,7 +3,17 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, ChoiceChips, ListRow, Notice, Pill, Screen, Text } from '@/components';
+import {
+  Button,
+  Card,
+  ChoiceChips,
+  ListRow,
+  Notice,
+  Pill,
+  Screen,
+  Text,
+  statusPill,
+} from '@/components';
 import { useDevWalkthrough } from '@/dev/DevTools';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
@@ -109,10 +119,7 @@ export default function ConnectBank() {
               subtitle={`Account ending ${l.accountMask}`}
               right={
                 <>
-                  <Pill
-                    label={l.status === 'LINKED' ? 'Linked' : l.status}
-                    tone={l.status === 'LINKED' ? 'paid' : 'late'}
-                  />
+                  <Pill {...statusPill(l.status)} />
                   {l.availableBalanceCents !== null ? (
                     <Text variant="caption" tone="muted">
                       {formatCents(l.availableBalanceCents, { showCents: false })}

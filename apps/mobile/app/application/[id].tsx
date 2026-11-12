@@ -5,11 +5,11 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Notice, Pill, Screen, ScoreGauge, Text } from '@/components';
+import { Button, Card, Notice, Pill, Screen, ScoreGauge, Text, TitleRow } from '@/components';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
-import { FACTOR_STATUS, longDate } from '@/lib/decision';
-import { formatPeriod } from '@/lib/forms';
+import { FACTOR_STATUS, longDate, needsInfoStep } from '@/lib/decision';
+import { formatMoney, formatPeriod, plural } from '@/lib/forms';
 import { IN_REVIEW_COPY } from '@/lib/plan-notices';
 import { leaseForPassThrough } from '@/lib/pass-through';
 import {
@@ -19,6 +19,7 @@ import {
   useExplanation,
   useLeases,
   usePassThroughOffer,
+  useRentPlans,
   useResubmitApplication,
   useStartPassThroughPlan,
 } from '@/lib/queries';
@@ -32,20 +33,39 @@ import { border, colors, radii, spacing } from '@/theme';
  */
 export default function Decision() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { business } = useBusiness();
-  const { data: app, isLoading } = useApplication(id, business?.id);
+  const { business, isLoading: businessLoading } = useBusiness();
+  const { data: app, isLoading, error: appError, refetch } = useApplication(id, business?.id);
   const explanation = useExplanation(id);
   const links = useBankLinks(business?.id);
+  const leases = useLeases(business?.id);
+  const plans = useRentPlans(business?.id);
   const resubmit = useResubmitApplication();
   const [error, setError] = useState<string | null>(null);
 
   const e = explanation.data;
   if (isLoading || explanation.isLoading || !app || !e) {
+    const failed = appError ?? explanation.error;
     return (
       <Screen back title="Decision">
-        <Text tone="muted">
-          {isLoading || explanation.isLoading ? 'Loading…' : 'Application not found.'}
-        </Text>
+        {failed ? (
+          <>
+            <Notice tone="danger" message={describeError(failed)} />
+            <Button
+              title="Try again"
+              variant="secondary"
+              onPress={() => {
+                void refetch();
+                void explanation.refetch();
+              }}
+            />
+          </>
+        ) : (
+          <Text tone="muted">
+            {isLoading || explanation.isLoading || businessLoading
+              ? 'Loading…'
+              : 'Application not found.'}
+          </Text>
+        )}
       </Screen>
     );
   }
@@ -66,9 +86,35 @@ export default function Decision() {
 
   const footer = (() => {
     if (e.outcome === 'APPROVED' || e.outcome === 'COUNTER_OFFER') {
+      // Once the lease is linked or the plan is running, the next step is not linking again.
+      const running = plans.data?.some((p) => p.status !== 'CLOSED');
+      const lease = leases.data?.find((l) => l.status === 'ACTIVE');
+      if (running) {
+        return (
+          <Button
+            title="Back to home"
+            variant="secondary"
+            onPress={() => router.replace('/(tabs)')}
+          />
+        );
+      }
+      if (lease && e.outcome === 'APPROVED') {
+        return (
+          <Button
+            title="Start your rent plan"
+            size="lg"
+            icon="arrow-right"
+            onPress={() => router.push({ pathname: '/plan/new', params: { leaseId: lease.id } })}
+          />
+        );
+      }
       return (
         <Button
-          title="Link your lease"
+          title={
+            e.outcome === 'COUNTER_OFFER' && lease
+              ? 'Link a lease within your limit'
+              : 'Link your lease'
+          }
           size="lg"
           icon="arrow-right"
           onPress={() => router.push('/lease/new')}
@@ -76,18 +122,37 @@ export default function Decision() {
       );
     }
     if (e.outcome === 'NEEDS_INFO') {
-      return linked.length > 0 ? (
-        <Button
-          title="Run the decision again"
-          onPress={() => void retry()}
-          loading={resubmit.isPending}
-        />
-      ) : (
-        <Button
-          title="Connect a bank account"
-          variant="azure"
-          onPress={() => router.push('/bank/connect')}
-        />
+      const step = needsInfoStep(
+        e.requestedInformation.map((r) => r.code),
+        linked.length > 0,
+      );
+      const rerun =
+        linked.length > 0 ? (
+          <Button
+            title="Run the decision again"
+            variant={step === 'RUN_AGAIN' ? 'primary' : 'text'}
+            onPress={() => void retry()}
+            loading={resubmit.isPending}
+          />
+        ) : null;
+      if (step === 'RUN_AGAIN') return rerun;
+      return (
+        <>
+          {step === 'CONNECT_BANK' ? (
+            <Button
+              title="Connect a bank account"
+              variant="azure"
+              onPress={() => router.push('/bank/connect')}
+            />
+          ) : (
+            <Button
+              title="Review connections"
+              variant="azure"
+              onPress={() => router.push('/connections')}
+            />
+          )}
+          {rerun}
+        </>
       );
     }
     return (
@@ -124,18 +189,18 @@ export default function Decision() {
             <View style={styles.stats}>
               <Stat
                 label="Monthly rent limit"
-                value={formatCents(e.terms.approvedMonthlyLimitCents, { showCents: false })}
+                value={formatMoney(e.terms.approvedMonthlyLimitCents)}
               />
               {e.outcome === 'COUNTER_OFFER' ? (
                 <Stat
                   label="You asked for"
-                  value={formatCents(e.terms.requestedMonthlyRentCents, { showCents: false })}
+                  value={formatMoney(e.terms.requestedMonthlyRentCents)}
                 />
               ) : null}
               <Stat label="Fee per month" value={`${formatBps(e.terms.feeBps)} of rent`} />
               <Stat
-                label="Suggested cadence"
-                value={`${e.terms.installmentsPerMonth} installments a month`}
+                label="Suggested repayment"
+                value={`${plural(e.terms.installmentsPerMonth, 'payment')} a month`}
               />
               <Text variant="body" tone="muted">
                 {e.terms.why}
@@ -178,7 +243,12 @@ export default function Decision() {
         </Section>
       ) : null}
 
-      {approved && helping.length > 0 ? (
+      {/* The free plan is the way forward from a decline, so it comes straight after why. */}
+      {e.outcome === 'DECLINED' && business ? (
+        <PassThroughCard applicationId={app.id} businessId={business.id} />
+      ) : null}
+
+      {e.outcome === 'APPROVED' && helping.length > 0 ? (
         <Section title="What helped">
           {helping.map((f) => (
             <FactorRow key={f.code} factor={f} />
@@ -192,10 +262,6 @@ export default function Decision() {
             <FactorRow key={f.code} factor={f} />
           ))}
         </Section>
-      ) : null}
-
-      {e.outcome === 'DECLINED' && business ? (
-        <PassThroughCard applicationId={app.id} businessId={business.id} />
       ) : null}
 
       {e.notices.length > 0 ? (
@@ -280,12 +346,7 @@ function FactorRow({ factor }: { factor: ExplanationFactor }) {
   const s = FACTOR_STATUS[factor.status];
   return (
     <View style={styles.factor}>
-      <View style={styles.labelRow}>
-        <Text variant="bodyStrong" style={styles.labelText}>
-          {factor.label}
-        </Text>
-        <Pill label={s.label} tone={s.tone} />
-      </View>
+      <TitleRow title={factor.label} pill={<Pill label={s.label} tone={s.tone} />} />
       <Text variant="body" tone="muted">
         {factor.detail}
       </Text>
@@ -296,12 +357,12 @@ function FactorRow({ factor }: { factor: ExplanationFactor }) {
 function CheckRow({ check }: { check: ExplanationCheck }) {
   return (
     <View style={styles.factor}>
-      <View style={styles.labelRow}>
-        <Text variant="bodyStrong" style={styles.labelText}>
-          {check.label}
-        </Text>
-        <Pill label={check.passed ? 'Met' : 'Not met'} tone={check.passed ? 'paid' : 'late'} />
-      </View>
+      <TitleRow
+        title={check.label}
+        pill={
+          <Pill label={check.passed ? 'Met' : 'Not met'} tone={check.passed ? 'paid' : 'late'} />
+        }
+      />
       {check.passed ? null : (
         <Text variant="body" tone="muted">
           {check.detail}
@@ -392,14 +453,10 @@ function PassThroughCard({
       <Pill label="Free plan" tone="info" />
       <Text variant="heading">{o.headline}</Text>
       <Text variant="body">{o.explanation}</Text>
-      <View style={{ gap: spacing.xs }}>
-        <Text variant="body" tone="muted">
-          {`Rent: ${formatCents(o.monthlyRentCents)} a month, collected from your bank ${o.collectionLeadBusinessDays} business days before it is due.`}
-        </Text>
-        <Text variant="body" tone="muted">
-          {`Fee: ${formatCents(o.feeCents)}. No late fees.`}
-        </Text>
-      </View>
+      {/* The explanation already says when it is collected and that there is no fee. */}
+      <Text variant="bodyStrong">
+        {`Rent: ${formatMoney(o.monthlyRentCents)} a month${o.feeCents > 0 ? `, plus a ${formatMoney(o.feeCents)} fee` : ''}.`}
+      </Text>
       {error ? <Notice tone="danger" message={error} /> : null}
       {o.existingPlanId ? (
         <>
@@ -467,9 +524,9 @@ function CashFlowCard({ summary: s }: { summary: CashFlowSummary }) {
         />
         <Metric
           label="Cash on hand"
-          value={s.daysOfCashOnHand === null ? 'Unknown' : `${s.daysOfCashOnHand} days`}
+          value={s.daysOfCashOnHand === null ? 'Unknown' : plural(s.daysOfCashOnHand, 'day')}
         />
-        <Metric label="Overdrafts (90d)" value={String(s.nsfCount90)} />
+        <Metric label="Overdrafts, last 90 days" value={String(s.nsfCount90)} />
       </View>
       {s.monthly.length > 0 ? (
         <View style={{ gap: 6, paddingTop: spacing.sm }}>
@@ -526,14 +583,6 @@ const styles = StyleSheet.create({
     padding: spacing.smd,
   },
   factor: { gap: spacing.xs },
-  // A short label and its pill wrap onto two lines rather than squeeze the label.
-  labelRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  labelText: { flexShrink: 1, minWidth: 140 },
   noticeRow: { gap: spacing.xs, alignItems: 'flex-start' },
   source: { gap: 2 },
   buttons: { gap: spacing.sm },

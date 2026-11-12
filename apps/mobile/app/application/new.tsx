@@ -1,5 +1,5 @@
 import { CreateApplicationRequest, formatCents } from '@cashflow/shared';
-import { Link, router } from 'expo-router';
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -100,8 +100,8 @@ export default function NewApplication() {
     <Screen
       back
       step="Step 2 of 4"
-      title="Apply for rent advances"
-      subtitle="Underwriting looks at your bank account, not a credit score. Decisions are instant."
+      title="Apply to split your rent"
+      subtitle="We look at your bank account, not your credit score. Decisions are instant."
       footer={
         <Button
           title="Submit application"
@@ -153,14 +153,7 @@ export default function NewApplication() {
       />
 
       <Card>
-        <View style={styles.cardHeader}>
-          <Text variant="heading">Bank account</Text>
-          <Link href={{ pathname: '/bank/connect', params: { next: 'application' } }}>
-            <Text variant="bodyStrong" tone="link">
-              {linked.length > 0 ? 'Add another' : 'Connect'}
-            </Text>
-          </Link>
-        </View>
+        <Text variant="heading">Bank account</Text>
         {linked.length === 0 ? (
           <Text variant="body" tone="muted">
             No account connected yet. You can submit without one, but the decision will ask for it.
@@ -182,17 +175,18 @@ export default function NewApplication() {
             />
           ))
         )}
+        <Button
+          title={linked.length > 0 ? 'Add another bank account' : 'Connect a bank account'}
+          variant={linked.length > 0 ? 'text' : 'secondary'}
+          size="sm"
+          onPress={() =>
+            router.push({ pathname: '/bank/connect', params: { next: 'application' } })
+          }
+        />
       </Card>
 
       <Card>
-        <View style={styles.cardHeader}>
-          <Text variant="heading">Point of sale</Text>
-          <Link href={{ pathname: '/connections/pos', params: { next: 'application' } }}>
-            <Text variant="bodyStrong" tone="link">
-              {platforms.length > 0 ? 'Add another' : 'Connect'}
-            </Text>
-          </Link>
-        </View>
+        <Text variant="heading">Point of sale</Text>
         {platforms.length === 0 ? (
           <Text variant="body" tone="muted">
             Optional. Your sales at the source, matched to your bank deposits, count as a second
@@ -203,7 +197,7 @@ export default function NewApplication() {
             <ListRow
               key={c.id}
               title={c.name}
-              subtitle={c.methodDescription}
+              subtitle={c.detail}
               right={
                 <Pill
                   label={c.status === 'PENDING' ? 'Waiting on you' : 'Connected'}
@@ -223,6 +217,14 @@ export default function NewApplication() {
             />
           ))
         )}
+        <Button
+          title={platforms.length > 0 ? 'Add another point of sale' : 'Connect a point of sale'}
+          variant={platforms.length > 0 ? 'text' : 'secondary'}
+          size="sm"
+          onPress={() =>
+            router.push({ pathname: '/connections/pos', params: { next: 'application' } })
+          }
+        />
       </Card>
 
       <Card tone="paper" shadow="none">
@@ -241,10 +243,4 @@ export default function NewApplication() {
 
 const styles = StyleSheet.create({
   points: { gap: spacing.sm, paddingTop: spacing.xs },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
-  },
 });

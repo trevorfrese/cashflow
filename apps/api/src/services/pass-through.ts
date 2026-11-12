@@ -9,6 +9,7 @@ import {
 } from '@cashflow/shared';
 
 import type { AppContext } from '../context.ts';
+import { longDate } from '../adverse-action/render.ts';
 import { effectiveAt } from '../dates.ts';
 import type { Tx } from '../db.ts';
 import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
@@ -96,19 +97,20 @@ export function periodMessage(
   landlordName: string,
 ): string {
   const amount = usd(p.amountCents);
+  const day = (d: string) => longDate(d as IsoDate);
   switch (p.status) {
     case 'SCHEDULED':
-      return `We will collect ${amount} from your bank account on ${p.collectOn} and pay ${landlordName} on ${p.dueDate}. Keep that amount in the account by then.`;
+      return `We will collect ${amount} from your bank account on ${day(p.collectOn)} and pay ${landlordName} on ${day(p.dueDate)}. Keep that amount in the account by then.`;
     case 'COLLECTING':
-      return `We collected ${amount}. Once it clears on ${p.settlesOn ?? p.dueDate}, we pay ${landlordName} on ${p.dueDate}.`;
+      return `We collected ${amount}. Once it clears on ${day(p.settlesOn ?? p.dueDate)}, we pay ${landlordName} on ${day(p.dueDate)}.`;
     case 'SETTLED':
       return p.heldReason
         ? `We have your ${amount}, but the payment to ${landlordName} is on hold while your landlord's details are confirmed. If it cannot go out within a few days, we send the money back to you.`
-        : `Your ${amount} has cleared. We pay ${landlordName} on ${p.dueDate}.`;
+        : `Your ${amount} has cleared. We pay ${landlordName} on ${day(p.dueDate)}.`;
     case 'PAID':
-      return `${landlordName} was paid ${amount} on ${p.paidOn ?? p.dueDate}.`;
+      return `${landlordName} was paid ${amount} on ${day(p.paidOn ?? p.dueDate)}.`;
     case 'MISSED':
-      return `We could not collect this month's rent in time, so we did not pay ${landlordName}. Please pay ${landlordName} ${amount} directly by ${p.dueDate}. There is no fee.`;
+      return `We could not collect this month's rent in time, so we did not pay ${landlordName}. Please pay ${landlordName} ${amount} directly by ${day(p.dueDate)}. There is no fee.`;
     case 'REFUNDED':
       return `We could not pay ${landlordName} this month, so we sent your ${amount} back. Please pay ${landlordName} directly.`;
     case 'RETURNED_AFTER_PAYOUT':

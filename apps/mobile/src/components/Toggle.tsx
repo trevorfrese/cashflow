@@ -18,18 +18,24 @@ export function Toggle({
       accessibilityLabel={label}
       accessibilityState={{ checked: value }}
       onPress={() => onValueChange(!value)}
-      style={[
-        styles.track,
-        { backgroundColor: value ? colors.mint : colors.sand },
-        { alignItems: value ? 'flex-end' : 'flex-start' },
-      ]}
+      style={styles.hit}
     >
-      <View style={styles.knob} />
+      <View
+        style={[
+          styles.track,
+          { backgroundColor: value ? colors.mint : colors.sand },
+          { alignItems: value ? 'flex-end' : 'flex-start' },
+        ]}
+      >
+        <View style={styles.knob} />
+      </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
+  // The track is 34 tall; the pressable area is a full 44 touch target around it.
+  hit: { minHeight: 44, minWidth: 60, justifyContent: 'center' },
   track: {
     width: 60,
     height: 34,

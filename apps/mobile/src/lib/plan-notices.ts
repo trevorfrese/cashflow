@@ -1,7 +1,6 @@
 import type { LandlordPayout, RentPlan } from '@cashflow/shared';
-import { formatCents } from '@cashflow/shared';
 
-import { formatDate, formatPeriod } from './forms';
+import { formatDate, formatMoney, formatPeriod } from './forms';
 
 /**
  * Banners the home screen shows above a running plan, built only from fields the API
@@ -29,14 +28,17 @@ export function pastDueNotice(plan: Standing): PlanNotice | null {
     return {
       tone: 'danger',
       title: 'This plan was closed with a balance unpaid',
-      message:
-        'We stopped paying rent on this plan because payments were missed for too long. The unpaid balance is still owed, and you can pay it below.',
+      message: `We stopped paying rent on this plan because payments were missed for too long. ${
+        plan.pastDueCents > 0
+          ? `The unpaid balance of ${formatMoney(plan.pastDueCents)} is still owed`
+          : 'The unpaid balance is still owed'
+      }, and you can pay it below.`,
     };
   }
   if (plan.delinquencyStatus === 'CURRENT' && !plan.needsPayment) return null;
   if (plan.daysPastDue === 0 && plan.pastDueCents === 0 && !plan.needsPayment) return null;
 
-  const amount = plan.pastDueCents > 0 ? formatCents(plan.pastDueCents) : 'A payment';
+  const amount = plan.pastDueCents > 0 ? formatMoney(plan.pastDueCents) : 'A payment';
   const age = plan.daysPastDue > 0 ? ` ${days(plan.daysPastDue)} past due` : ' past due';
   const owed = `${amount} is${age}.`;
   const action = plan.needsPayment

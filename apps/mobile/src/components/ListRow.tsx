@@ -51,6 +51,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   divider: { borderBottomWidth: border.thin, borderBottomColor: colors.ink },
-  left: { flex: 1, gap: 2 },
-  right: { alignItems: 'flex-end', gap: 4 },
+  // The text takes the room; the right side (a pill, an amount, a chevron) stays short and
+  // never squeezes the text into a narrow column.
+  left: { flex: 1, minWidth: 0, gap: 2 },
+  right: { flexShrink: 0, maxWidth: '45%', alignItems: 'flex-end', gap: 4 },
 });

@@ -40,3 +40,22 @@ export function longDate(value: string): string {
     timeZone: 'UTC',
   });
 }
+
+/** Requests that only a newly connected bank account can answer. */
+const NEEDS_A_BANK = ['BANK_LINK_REQUIRED', 'INSUFFICIENT_HISTORY', 'PAYOUT_ACCOUNT_NOT_CONNECTED'];
+/** Requests answered on the connections screen: reconnect, or an action on a connection. */
+const NEEDS_CONNECTIONS = ['RECONNECT_REQUIRED', 'CONNECTION_ACTION_NEEDED'];
+
+/**
+ * The one primary step for an application that needs information: connect a bank account,
+ * fix a connection, or (once nothing is left to connect) run the decision again. Running it
+ * again before the missing account is connected would only ask for the same thing.
+ */
+export function needsInfoStep(
+  requestedCodes: readonly string[],
+  hasLinkedBank: boolean,
+): 'CONNECT_BANK' | 'CONNECTIONS' | 'RUN_AGAIN' {
+  if (!hasLinkedBank || requestedCodes.some((c) => NEEDS_A_BANK.includes(c))) return 'CONNECT_BANK';
+  if (requestedCodes.some((c) => NEEDS_CONNECTIONS.includes(c))) return 'CONNECTIONS';
+  return 'RUN_AGAIN';
+}

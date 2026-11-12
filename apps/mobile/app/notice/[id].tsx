@@ -2,6 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { Card, Notice, Pill, Screen, Text } from '@/components';
+import { describeError } from '@/lib/api';
 import { longDate, NOTICE_KIND_LABEL } from '@/lib/decision';
 import { useNotices } from '@/lib/queries';
 import { border, colors, radii, spacing } from '@/theme';
@@ -19,7 +20,11 @@ export default function NoticeScreen() {
   if (notices.isLoading || !notice) {
     return (
       <Screen back title="Your notice">
-        <Text tone="muted">{notices.isLoading ? 'Loading…' : 'Notice not found.'}</Text>
+        {notices.error ? (
+          <Notice tone="danger" message={describeError(notices.error)} />
+        ) : (
+          <Text tone="muted">{notices.isLoading ? 'Loading…' : 'Notice not found.'}</Text>
+        )}
       </Screen>
     );
   }

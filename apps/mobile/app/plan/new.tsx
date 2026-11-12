@@ -1,17 +1,22 @@
-import {
-  buildInstallmentSchedule,
-  formatBps,
-  formatCents,
-  nextRentDueDate,
-} from '@cashflow/shared';
+import { buildInstallmentSchedule, formatBps, nextRentDueDate } from '@cashflow/shared';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, ListRow, Notice, Pill, Screen, Segmented, Text } from '@/components';
+import {
+  Button,
+  Card,
+  ListRow,
+  Notice,
+  Pill,
+  Screen,
+  Segmented,
+  Text,
+  TitleRow,
+} from '@/components';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
-import { formatDate, todayIso } from '@/lib/forms';
+import { formatDate, formatMoney, ordinal, todayIso } from '@/lib/forms';
 import { useApplications, useCreateRentPlan, useLeases } from '@/lib/queries';
 import { border, colors, fonts, spacing } from '@/theme';
 
@@ -79,7 +84,7 @@ export default function NewPlan() {
       {lease ? (
         <Card tone="gold">
           <Text variant="label">{lease.landlordName}</Text>
-          <Text variant="money">{formatCents(lease.monthlyRentCents, { showCents: false })}</Text>
+          <Text variant="money">{formatMoney(lease.monthlyRentCents)}</Text>
           <Text variant="body">paid in full on the {ordinal(lease.dueDayOfMonth)} each month</Text>
         </Card>
       ) : (
@@ -87,7 +92,7 @@ export default function NewPlan() {
       )}
 
       <View style={styles.group}>
-        <Text style={styles.label}>Installments per month</Text>
+        <Text style={styles.label}>Payments per month</Text>
         <Segmented
           options={[
             { value: 1, label: '1' },
@@ -99,17 +104,18 @@ export default function NewPlan() {
         />
         <Text variant="caption" tone="muted">
           {cadence === recommended
-            ? `Recommended for your cash flow pattern.`
-            : `Underwriting suggested ${recommended} based on your deposit pattern and cash buffer.`}
+            ? 'Recommended for your cash flow pattern.'
+            : `We suggested ${recommended} a month, based on when your deposits come in and your cash buffer.`}
         </Text>
       </View>
 
       {preview ? (
         <Card shadowColor={colors.sky}>
-          <View style={styles.cardHeader}>
-            <Text variant="heading">First period</Text>
-            <Pill label={`${formatBps(feeBps)} fee`} tone="gold" />
-          </View>
+          <TitleRow
+            title="First month"
+            variant="heading"
+            pill={<Pill label={`${formatBps(feeBps)} fee`} tone="gold" />}
+          />
           <Text variant="caption" tone="muted">
             Landlord paid {formatDate(preview.payoutDate)}. You repay:
           </Text>
@@ -117,14 +123,14 @@ export default function NewPlan() {
             <ListRow
               key={i.sequence}
               title={formatDate(i.dueDate)}
-              subtitle={`${formatCents(i.principalCents)} rent + ${formatCents(i.feeCents)} fee`}
-              right={<Text variant="heading">{formatCents(i.totalCents)}</Text>}
+              subtitle={`${formatMoney(i.principalCents)} rent + ${formatMoney(i.feeCents)} fee`}
+              right={<Text variant="heading">{formatMoney(i.totalCents)}</Text>}
               last={idx === preview.installments.length - 1}
             />
           ))}
           <View style={styles.total}>
             <Text variant="bodyStrong">Total per month</Text>
-            <Text variant="heading">{formatCents(preview.payoutCents + preview.feeCents)}</Text>
+            <Text variant="heading">{formatMoney(preview.payoutCents + preview.feeCents)}</Text>
           </View>
         </Card>
       ) : null}
@@ -132,16 +138,9 @@ export default function NewPlan() {
   );
 }
 
-function ordinal(d: number): string {
-  const s = ['th', 'st', 'nd', 'rd'] as const;
-  const v = d % 100;
-  return `${d}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
-}
-
 const styles = StyleSheet.create({
   group: { gap: spacing.sm },
   label: { fontFamily: fonts.bold, fontSize: 14, lineHeight: 18, color: colors.ink },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   total: {
     flexDirection: 'row',
     justifyContent: 'space-between',

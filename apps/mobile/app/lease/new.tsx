@@ -1,12 +1,32 @@
-import { CreateLeaseRequest, formatCents, type Lease } from '@cashflow/shared';
+import { CreateLeaseRequest, type Lease } from '@cashflow/shared';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Notice, Screen, Segmented, Text, TextField, Toggle } from '@/components';
+import {
+  Button,
+  Card,
+  ChoiceChips,
+  Notice,
+  Screen,
+  Segmented,
+  Text,
+  TextField,
+  Toggle,
+} from '@/components';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
-import { centsToDollarsInput, dollarsToCents, normalizeMonthInput, todayIso } from '@/lib/forms';
+import {
+  centsToDollarsInput,
+  dollarsToCents,
+  fieldError,
+  formatMoney,
+  formatPeriod,
+  normalizeMonthInput,
+  ordinal,
+  todayIso,
+  upcomingMonthStarts,
+} from '@/lib/forms';
 import {
   useApplications,
   useCreateLease,
@@ -42,7 +62,7 @@ export default function NewLease() {
     postalCode: '',
     rent: '',
     dueDay: 1 as number,
-    startsOn: nextMonthStart(),
+    startsOn: upcomingMonthStarts(todayIso(), 1)[0]!,
     accountHolderName: '',
     routingNumber: '',
     accountNumber: '',
@@ -76,9 +96,8 @@ export default function NewLease() {
         };
     const next: Record<string, string> = {};
     if (rentCents === null || rentCents === 0) next.rent = 'Enter the monthly rent.';
-    if (overLimit)
-      next.rent = `Your approved limit is ${formatCents(limit!, { showCents: false })}.`;
-    if (!startsOn) next.startsOn = 'Use the format YYYY-MM-DD.';
+    if (overLimit) next.rent = `Your approved limit is ${formatMoney(limit!)}.`;
+    if (!startsOn) next.startsOn = 'Pick the first month.';
     if (!/^\d{9}$/.test(form.routingNumber)) next.routingNumber = 'Routing numbers are 9 digits.';
     if (!/^\d{4,17}$/.test(form.accountNumber)) next.accountNumber = 'Enter the account number.';
     const parsed = CreateLeaseRequest.safeParse({
@@ -101,7 +120,7 @@ export default function NewLease() {
     if (!parsed.success) {
       for (const issue of parsed.error.issues) {
         const key = String(issue.path[issue.path.length - 1]);
-        if (!next[key]) next[key] = issue.message;
+        if (!next[key]) next[key] = fieldError(issue);
       }
     }
     if (Object.keys(next).length > 0) {
@@ -244,16 +263,12 @@ export default function NewLease() {
         prefix="$"
         keyboardType="decimal-pad"
         error={errors.rent}
-        helper={
-          limit !== null
-            ? `Approved for up to ${formatCents(limit, { showCents: false })} a month.`
-            : undefined
-        }
+        helper={limit !== null ? `Approved for up to ${formatMoney(limit)} a month.` : undefined}
       />
       <View style={styles.group}>
         <Text style={styles.label}>Due on the</Text>
         <Segmented
-          options={DUE_DAYS.map((d) => ({ value: d, label: ordinalLabel(d) }))}
+          options={DUE_DAYS.map((d) => ({ value: d, label: ordinal(d) }))}
           value={DUE_DAYS.includes(form.dueDay as (typeof DUE_DAYS)[number]) ? form.dueDay : null}
           onChange={(v) => setForm((f) => ({ ...f, dueDay: v }))}
         />
@@ -267,13 +282,24 @@ export default function NewLease() {
           error={errors.dueDayOfMonth}
         />
       </View>
-      <TextField
-        label="First month CashFlow pays"
-        value={form.startsOn}
-        onChangeText={set('startsOn')}
-        error={errors.startsOn}
-        placeholder="YYYY-MM-DD"
-      />
+      <View style={styles.group}>
+        <Text style={styles.label}>
+          {passThrough ? 'First month we pay your landlord' : 'First month CashFlow pays'}
+        </Text>
+        <ChoiceChips
+          options={upcomingMonthStarts(todayIso()).map((d) => ({
+            value: d,
+            label: formatPeriod(d.slice(0, 7)),
+          }))}
+          value={form.startsOn}
+          onChange={(v) => setForm((f) => ({ ...f, startsOn: v }))}
+        />
+        {errors.startsOn ? (
+          <Text variant="caption" tone="danger">
+            {errors.startsOn}
+          </Text>
+        ) : null}
+      </View>
 
       <Text variant="label">Where the landlord gets paid</Text>
       <TextField
@@ -300,19 +326,6 @@ export default function NewLease() {
       />
     </Screen>
   );
-}
-
-function nextMonthStart(): string {
-  const [y, m] = todayIso().split('-').map(Number) as [number, number];
-  const ny = m === 12 ? y + 1 : y;
-  const nm = m === 12 ? 1 : m + 1;
-  return `${ny}-${String(nm).padStart(2, '0')}-01`;
-}
-
-function ordinalLabel(d: number): string {
-  const s = ['th', 'st', 'nd', 'rd'] as const;
-  const v = d % 100;
-  return `${d}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
 }
 
 const styles = StyleSheet.create({

@@ -5,6 +5,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { Button, Notice, Screen, Text, TextField } from '@/components';
 import { describeError } from '@/lib/api';
+import { fieldError } from '@/lib/forms';
 import { useAuth } from '@/lib/auth';
 import { spacing } from '@/theme';
 
@@ -21,7 +22,7 @@ export default function Register() {
     const parsed = RegisterRequest.safeParse({ fullName, email, password });
     if (!parsed.success) {
       const next: Record<string, string> = {};
-      for (const issue of parsed.error.issues) next[String(issue.path[0])] = issue.message;
+      for (const issue of parsed.error.issues) next[String(issue.path[0])] = fieldError(issue);
       setErrors(next);
       return;
     }
@@ -82,7 +83,7 @@ export default function Register() {
         <Text variant="body" tone="muted">
           Already have an account?{' '}
         </Text>
-        <Link href="/(auth)/sign-in">
+        <Link href="/(auth)/sign-in" style={styles.link}>
           <Text variant="bodyStrong" tone="link">
             Sign in
           </Text>
@@ -93,5 +94,13 @@ export default function Register() {
 }
 
 const styles = StyleSheet.create({
-  footer: { flexDirection: 'row', justifyContent: 'center', paddingTop: spacing.md },
+  footer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: spacing.sm,
+  },
+  // A full 44 point touch target around the link text.
+  link: { paddingVertical: 11 },
 });

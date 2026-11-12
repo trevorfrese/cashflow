@@ -41,7 +41,7 @@ export function payoutKey(payout: Pick<LandlordPayout, 'id' | 'resendCount'>): s
  */
 export const HOLD_MESSAGES: Record<PayoutHoldReason, string> = {
   PAST_DUE:
-    'An earlier installment is past due. This rent payment goes out once it has been paid, if that is within a few days.',
+    'An earlier payment is past due. This rent payment goes out once it has been paid, if that is within a few days.',
   ADVANCE_FROZEN:
     'Your account is under review, so this rent payment is on hold. Contact support and we will help.',
   PLAN_PAUSED: 'You paused rent splitting. Resume the plan to send this payment.',

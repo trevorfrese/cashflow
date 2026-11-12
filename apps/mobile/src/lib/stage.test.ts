@@ -47,6 +47,21 @@ describe('deriveStage', () => {
     ).toBe('ACTIVE_PLAN');
   });
 
+  it('does not offer a plan on a lease above the approved limit', () => {
+    const counter = {
+      ...app('APPROVED'),
+      decision: { approvedMonthlyLimitCents: 430000 },
+    } as unknown as UnderwritingApplication;
+    const big = { id: 'lease', status: 'ACTIVE', monthlyRentCents: 600000 } as unknown as Lease;
+    const fits = { ...big, monthlyRentCents: 430000 } as unknown as Lease;
+    expect(deriveStage({ applications: [counter], leases: [big], plans: [] }).kind).toBe(
+      'RENT_OVER_LIMIT',
+    );
+    expect(deriveStage({ applications: [counter], leases: [fits], plans: [] }).kind).toBe(
+      'LEASE_NO_PLAN',
+    );
+  });
+
   it('ignores ended leases', () => {
     expect(
       deriveStage({ applications: [app('APPROVED')], leases: [lease('ENDED')], plans: [] }).kind,

@@ -1,11 +1,13 @@
 import { formatCents } from '@cashflow/shared';
 import { router } from 'expo-router';
+import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, EmptyState, Notice, Pill, Screen, Text } from '@/components';
+import { Button, Card, EmptyState, Notice, Pill, Screen, Text, TitleRow } from '@/components';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { healthPill, pendingActions, trustLabel } from '@/lib/connections';
+import { formatDate } from '@/lib/forms';
 import { useConnections, useDisconnect, useVerifySeat } from '@/lib/queries';
 import { spacing } from '@/theme';
 
@@ -14,11 +16,12 @@ import { spacing } from '@/theme';
  * anything the owner needs to do. The server decides all of it; this screen only says it.
  */
 export default function Connections() {
-  const { business } = useBusiness();
+  const { business, isLoading: businessLoading } = useBusiness();
   const list = useConnections(business?.id);
   const verify = useVerifySeat();
   const disconnect = useDisconnect();
   const actions = pendingActions(list.data);
+  const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
   const error = list.error ?? verify.error ?? disconnect.error;
 
   const act = (code: string, connectionId: string | null) => {
@@ -41,7 +44,7 @@ export default function Connections() {
       footer={
         <Button
           title="Connect a point of sale"
-          variant="azure"
+          variant={actions.length > 0 ? 'secondary' : 'azure'}
           icon="arrow-right"
           onPress={() => router.push('/connections/pos')}
           disabled={!business}
@@ -52,19 +55,29 @@ export default function Connections() {
       {actions.map((a) => (
         <Card key={a.code}>
           <Notice tone="warning" title="Action needed" message={a.message} />
-          <Button
-            title={
-              a.code === 'RECONNECT'
-                ? 'Reconnect'
-                : a.code === 'CONTACT_SUPPORT'
-                  ? 'Contact support'
-                  : 'Connect an account'
-            }
-            size="sm"
-            onPress={() => act(a.code, a.connectionId)}
-          />
+          {/* Contact support has no in-app channel yet, so the message stands on its own. */}
+          {a.code === 'CONTACT_SUPPORT' ? null : (
+            <Button
+              title={a.code === 'RECONNECT' ? 'Reconnect' : 'Connect an account'}
+              size="sm"
+              onPress={() => act(a.code, a.connectionId)}
+            />
+          )}
         </Card>
       ))}
+      {!business && !businessLoading ? (
+        <Card>
+          <Text variant="heading">Set up your business first</Text>
+          <Text variant="body" tone="muted">
+            Connections belong to a business. Add yours, then connect its bank account.
+          </Text>
+          <Button
+            title="Set up your business"
+            icon="arrow-right"
+            onPress={() => router.push('/business/new')}
+          />
+        </Card>
+      ) : null}
       {list.data && list.data.connections.length === 0 ? (
         <EmptyState
           title="Nothing connected yet"
@@ -75,14 +88,17 @@ export default function Connections() {
         const pill = healthPill(c);
         return (
           <Card key={c.id}>
-            <View style={styles.header}>
-              <View style={styles.titleBlock}>
-                <Text variant="heading">{c.name}</Text>
+            <View style={styles.titleBlock}>
+              <TitleRow
+                title={c.name}
+                variant="heading"
+                pill={<Pill label={pill.label} tone={pill.tone} />}
+              />
+              {c.detail !== c.name ? (
                 <Text variant="caption" tone="muted">
                   {c.detail}
                 </Text>
-              </View>
-              <Pill label={pill.label} tone={pill.tone} />
+              ) : null}
             </View>
             <Text variant="body" tone="muted">
               {c.methodDescription}
@@ -97,10 +113,18 @@ export default function Connections() {
             ))}
             {c.lastPulledAt ? (
               <Text variant="caption" tone="muted">
-                Last updated {new Date(c.lastPulledAt).toLocaleDateString()}
+                {`Last updated ${formatDate(c.lastPulledAt.slice(0, 10))}`}
               </Text>
             ) : null}
             <View style={styles.buttons}>
+              {c.accessMethod === 'DELEGATED_SEAT' && c.status !== 'DISCONNECTED' ? (
+                <Button
+                  title="Check connection"
+                  size="sm"
+                  onPress={() => verify.mutate(c.id)}
+                  loading={verify.isPending && verify.variables === c.id}
+                />
+              ) : null}
               {c.accessMethod === 'DELEGATED_SEAT' && c.status === 'PENDING' ? (
                 <Button
                   title="See the steps"
@@ -111,31 +135,45 @@ export default function Connections() {
                   }
                 />
               ) : null}
-              {c.accessMethod === 'DELEGATED_SEAT' && c.status !== 'DISCONNECTED' ? (
-                <Button
-                  title="Check connection"
-                  size="sm"
-                  onPress={() => verify.mutate(c.id)}
-                  loading={verify.isPending && verify.variables === c.id}
-                />
-              ) : null}
-              {c.status !== 'DISCONNECTED' ? (
+              {c.status !== 'DISCONNECTED' && confirmDisconnect !== c.id ? (
                 <Button
                   title="Disconnect"
                   size="sm"
                   variant="text"
-                  onPress={() => disconnect.mutate(c.id)}
-                  loading={disconnect.isPending && disconnect.variables === c.id}
+                  onPress={() => setConfirmDisconnect(c.id)}
                 />
               ) : null}
             </View>
+            {confirmDisconnect === c.id ? (
+              <View style={styles.confirm}>
+                <Text variant="body">
+                  {`Stop using ${c.name}? We stop reading it right away. A decision that needs it may ask you to connect again.`}
+                </Text>
+                <View style={styles.buttons}>
+                  <Button
+                    title="Yes, disconnect"
+                    size="sm"
+                    variant="danger"
+                    onPress={() =>
+                      disconnect.mutate(c.id, { onSettled: () => setConfirmDisconnect(null) })
+                    }
+                    loading={disconnect.isPending && disconnect.variables === c.id}
+                  />
+                  <Button
+                    title="Keep it"
+                    size="sm"
+                    variant="text"
+                    onPress={() => setConfirmDisconnect(null)}
+                  />
+                </View>
+              </View>
+            ) : null}
           </Card>
         );
       })}
       {business ? (
         <Text variant="caption" tone="muted">
-          Stated revenue on file:{' '}
-          {formatCents(business.statedMonthlyRevenueCents, { showCents: false })} a month.
+          {`Monthly revenue you told us: ${formatCents(business.statedMonthlyRevenueCents, { showCents: false })}.`}
         </Text>
       ) : null}
     </Screen>
@@ -143,12 +181,8 @@ export default function Connections() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-  },
-  titleBlock: { flex: 1 },
-  buttons: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs },
+  titleBlock: { gap: 2 },
+  confirm: { gap: spacing.sm },
+  // Stacked full width: the main action first, so nothing wraps into a ragged row.
+  buttons: { gap: spacing.sm, marginTop: spacing.xs },
 });

@@ -1,9 +1,8 @@
-import { formatCents } from '@cashflow/shared';
 import { StyleSheet, View } from 'react-native';
 
 import { Card, EmptyState, ListRow, Pill, Screen, Text, statusPill } from '@/components';
 import { useBusiness } from '@/lib/business';
-import { formatDate } from '@/lib/forms';
+import { formatDate, formatMoney } from '@/lib/forms';
 import { usePayouts, useRentPlan, useRentPlans, useRepayments } from '@/lib/queries';
 import { border, colors, hardShadow, spacing } from '@/theme';
 
@@ -86,13 +85,13 @@ export default function History() {
         <View style={[styles.tile, { backgroundColor: colors.gold }, hardShadow('m')]}>
           <Text variant="label">To landlord</Text>
           <Text variant="number" style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-            {formatCents(totalPaidOut, { showCents: false })}
+            {formatMoney(totalPaidOut)}
           </Text>
         </View>
         <View style={[styles.tile, hardShadow('m')]}>
           <Text variant="label">{passThrough ? 'Fees' : 'Repaid'}</Text>
           <Text variant="number" style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-            {formatCents(passThrough ? 0 : totalRepaid, { showCents: false })}
+            {formatMoney(passThrough ? 0 : totalRepaid)}
           </Text>
         </View>
       </View>
@@ -104,7 +103,7 @@ export default function History() {
           entries.map((e, idx) => (
             <ListRow
               key={e.id}
-              title={formatCents(e.amountCents, { showCents: e.title === 'Repayment' })}
+              title={formatMoney(e.amountCents)}
               subtitle={`${e.title} · ${formatDate(e.date)}`}
               right={<Pill {...statusPill(e.status)} />}
               last={idx === entries.length - 1}

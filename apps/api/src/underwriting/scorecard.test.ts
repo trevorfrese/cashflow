@@ -135,7 +135,9 @@ describe('scorecard versions', () => {
     // 70 days today is full marks for 60% of the factor; a low point of zero forfeits the rest.
     expect(points(steady, 'CASH_BUFFER').points).toBe(30);
     expect(points(dipped, 'CASH_BUFFER').points).toBe(18);
-    expect(points(dipped, 'CASH_BUFFER').message).toMatch(/ran out at least once in the last 90 days/);
+    expect(points(dipped, 'CASH_BUFFER').message).toMatch(
+      /ran out at least once in the last 90 days/,
+    );
   });
 
   it('version 2 takes a point for each overdraft fee earlier in the year', () => {

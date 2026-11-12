@@ -45,14 +45,17 @@ export interface TrendPolicy {
    * than this against the same weeks a year earlier (basis points, negative)...
    */
   maxYearOverYearDeclineBps: number;
-  /** ...and the trailing 90 days are down at least this much on the 90 days before. */
+  /** ...and the trailing twelve weeks are down at least this much on the twelve before. */
   confirmRecentDeclineBps: number;
   /**
    * The year over year threshold widens for businesses whose revenue is noisy month to
    * month: it is never tighter than this many times the business's own monthly variation.
    */
   volatilityMultiple: number;
-  /** Without a year of history: decline when the trailing 90 days are down more than this. */
+  /**
+   * Without a year of history: decline when the trailing twelve weeks are down more than this
+   * on the twelve before.
+   */
   maxRecentDeclineBps: number;
   /**
    * Decline with a thin buffer. A business whose revenue is falling by more than

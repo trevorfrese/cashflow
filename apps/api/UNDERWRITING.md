@@ -5,7 +5,12 @@ credit score. The engine lives in `src/underwriting/` and is pure TypeScript: gi
 of transactions and a current balance it produces a score, a grade, a limit, a fee, and a
 list of reasons an applicant can read. No network, no model weights, no hidden state.
 
-This document explains the model so it can be reviewed, argued with, and changed.
+This document explains the mechanics so they can be reviewed, argued with, and changed: the
+features, the curves, the checks, and the evidence behind each number. The policy those
+mechanics implement (eligibility, the escalation matrix, reviewer authority, servicing,
+provisioning, and change control) is stated on its own in [`CREDIT_POLICY.md`](CREDIT_POLICY.md).
+How the data is obtained is in [`DATA_CONNECTIONS.md`](DATA_CONNECTIONS.md), and the open legal
+questions are in [`COMPLIANCE.md`](../../COMPLIANCE.md). Nothing here is legal advice.
 
 ## Why cash flow and not credit
 
@@ -31,6 +36,10 @@ argument and defaults to `CURRENT_POLICY`.
 | `cashflow-v3` | Retired | Version 2 plus the data veracity checks (`src/veracity/`) and a data depth factor that reads them.        |
 | `cashflow-v4` | Current | Version 3 plus the payment history factor and graduation from the free pass-through plan.                 |
 
+Phases named below are rounds of the project's evaluation work: Phase R1 first measured
+version 1 in the portfolio simulation, R2 produced version 2, and R3 changed the simulator to
+model the product as built (a whole lease or nothing, a balance check before each debit).
+
 Every stored decision carries the `policyVersion` that made it and a `snapshot`: a summary of
 the inputs, the thresholds in force, the integrity flags, the fee build up with PD and
 expected loss, the caps on the limit, and the referral triggers. The snapshot is internal. The
@@ -44,17 +53,20 @@ index allows only one current decision per application, and every reader goes th
 `CURRENT_DECISION` in `src/services/decisions.ts`.
 
 Changing a policy number is a policy change: give the policy a new version, rerun
-`pnpm --filter @cashflow/api eval:portfolio`, and ship only if the gates pass. The measured
-effect of version 2 is in `evals/report.md`.
+`pnpm --filter @cashflow/api eval:portfolio --strict`, and ship only if every gate passes. The
+procedure is in [`CREDIT_POLICY.md`](CREDIT_POLICY.md), "Change control"; the measured effect of
+each version, side by side on the same applicants, is in [`evals/report.md`](evals/report.md).
 
 ## Pipeline
 
 ```mermaid
 flowchart LR
-  A[Bank link] --> B[13 months of transactions + balance]
+  A[Bank and platform connections] --> B[Snapshots: 400 days of transactions + balance]
+  B --> V[Veracity checks]
   B --> C[Features]
   B --> N[Integrity checks]
   C --> D[Scorecard 0-100]
+  V --> E
   N --> E
   D --> E{Policy rules}
   E -->|fail| F[DECLINED + reasons]
@@ -63,7 +75,8 @@ flowchart LR
   G --> H{Anything for a person?}
   H -->|no| I[APPROVED: limit, fee, cadence, reasons]
   H -->|yes| K[REFER: reviewer decides]
-  B -->|too little data| J[NEEDS_INFO]
+  B -->|too little data, or a connection to make| J[NEEDS_INFO]
+  F -.->|credit capacity reasons only| P[Pass-through plan offered]
 ```
 
 1. **Bank data, through snapshots.** `services/connections.ts` (`gatherDecisionData`) reads
@@ -91,6 +104,9 @@ flowchart LR
 7. **Capacity, price, and limit**, solved together (`pricing.ts`, `exposure.ts`).
 8. **Escalation.** Anything a person should look at becomes a `REFER`. Clean applications are
    decided in the same request.
+9. **Reasons and notices.** At most four principal reasons are chosen from the reason catalog,
+   and a decline's adverse action notice is stored in the same transaction as the decision. See
+   "Reasons and adverse action notices".
 
 ## Features
 
@@ -117,16 +133,23 @@ and reproducible.
 
 ## Scorecard
 
-| Factor             | v1 weight | v2 weight | Full marks                                         | Zero                                   |
-| ------------------ | --------: | --------: | -------------------------------------------------- | -------------------------------------- |
-| Rent affordability |        20 |        10 | Rent at or under 10% of verified revenue           | 35% or more                            |
-| Cash flow coverage |        20 |        15 | Free cash covers the rent 2.0x                     | Under 1.0x                             |
-| Cash buffer        |        15 |        30 | 60 or more days on hand, never under 30 in 90 days | Under 7 days, and a low point of zero  |
-| Account conduct    |        15 |        15 | No NSF fees or negative days                       | 6 points per NSF, 1.5 per negative day |
-| Revenue stability  |        10 |        10 | Month to month variation at or under 15%           | 60% or more                            |
-| Revenue trend      |        10 |        10 | Up 10% or more                                     | Down 30% or more                       |
-| Existing debt      |         5 |         5 | Debt service at or under 3% of revenue             | 20% or more                            |
-| Bank history       |         5 |         5 | 12 months reviewed                                 | 3 months or fewer                      |
+| Factor             | v1 weight | v2 to v4 weight | Full marks                                         | Zero                                    |
+| ------------------ | --------: | --------------: | -------------------------------------------------- | --------------------------------------- |
+| Rent affordability |        20 |              10 | Rent at or under 10% of verified revenue           | 35% or more                             |
+| Cash flow coverage |        20 |              15 | Free cash covers the rent 2.0x                     | Under 1.0x                              |
+| Cash buffer        |        15 |              30 | 60 or more days on hand, never under 30 in 90 days | Under 7 days, and a low point of zero   |
+| Account conduct    |        15 |              15 | No NSF fees or negative days                       | 6 points per NSF, 1.5 per negative day  |
+| Revenue stability  |        10 |              10 | Month to month variation at or under 15%           | 60% or more                             |
+| Revenue trend      |        10 |              10 | Up 10% or more                                     | Down 30% or more                        |
+| Existing debt      |         5 |               5 | Debt service at or under 3% of revenue             | 20% or more                             |
+| Data depth         |         5 |               5 | 12 months of bank history, and a second source     | 3 months or fewer, and no second source |
+
+The curves are drawn for the version 1 weights; under a later policy each factor is scaled to
+its weight (`CURVE_MAX` in `scorecard.ts`). Data depth gives up to 4 points for bank history and
+1 for a point of sale with at least 3 months of sales. From version 3 the history points are scaled
+by the bank connection's trust tier and the point of sale point needs a platform that reconciles
+with the bank (see "Trust tiers and how sources are used"). Payment history (version 4) is
+outside the 100 points.
 
 Grades: A at 80 or above, B at 68, C at 55, D at 45, F below 45.
 
@@ -385,7 +408,7 @@ classifies and summarizes it, purely. One month per rent period:
 | --------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | `ON_TIME` | Every installment collected inside grace (3 days), and no payment on the period ever came back | Collected, settled, and paid to the landlord           |
 | `LATE`    | Everything paid in the end, but after grace or after a returned debit                          | (none)                                                 |
-| `MISSED`  | Written off, or an installment 30 days past due                                                | Nothing collected in time, or the collection came back |
+| `MISSED`  | Charged off, or an installment 30 days past due                                                | Nothing collected in time, or the collection came back |
 
 A month still in progress has no outcome. Nor does a month in which nothing was owed: a
 financed payout that was never made, a pass-through month refunded because its landlord
@@ -427,77 +450,6 @@ refer rate is the same as version 3's to the applicant.
 The PD table is not regenerated for version 4. Every first time decision is version 3's, and
 those are what the table is calibrated on. The graduated cohort is too small to calibrate a
 band on (see "Graduation" and `evals/report.md`).
-
-## Pass-through plans
-
-A business declined for credit capacity can still have CashFlow pay its landlord, free, on a
-pass-through plan (`RentPlan.kind = PASS_THROUGH`): CashFlow collects the whole month's rent
-from the business's bank five business days before the due date and pays the landlord on the
-due date, once the collection is past its return window. It never advances its own money on
-one, so it carries no credit risk, and it never touches the capital pool or the exposure caps.
-The money flow and postings are in `ARCHITECTURE.md`, "Pass-through plans".
-
-Who is offered one (`passThroughEligibility` in `src/underwriting/pass-through.ts`): an
-engine decision that is `DECLINED` with at least one capacity reason (too new, revenue too
-low, overdrafts, negative days, rent share, decline in revenue, no free cash flow, score
-below the cutoff, no capacity, fee above the cap, rent below the minimum, exposure limit) and
-no trust reason. Never on a referral, a request for information, a reviewer's decision, or a
-decline with an integrity or veracity knockout, an identity that could not be verified, a
-landlord account that is the applicant's own, or a lease far above the rent the account shows
-(`RENT_NOT_VERIFIED`). A pass-through plan moves the business's money to a payee on its say
-so: anything that questions who the business is or whether the lease is real rules it out.
-
-## Graduation
-
-Policy version 4 sets `graduation: { minOnTimeMonths: 3, offerValidDays: 30 }`. The
-`refresh-eligibility` job (`src/services/graduation.ts`):
-
-1. Re-underwrites a running pass-through plan once it has three on time months in a row, at
-   most once a calendar month (keyed by application and month, with a unique index), on
-   freshly pulled data, through the same data path and engine as an application, with its
-   payment history. Months completed before the review date count, so two runs on one day
-   agree. Time in business moves on from what was stated. The stated revenue checks are
-   skipped, as in a periodic review, and the lease is treated as verified: CashFlow has paid
-   that landlord from the business's own money for months.
-2. Stores the result as an `ELIGIBILITY_REVIEW` decision beside the decline. It is never the
-   current decision.
-3. Offers a financed plan when the result is an approval for at least the lease rent. A
-   referral is not offered and is not sent to the queue: the job looks again next month.
-4. Expires an offer not accepted in 30 days, and withdraws one when a month is missed.
-
-The owner accepts through `POST /v1/graduation-offers/:id/accept`. Nothing switches mid-cycle:
-the financed plan opens only when no pass-through month is being collected, settling, or
-waiting for its due date, and takes over from the next month. In one database transaction the
-offer's terms become the application's current decision (kind `GRADUATION`), the pass-through
-plan closes (`GRADUATED`), its months not yet started are cancelled, and the financed plan
-opens through `createRentPlanTx`, so the exposure caps and funding rules apply as to any plan.
-A refusal that can clear (the pool is full, a landlord change is waiting) leaves the
-pass-through plan running and is tried again the next day; any other withdraws the offer.
-Offer, acceptance, completion, expiry and withdrawal are each an audit event.
-
-What the evals found: graduates go bad more often than first time approvals at the same score.
-The businesses that fail after graduating are ones whose hidden health is poor but whose bank
-data looks good months later, and they paid every pass-through month on time, so a longer run
-of on time months barely separates them (six months instead of three changed the cohort's bad
-rate from about 10% to 8% on three seeds, with fewer graduates). On the default run (five
-seeds) 229 businesses graduate in the base case: 8.3% go bad, net loss 56 bps of volume, and
-the cohort still earns a 37 bps margin; with them the book's net loss is 21 bps against 19.
-The details are in `evals/report.md`, "Pass-through plans and graduation". Pricing graduates on their own PD is
-the next calibration step once there are enough of them.
-
-## Open questions for counsel
-
-Collected into `COMPLIANCE.md` in a later phase.
-
-- **Is the pass-through plan money transmission?** CashFlow receives the business's own money
-  and holds it for a few days before paying it on to a third party, the landlord, on the
-  business's instruction. That is the pattern state money transmitter laws and federal money
-  services business rules are written around, and the free price does not obviously change
-  it. Whether an exemption applies (for example acting as the landlord's agent for payment, or
-  as a payment processor), or whether the funds must instead be held by a licensed partner in
-  a for-benefit-of account, is a question for counsel. The sandbox keeps the money in a
-  separate ledger account (`pass_through_cash`) behind a liability (`landlord_payable`) so the
-  books already show it as the business's money, but that is bookkeeping, not an answer.
 
 ## Policy rules
 
@@ -601,7 +553,7 @@ is measured in the same run: 60% of one month's rent, because under the standard
 policy a plan is never more than one period ahead of its repayments.
 
 At these loss levels the build up is below the grade floor for most applicants. On the
-default evaluation run the floor set the fee for 83% of funded plans, the build up for 13%
+version 2 evaluation run the floor set the fee for 83% of funded plans, the build up for 13%
 (smaller rents, where $12 of servicing is a larger share), and the minimum fee for 5%.
 The PD, the expected loss, and the whole build up are stored on the decision snapshot.
 
@@ -637,7 +589,7 @@ pays.
 
 **The ladder** bounds the size of a single loss while there is no repayment history. A
 default costs up to one month's rent, and $10,000 is the fee income of well over a hundred
-average plan months. It binds on about one approval in twenty.
+average plan months. It bound on about one approval in twenty in the version 2 evaluation.
 
 Three more rules depend on the pool, not on the business:
 
@@ -664,7 +616,10 @@ The engine also suggests an installment cadence. Businesses with daily card depo
 thin cash buffer, or highly variable revenue, are steered to four smaller installments a
 month; everyone else gets the default two.
 
-## Escalation and manual review
+## Escalation and review
+
+The full escalation matrix, every condition and what it does, and reviewer authority are
+stated as policy in [`CREDIT_POLICY.md`](CREDIT_POLICY.md), sections 8 and 9. The mechanics:
 
 An application that would otherwise be approved is referred instead when any of these fires:
 
@@ -674,16 +629,19 @@ An application that would otherwise be approved is referred instead when any of 
   reach
 - the circuit breaker is tripped (trigger `CIRCUIT_BREAKER`): a monitoring rule found the book
   outside what the policy was evaluated for, so every new approval gets a person until an
-  admin resets it. See "Monitoring" in `ARCHITECTURE.md`
+  admin resets it. See "Monitoring" in [`ARCHITECTURE.md`](../../ARCHITECTURE.md)
+- a veracity finding whose consequence is Refer (see "Veracity")
 
-Counter offers on a first plan are **not** referred. They are a third of funded plans (28%
-bound by capacity, 5% by the ladder), so referring them all would put one applicant in five
-in a queue. Deep counter offers, under 60% of the request, are 3% of funded plans and did go
-bad more often: 11% on the seeds the policy was tuned on and 16% on the gate seeds, against
-7.5% for counter offers as a whole. That is the risk of grades C and D, which the fee
-already reflects, and a reviewer has nothing to verify on them that the engine did not see.
-Referring only those would add about 2 points to the refer rate. The switch exists
-(`referCounterOfferBelowBps`) and is off.
+Counter offers on a first plan are **not** referred. They are about a third of approvals (1,812
+of 5,799 on the default run), so referring them all would put one applicant in five in a
+queue. When version 2 was tuned, while the simulator still fronted counter offers in part,
+deep counter offers (under 60% of the request) went bad more often: 11% on the tuning seeds and
+16% on the gate seeds, against 7.5% for counter offers as a whole. That is the risk of grades C
+and D, which the fee already reflects, and a reviewer has nothing to verify on them that the
+engine did not see. Referring only those would have added about 2 points to the refer rate. The
+switch exists (`referCounterOfferBelowBps`) and is off. Since the product fronts a whole lease
+or nothing, a counter offer opens no plan anyway; the applicant gets an adverse action notice
+if it is not taken up.
 
 A referral sets the application to `IN_REVIEW` with decision outcome `REFER`. The engine's
 recommended limit and fee are stored for the reviewer but are not shown to the applicant
@@ -703,43 +661,6 @@ An approval is refused while the business has an open screening hit (clear it in
 queue first), and for a business that is not verified unless the review carries the
 `IDENTITY_VERIFIED` reason code, which records that the reviewer verified it another way and
 marks the business verified.
-
-## Periodic re-underwriting
-
-The `reunderwrite` job runs first in every job run. Once a calendar month it re-scores each
-active plan on fresh bank data, with the plan's rent as the request, and stores the result as
-a decision of kind `PERIODIC_REVIEW` beside the origination decision (it does not replace
-it). When the result is a credit decline, or the score is below the watch threshold (50), the
-plan is frozen: `advanceFrozenAt` is set, no new rent period is generated, and a payout
-that falls due is held (`HELD`, reason `ADVANCE_FROZEN`). A period already paid out is not
-touched and is collected as normal.
-
-- Idempotent: one review per plan per month, enforced by a unique index.
-- A review needs fresh data. When the newest transaction is more than 7 days older than the
-  review date the feed is stale, nothing is stored, and the next run tries again.
-- A decline for an origination rule (an exposure cap, the fee cap) does not freeze a customer
-  who is repaying. Only deterioration does.
-- A freeze is not lifted automatically. A reviewer lifts it with
-  `POST /v1/admin/rent-plans/:id/release-freeze`. A payout held by the freeze is then paid
-  only if it is still within 5 days of its scheduled date. Otherwise it is cancelled, and a
-  month that went by while the plan was frozen is never paid late or generated afterwards.
-  See "Holds" in `ARCHITECTURE.md`.
-
-## Audit log
-
-`AuditEvent` records who did what to which record: decisions made, referrals, reviews,
-overrides, limits and fees set, plans created, plan status changes, and freezes. Events are
-written in the same transaction as the change. A database trigger rejects UPDATE and DELETE
-on `AuditEvent`, `LedgerEntry`, and `LedgerTransaction`.
-
-## Explainability
-
-Every decision stores the full `CashFlowSummary`, a reason list with stable codes and plain
-language messages, and its principal reasons. The codes come from one catalog; what an
-applicant is told, and the notices that record it, are in "Reasons and adverse action
-notices" below. A lender in the United States must tell a declined applicant the principal
-reasons, and a model that cannot name them is not usable in production regardless of its
-accuracy.
 
 ## Reasons and adverse action notices
 
@@ -867,7 +788,9 @@ least one catalog reason with applicant text. The `adverse_action_reasons` gate 
 
 ### Questions for counsel
 
-Collected into `COMPLIANCE.md` in a later phase.
+Kept here in context. All of them are collected, deduplicated and numbered with the rest of the
+repository's open questions in [`COMPLIANCE.md`](../../COMPLIANCE.md), section 14: items 1 and 10
+below are its question 10, 2 is 2, 3 is 3, 4 is 4, 5 is 5, 6 is 6, 7 is 7, 8 is 8, and 9 is 9.
 
 1. **Federal agency.** The notice names the Federal Trade Commission, which appendix A to
    Regulation B gives for creditors not otherwise listed. A bank or capital partner, or a
@@ -901,6 +824,128 @@ Collected into `COMPLIANCE.md` in a later phase.
    decline from the engine. If it is declined after review, what may the reason say?
 10. **Placeholders.** The creditor name, address and contact must be real before any real
     applicant sees a notice.
+
+## Pass-through plans
+
+A business declined for credit capacity can still have CashFlow pay its landlord, free, on a
+pass-through plan (`RentPlan.kind = PASS_THROUGH`): CashFlow collects the whole month's rent
+from the business's bank five business days before the due date and pays the landlord on the
+due date, once the collection is past its return window. It never advances its own money on
+one, so it carries no credit risk, and it never touches the capital pool or the exposure caps.
+The money flow and postings are in `ARCHITECTURE.md`, "Pass-through plans".
+
+Who is offered one (`passThroughEligibility` in `src/underwriting/pass-through.ts`): an
+engine decision that is `DECLINED` with at least one capacity reason (too new, revenue too
+low, overdrafts, negative days, rent share, decline in revenue, no free cash flow, score
+below the cutoff, no capacity, fee above the cap, rent below the minimum, exposure limit) and
+no trust reason. Never on a referral, a request for information, a reviewer's decision, or a
+decline with an integrity or veracity knockout, an identity that could not be verified, a
+landlord account that is the applicant's own, or a lease far above the rent the account shows
+(`RENT_NOT_VERIFIED`). A pass-through plan moves the business's money to a payee on its say
+so: anything that questions who the business is or whether the lease is real rules it out.
+
+The plan's terms as policy are in [`CREDIT_POLICY.md`](CREDIT_POLICY.md), section 10.
+
+**For counsel: is the pass-through plan money transmission?** CashFlow receives the business's
+own money and holds it for a few days before paying it on to a third party, the landlord, on the
+business's instruction. That is the pattern state money transmitter laws and federal money
+services business rules are written around, and the free price does not obviously change it.
+Whether an exemption applies (for example acting as the landlord's agent for payment, or as a
+payment processor), or whether the funds must instead be held by a licensed partner in a
+for-benefit-of account, is a question for counsel. The sandbox keeps the money in a separate
+ledger account (`pass_through_cash`) behind a liability (`landlord_payable`) so the books already
+show it as the business's money, but that is bookkeeping, not an answer. The research and the
+exemptions are in [`COMPLIANCE.md`](../../COMPLIANCE.md), section 6, and the question is number
+1 in its list.
+
+## Graduation
+
+Policy version 4 sets `graduation: { minOnTimeMonths: 3, offerValidDays: 30 }`. The
+`refresh-eligibility` job (`src/services/graduation.ts`):
+
+1. Re-underwrites a running pass-through plan once it has three on time months in a row, at
+   most once a calendar month (keyed by application and month, with a unique index), on
+   freshly pulled data, through the same data path and engine as an application, with its
+   payment history. Months completed before the review date count, so two runs on one day
+   agree. Time in business moves on from what was stated. The stated revenue checks are
+   skipped, as in a periodic review, and the lease is treated as verified: CashFlow has paid
+   that landlord from the business's own money for months.
+2. Stores the result as an `ELIGIBILITY_REVIEW` decision beside the decline. It is never the
+   current decision.
+3. Offers a financed plan when the result is an approval for at least the lease rent. A
+   referral is not offered and is not sent to the queue: the job looks again next month.
+4. Expires an offer not accepted in 30 days, and withdraws one when a month is missed.
+
+The owner accepts through `POST /v1/graduation-offers/:id/accept`. Nothing switches mid-cycle:
+the financed plan opens only when no pass-through month is being collected, settling, or
+waiting for its due date, and takes over from the next month. In one database transaction the
+offer's terms become the application's current decision (kind `GRADUATION`), the pass-through
+plan closes (`GRADUATED`), its months not yet started are cancelled, and the financed plan
+opens through `createRentPlanTx`, so the exposure caps and funding rules apply as to any plan.
+A refusal that can clear (the pool is full, a landlord change is waiting) leaves the
+pass-through plan running and is tried again the next day; any other withdraws the offer.
+Offer, acceptance, completion, expiry and withdrawal are each an audit event.
+
+What the evals found: graduates go bad more often than first time approvals at the same score.
+The businesses that fail after graduating are ones whose hidden health is poor but whose bank
+data looks good months later, and they paid every pass-through month on time, so a longer run
+of on time months barely separates them (six months instead of three changed the cohort's bad
+rate from about 10% to 8% on three seeds, with fewer graduates). On the default run (five
+seeds) 229 businesses graduate in the base case: 8.3% go bad, net loss 56 bps of volume, and
+the cohort still earns a 37 bps margin; with them the book's net loss is 21 bps against 19.
+The details are in `evals/report.md`, "Pass-through plans and graduation". Pricing graduates on their own PD is
+the next calibration step once there are enough of them.
+
+## Periodic re-underwriting
+
+The `reunderwrite` job (`src/services/reunderwriting.ts`) runs fourth in every job run: after
+`refresh-connections`, so it reads a fresh pull, and before anything is generated or paid, so a
+plan it freezes gets no new period and no payout that day. Once a calendar month it re-scores
+each active financed plan on fresh bank data, through the same data path and veracity checks as
+an application, with the plan's rent as the request, and stores the result as
+a decision of kind `PERIODIC_REVIEW` beside the origination decision (it does not replace
+it). When the result is a credit decline, or the score is below the watch threshold (50), the
+plan is frozen: `advanceFrozenAt` is set, no new rent period is generated, and a payout
+that falls due is held (`HELD`, reason `ADVANCE_FROZEN`). A period already paid out is not
+touched and is collected as normal.
+
+- Idempotent: one review per plan per month, enforced by a unique index.
+- A review needs fresh data. When the newest transaction is more than 7 days older than the
+  review date the feed is stale, nothing is stored, and the next run tries again.
+- A decline for an origination rule (an exposure cap, the fee cap) does not freeze a customer
+  who is repaying. Only deterioration does: the decline reasons in `DETERIORATION_CODES`
+  (overdrafts, negative days, revenue decline, thin buffer decline, revenue too low, rent
+  share, no free cash flow, no capacity, score below the minimum, round trip deposits), or a
+  score under the watch score.
+- The stated revenue checks are skipped and the lease is treated as verified. A request to
+  connect a payout account is shown to the owner but does not stop the review; a bank that
+  cannot be pulled does.
+- A veracity knockout on a periodic review (rewritten history, for example) declines with a
+  trust reason that is not on the deterioration list, so it does not freeze the plan by
+  itself. The `fraud.history_rewritten` monitoring alert is what brings it to a person.
+- A freeze is not lifted automatically. A reviewer lifts it with
+  `POST /v1/admin/rent-plans/:id/release-freeze`. A payout held by the freeze is then paid
+  only if it is still within 5 days of its scheduled date. Otherwise it is cancelled, and a
+  month that went by while the plan was frozen is never paid late or generated afterwards.
+  See "Holds" in `ARCHITECTURE.md`.
+
+## Audit log
+
+`AuditEvent` records who did what to which record: decisions made, referrals, reviews,
+overrides, limits and fees set, plans created, plan status changes, and freezes. Events are
+written in the same transaction as the change. A database trigger rejects UPDATE and DELETE
+on `AuditEvent`, `LedgerEntry`, `LedgerTransaction`, `DataSnapshot`, and
+`AdverseActionNotice`, and the `books.append_only_triggers_missing` monitoring rule checks that
+the triggers are still there.
+
+## Explainability
+
+Every decision stores the full `CashFlowSummary`, a reason list with stable codes and plain
+language messages, and its principal reasons. The codes come from one catalog; what an
+applicant is told, and the notices that record it, are in "Reasons and adverse action
+notices" above. A lender in the United States must tell a declined applicant the principal
+reasons, and a model that cannot name them is not usable in production regardless of its
+accuracy.
 
 ## Testing with the mock bank
 
@@ -957,4 +1002,4 @@ assumptions and nothing more; all three need refitting on real outcomes before a
 capital. The integrity checks were written against three scripted fraud behaviors and the
 veracity checks against five more, and they will catch those; real fraud adapts. The honest
 messiness the veracity false positive rates are measured on is a set of choices as well. The engine has no notion of industry seasonality beyond what
-a year of history shows, and manual review has no document handling behind it yet.
+a year of history shows, and review has no document handling behind it yet.

@@ -9,21 +9,28 @@ It draws a synthetic population, runs every applicant through the real `decide()
 by day against simulated bank accounts and a finite capital pool. Nothing touches the
 database, the network, or a clock. The same seeds always give the same report.
 
-**Current state: 10 of 10 gates pass** under `cashflow-v4` (version 3 plus the payment history
+**Current state: 11 of 11 gates pass** under `cashflow-v4` (version 3 plus the payment history
 factor, with credit declines put on the free pass-through plan and graduated from it; see
 "Pass-through and graduation" below). Its origination decisions are version 3's for every
-applicant, so every gated number equals `v3_standard`'s. Version 3 was version 2 plus the data veracity
-checks on a population extended with connection data, honest messiness, and five more fraud
-archetypes. See "Data veracity" below for what changed and what it cost. The AUC gate is
-judged on every scored honest applicant, through a counterfactual run that funds the declined
-ones too (0.873 against 0.70). Measured the old way, on funded plans only, it is still 0.669, and that figure is
-still in the report, ungated. Read "Where the gates stand" and "The AUC gate: through the
-door" below before relying on any number here.
+applicant, so every gated number equals `v3_standard`'s. Version 3 was version 2 plus the data
+veracity checks on a population extended with connection data, honest messiness, and five more
+fraud archetypes. See "Data veracity" below for what changed and what it cost. The eleventh
+gate, `adverse_action_reasons`, checks that every decline and counter offer gives the applicant
+a catalog reason. The AUC gate is judged on every scored honest applicant, through a
+counterfactual run that funds the declined ones too (0.873 against 0.70). Measured the old way,
+on funded plans only, it is 0.677 today, and that figure is still in the report, ungated. Read
+"Where the gates stood after Phase R3" and "The AUC gate: through the door" below before relying
+on any number here. The current numbers are always the ones in [`report.md`](report.md); figures
+quoted in this file from earlier phases are labeled with the phase.
+
+How the gates are used to control policy changes is in
+[`../CREDIT_POLICY.md`](../CREDIT_POLICY.md), "Change control". The population is synthetic, and
+nothing here is a forecast of real performance.
 
 ## Run it
 
 ```sh
-pnpm --filter @cashflow/api eval:portfolio                    # default run: 5 seeds, about 4 minutes
+pnpm --filter @cashflow/api eval:portfolio                    # default run: 5 seeds, a few minutes
 pnpm --filter @cashflow/api eval:portfolio --seeds 1          # one seed, about 35 seconds
 pnpm --filter @cashflow/api eval:portfolio --n 10000 --seeds 1,2   # tighter estimates
 pnpm --filter @cashflow/api eval:portfolio --n 500 --seeds 7,8 --horizon 6 --out /tmp/evals
@@ -43,7 +50,7 @@ pnpm --filter @cashflow/api eval:calibrate                    # regenerate the P
 
 Output:
 
-- `report.md`: the gates, the four configurations side by side, swap sets, then for the
+- `report.md`: the gates, the six configurations side by side, swap sets, then for the
   gated configuration the headline numbers and cuts by grade, score band, archetype, and
   industry, calibration, the stress table, the pool by month, roll rates by delinquency
   bucket, the sensitivities, and the challengers.
@@ -64,8 +71,8 @@ collection, payout, aging, and provisioning services run (`ACTIVE_SERVICING_POLI
 in the order the jobs run, and models the product as built:
 
 - **Whole lease or nothing.** `createRentPlan` refuses a lease above the approved limit, so
-  an approval for less than the rent requested opens no plan. A third of approvals are
-  counter offers (2,013 of 6,084 on the default run), and none of them is funded.
+  an approval for less than the rent requested opens no plan. About a third of approvals are
+  counter offers (1,812 of 5,799 on the default run), and none of them is funded.
 - **Stop-advance with release and cancel.** A payout is held while anything is more than 3
   days past due. The business leaves that month's rent to CashFlow. If it cures within 5
   days of the rent date the payout is released and its installments move out by the delay;
@@ -75,20 +82,21 @@ in the order the jobs run, and models the product as built:
   owner is assumed to react to being told the same way as to a returned debit.
 - **Returns.** A debit the account cannot cover is booked as collected, as the services
   book it, and reversed two days later. Until then the plan is treated as paid up.
-- **Charge-off.** At 90 days past due the whole unpaid balance of the plan is written off
+- **Charge-off.** At 90 days past due the whole unpaid balance of the plan is charged off
   and the plan is closed.
 
-The same applicants are also run under three comparison configurations:
+The same applicants are also run under five comparison configurations:
 
-| Configuration | Decisions     | Servicing | Why it is there                                        |
-| ------------- | ------------- | --------- | ------------------------------------------------------ |
-| `v1_baseline` | `cashflow-v1` | baseline  | The launch policy as first measured                    |
-| `v1_standard` | `cashflow-v1` | standard  | What the servicing change buys on its own              |
-| `v2_baseline` | `cashflow-v2` | baseline  | What the credit policy buys on its own                 |
-| `v2_standard` | `cashflow-v2` | standard  | Both, before the veracity checks                       |
-| `v3_standard` | current       | standard  | Plus the veracity checks. The gates decide on this one |
+| Configuration | Decisions     | Servicing | Why it is there                                                                                                |
+| ------------- | ------------- | --------- | -------------------------------------------------------------------------------------------------------------- |
+| `v1_baseline` | `cashflow-v1` | baseline  | The launch policy as first measured                                                                            |
+| `v1_standard` | `cashflow-v1` | standard  | What the servicing change buys on its own                                                                      |
+| `v2_baseline` | `cashflow-v2` | baseline  | What the credit policy buys on its own                                                                         |
+| `v2_standard` | `cashflow-v2` | standard  | Both, before the veracity checks                                                                               |
+| `v3_standard` | `cashflow-v3` | standard  | Plus the veracity checks, without pass-through plans                                                           |
+| `v4_standard` | `cashflow-v4` | standard  | The gated configuration: plus payment history, pass-through plans and graduation. The gates decide on this one |
 
-A single run of 2,000 applicants funds about 28 bad plans, and rank ordering among funded
+A single run of 2,000 applicants funds about 30 bad plans, and rank ordering among funded
 plans in particular moves several points from seed to seed. So the default run uses five seeds, each a separate population with
 its own pool, and **the gates judge the mean across seeds**. The report shows the mean and the
 lowest and highest seed for every gate. Two gates are counts and are handled differently:
@@ -96,12 +104,12 @@ grade inversions are counted on bad rates pooled across the seeds, and unfunded 
 summed, because one on any seed is a failure. Tables of counts pool the five seeds into one
 book of 10,000 applicants.
 
-Five seeds of 2,000 is eleven portfolio runs per seed (three scenarios for the gated
-configuration, five for the comparisons, two sensitivities, and one challenger; the swap sets
-reuse them), plus a through the door run for each of the three configurations the gates are
-applied to. A through the door run plays only the applicants its configuration did not
-already fund, and takes the rest from the run that did. The whole thing takes about two and a half minutes, roughly a third longer than the eleven
-runs alone.
+Each seed runs the gated configuration in base, mild and severe stress, each comparison
+configuration in base (and mild stress where the gates are applied to it), the two
+sensitivities and the challenger, plus a through the door run for each configuration the gates
+are applied to and a veracity counterfactual. A through the door run plays only the applicants
+its configuration did not already fund, and takes the rest from the run that did. The whole
+thing takes a few minutes.
 `--seeds 1` runs a single seed when a quick look is enough.
 
 ## Where the gates stood after Phase R3 (cashflow-v2)
@@ -140,7 +148,7 @@ about 30 of the more predictable bad plans. Funding only whole leases removes ev
 offer, and counter offers are where the low grades are: of 4,071 funded plans 3,805 are
 grade A, 249 are B, 17 are C, and none is D. With 141 bad plans across five seeds (about 28
 a seed) and almost no spread of grades left, the score has little to separate. One seed
-scores 0.569. Holds, releases, cancellations, return handling, and writing off the whole
+scores 0.569. Holds, releases, cancellations, return handling, and charging off the whole
 balance at once do not move the numbers: with those alone the result is the committed one to
 the basis point.
 
@@ -162,7 +170,7 @@ and threshold. The PD table was not recalibrated: see "Calibrating the PD table"
 | `src/servicing/policy.ts`                 | Servicing rules as data and pure functions. Standard is what the services run. Baseline is how they behaved before. |
 | `src/underwriting/policy.ts`              | Credit policies as data. The evals run `POLICY_V1` and `CURRENT_POLICY` through the same engine.                    |
 | `src/underwriting/exposure.ts`            | The exposure rules. The simulator calls the same functions the services call, on its own in memory state.           |
-| `src/evals/portfolio.ts`                  | The calendar loop: decisions, review, funding rules, returns, payouts and holds, debits, aging, write offs.         |
+| `src/evals/portfolio.ts`                  | The calendar loop: decisions, review, funding rules, returns, payouts and holds, debits, aging, charge-offs.        |
 | `src/evals/portfolio.ts`                  | Also `runThroughTheDoor`, the counterfactual run that funds every scored applicant, for the AUC gate.               |
 | `src/evals/metrics.ts`                    | Economics, rank ordering, calibration, and pooling of seeds, from the simulation output.                            |
 | `src/evals/gates.ts`                      | Pass or fail thresholds, judged on the mean across seeds.                                                           |
@@ -200,21 +208,22 @@ Five properties matter:
 
 Defined in `src/evals/gates.ts`. A policy change should not ship unless all pass on the
 default run. No threshold has been loosened since the first evaluation; `refer_rate` was
-added with the manual review path, and `approval_floor` was tightened in Phase R3 to count
+added with the review path, and `approval_floor` was tightened in Phase R3 to count
 only approvals that can be used.
 
-| Gate                      | Threshold                                                                     | Why                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `net_loss_base`           | At or under 75 bps of rent volume                                             | Fees are 150 to 300 bps of rent. After funding and servicing about 90 bps is left, so losses above 75 bps consume the margin.                                                                                                                                                                                                                                |
-| `net_margin_base`         | Above zero                                                                    | Fees collected less cost of funds, servicing, and net losses.                                                                                                                                                                                                                                                                                                |
-| `net_margin_mild_stress`  | Above zero                                                                    | The same, with revenue down 15% for six months across the book.                                                                                                                                                                                                                                                                                              |
-| `bad_rate_monotonic`      | No inversions from A to D                                                     | Pricing and limits step by grade, so worse grades must be riskier. Grades with fewer than 30 plans are skipped, and a better grade may sit up to 100 bps (one percentage point) above the next. Counted on bad rates pooled across seeds.                                                                                                                    |
-| `auc`                     | At or above 0.70                                                              | The score must separate applicants who would go bad from applicants who would not. Judged on every honest applicant the engine scored, each funded in a counterfactual run. See "The AUC gate: through the door".                                                                                                                                            |
-| `fraud_approval`          | Under 5% of fraud applicants approved                                         | Covers all three fraud archetypes together, and counts the final outcome: a fraud applicant who is referred and then approved by the reviewer counts as approved.                                                                                                                                                                                            |
-| `pool_funding`            | No payout unfunded on its due date                                            | At the planned growth rate, with the planned pool. Summed across seeds.                                                                                                                                                                                                                                                                                      |
-| `approval_floor`          | At or above 30% of all applicants                                             | Stops the other gates being passed by declining everyone. Counts approvals the applicant can use: an approval for less than the rent requested opens no plan in the product, so it does not count. 55% of the default population comes from archetypes that are creditworthy by construction, so approving under 30% means turning away about half of those. |
-| `refer_rate`              | At most 5% of applicants referred                                             | The product promises a decision in the same request. Nineteen applicants in twenty must get one, and a policy must not pass the fraud gate by handing its hard cases to a queue.                                                                                                                                                                             |
-| `veracity_honest_adverse` | At most 3% of honest applicants knocked out or referred by a veracity finding | The checks must not pass the fraud gate by flagging everyone. Before the checks the policy referred 1.7% against the 5% ceiling: 3.3 points of headroom, of which the checks get at most 3, for referrals and knockouts together. Set before the first measurement. Requests for information are reported beside it, and the approval floor bounds them.     |
+| Gate                      | Threshold                                                                           | Why                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `net_loss_base`           | At or under 75 bps of rent volume                                                   | Fees are 150 to 300 bps of rent. After funding and servicing about 90 bps is left, so losses above 75 bps consume the margin.                                                                                                                                                                                                                                |
+| `net_margin_base`         | Above zero                                                                          | Fees collected less cost of funds, servicing, and net losses.                                                                                                                                                                                                                                                                                                |
+| `net_margin_mild_stress`  | Above zero                                                                          | The same, with revenue down 15% for six months across the book.                                                                                                                                                                                                                                                                                              |
+| `bad_rate_monotonic`      | No inversions from A to D                                                           | Pricing and limits step by grade, so worse grades must be riskier. Grades with fewer than 30 plans are skipped, and a better grade may sit up to 100 bps (one percentage point) above the next. Counted on bad rates pooled across seeds.                                                                                                                    |
+| `auc`                     | At or above 0.70                                                                    | The score must separate applicants who would go bad from applicants who would not. Judged on every honest applicant the engine scored, each funded in a counterfactual run. See "The AUC gate: through the door".                                                                                                                                            |
+| `fraud_approval`          | Under 5% of fraud applicants approved                                               | Covers all eight fraud archetypes together, and counts the final outcome: a fraud applicant who is referred and then approved by the reviewer counts as approved.                                                                                                                                                                                            |
+| `pool_funding`            | No payout unfunded on its due date                                                  | At the planned growth rate, with the planned pool. Summed across seeds.                                                                                                                                                                                                                                                                                      |
+| `approval_floor`          | At or above 30% of all applicants                                                   | Stops the other gates being passed by declining everyone. Counts approvals the applicant can use: an approval for less than the rent requested opens no plan in the product, so it does not count. 55% of the default population comes from archetypes that are creditworthy by construction, so approving under 30% means turning away about half of those. |
+| `refer_rate`              | At most 5% of applicants referred                                                   | The product promises a decision in the same request. Nineteen applicants in twenty must get one, and a policy must not pass the fraud gate by handing its hard cases to a queue.                                                                                                                                                                             |
+| `veracity_honest_adverse` | At most 3% of honest applicants knocked out or referred by a veracity finding       | The checks must not pass the fraud gate by flagging everyone. Before the checks the policy referred 1.7% against the 5% ceiling: 3.3 points of headroom, of which the checks get at most 3, for referrals and knockouts together. Set before the first measurement. Requests for information are reported beside it, and the approval floor bounds them.     |
+| `adverse_action_reasons`  | Every decline and counter offer has at least one catalog reason with applicant text | Regulation B asks for the specific principal reasons on every adverse action (12 CFR 1002.9(b)(2)). One without is a defect, not a rate to manage. Explaining decisions does not change them.                                                                                                                                                                |
 
 ### The AUC gate: through the door
 
@@ -240,7 +249,7 @@ run again in a counterfactual, `runThroughTheDoor` in `src/evals/portfolio.ts`:
   approved for less.
 - Servicing is the configuration's own (standard, for the gated one), the horizon and runoff
   are the same, and bad means what it means everywhere else: an installment 30 days past
-  due, or written off.
+  due, or charged off.
 - The pool has no limit and no exposure or concentration rule applies, so every plan starts
   on its first rent date and no plan affects another.
 - Approved and referred applicants pay the fee they were quoted. A declined applicant pays
@@ -310,10 +319,10 @@ score 55 is funded once counter offers are excluded, so it scores the same 0.669
 Definitions used by the gates and the report:
 
 - **Volume**: rent paid to landlords.
-- **Bad**: any installment reached 30 days past due, or was written off.
-- **Net loss**: principal written off, less recoveries. Under a servicing policy that never
-  writes off (the baseline), anything still unpaid 90 days past due when a plan's observation
-  ends is counted as written off. Unpaid fees are never income, so they are not a loss either.
+- **Bad**: any installment reached 30 days past due, or was charged off.
+- **Net loss**: principal charged off, less recoveries. Under a servicing policy that never
+  charges off (the baseline), anything still unpaid 90 days past due when a plan's observation
+  ends is counted as charged off. Unpaid fees are never income, so they are not a loss either.
 - **Usable approval**: approved for at least the rent requested. An approval for less is a
   counter offer, and the product cannot open a plan on one.
 - **First payment default**: an installment of the first period reached 30 days past due.
@@ -425,12 +434,12 @@ All in `src/evals/assumptions.ts`.
 | ------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Cost of funds | 12% APR on daily principal outstanding | A warehouse line for a young nonbank lender.                                                                                                |
 | Servicing     | $12.00 per plan-month                  | About $1.50 payments, $1.50 bank data refresh, $9 support and operations. Roughly 0.28% of volume at the average plan rent of about $4,300. |
-| Recovery      | 10% of written off principal           | Low end for unsecured small business credit without a personal guarantee. Taken at write off, with no delay.                                |
+| Recovery      | 10% of charged off principal           | Low end for unsecured small business credit without a personal guarantee. Taken at charge off, with no delay.                               |
 | Returns       | 2 days                                 | A debit the account cannot cover is booked as collected and reversed two days later. Not applied under the baseline servicing policy.       |
 | Balance check | The morning's balance                  | Read before the day's deposits. A debit it cannot cover is put off a day. The owner reacts to the notice as to a returned debit.            |
 | Late rent     | Paid by the business on cancellation   | When a held payout is cancelled the business pays that month's rent itself, on that day.                                                    |
 | Manual pay    | None in the gated run                  | A balance automatic debits never collect is assumed never to be paid by hand. The `manual_payment` sensitivity assumes 30% is.              |
-| Manual review | Catches 70% of referred fraud          | An assumption, not a measurement. A reviewer who asks for the lease and calls the landlord stops most staged applications and misses some.  |
+| Review        | Catches 70% of referred fraud          | An assumption, not a measurement. A reviewer who asks for the lease and calls the landlord stops most staged applications and misses some.  |
 | Funding wait  | Up to 3 rent dates                     | A plan the pool cannot take under the exposure rules waits, then is counted as approved but never funded.                                   |
 | Pool          | $7,500,000 per 2,000 applicants        | The planned peak day of payouts (about $5.8 million) plus roughly 30% headroom. Scales with `--n`.                                          |
 | Growth        | 10% a month over 12 arrival months     | The pool is exercised by a growing book.                                                                                                    |
@@ -476,7 +485,9 @@ Choices, not measurements. They live in `src/evals/population.ts`.
   - `bust_out` (25%): 8 to 11 months of clean history, a requested rent 2.5 to 4 times the
     rent seen in the account, and the account is emptied 2 to 20 days after applying.
 
-What that produces on the default run (five seeds of 2,000, pooled):
+What that produced on the default run after Phase R3 (five seeds of 2,000, pooled, on the
+original population before the veracity archetypes were added; the current cuts by archetype
+and grade are in `report.md`):
 
 | Configuration     | Funded plans | That go bad | A    | B     | Fraud applicants approved | Of those, funded |
 | ----------------- | -----------: | ----------: | ---- | ----- | ------------------------- | ---------------: |
@@ -523,10 +534,15 @@ should wait until the counter offer question above is settled.
 The report's "Roll to charge-off by bucket" table is where the reserve rates in
 `STANDARD_SERVICING_POLICY.provisionRatesBps` come from. On the evening of the first of each
 month, which is when the provision job runs, 0.36% of the principal outstanding in current
-plans is later written off, 94.3% of the principal in delinquent plans, and 99.8% of the
-principal in default. No plan is in grace on the first, because all rent here is due on the
-first, so grace is measured on entry: 84.5% of principal in plans as they move into grace is
-later written off. The policy uses those rounded up: 0.40%, 85%, 95%, and 100%.
+plans was later charged off when the rates were set (Phase R3), 94.3% of the principal in
+delinquent plans, and 99.8% of the principal in default. No plan is in grace on the first,
+because all rent here is due on the first, so grace is measured on entry: 84.5% of principal in
+plans as they moved into grace. The policy uses those rounded up: 0.40%, 85%, 95%, and 100%.
+
+On the current report the same measures are 0.42%, 92.6%, 99.4%, and 79.5%. Every rate but the
+current one is still covered; current principal now rolls slightly above its 0.40% reserve.
+That is inside the simulation's noise, and a reason to revisit the rates at the next policy
+version (see [`../CREDIT_POLICY.md`](../CREDIT_POLICY.md), "Known gaps").
 
 The step from current to grace says more about the simulation than about lending. Owners
 here cover a short account from savings until the business fails, and the balance check waits
@@ -537,13 +553,15 @@ belongs to a business that has closed. Real businesses cure from grace far more 
 
 Reported in their own table, never gated.
 
+Current figures, against the gated run (`report.md`, "Sensitivities"):
+
 - `partial_advance`: counter offers are fronted in part, which the product does not do.
-  Approval on usable terms 60.8% against 40.7%, 6,084 plans against 4,071, volume $283.7
-  million against $170.2 million, net loss 21 bps against 18, net margin $2,649,924 (93 bps)
-  against $1,347,764 (79 bps), funded only AUC 0.678 against 0.669.
+  Approval on usable terms 58.0% against 39.9%, 5,799 plans against 3,987, volume $272.5
+  million against $168.0 million, net loss 22 bps against 19, net margin $2,539,127 (93 bps)
+  against $1,322,851 (79 bps), funded only AUC 0.675 against 0.677.
 - `manual_payment`: 30% of installments still unpaid after the retries, at businesses still
   trading, are paid by hand between day 7 and day 30. It changes almost nothing: net loss
-  $304,785 against $304,020, both 18 bps, with two more held payouts released. Nearly every
+  $326,914 against $326,543, both 19 bps. Nearly every
   installment that is unpaid after a week here belongs to a business that has already
   closed, and a closed business pays nothing. So the gated figure does not lean on the
   assumption that nobody pays by hand, and this simulation cannot say what manual payments
@@ -579,11 +597,13 @@ Reported in their own table, never gated.
 - **A held payout assumes a patient tenant.** While a payout is held, the simulated business
   does not pay its landlord itself; it pays only once the payout is cancelled. A real owner
   told that the payout is on hold may pay the landlord at once, and a payout released
-  afterwards would then pay the landlord twice. Only 5 of 328 held payouts are released in
-  the gated run, so the numbers do not depend on it, but the product risk is real.
+  afterwards would then pay the landlord twice. Only 8 of 353 held payouts are released in
+  the gated run, so the numbers do not depend on it. In the product the risk is closed off:
+  one landlord payout per lease and month is enforced by the database (see
+  `ARCHITECTURE.md`, "Ledger").
 - **The balance check is better informed here than it would be.** It reads the true balance
-  each morning, and a debit that passes it almost never fails later in the day: 16 debits
-  are returned in the gated run against 20,445 put off. A real balance read is older and
+  each morning, and a debit that passes it almost never fails later in the day: 30 debits
+  are returned in the gated run against 22,455 put off. A real balance read is older and
   misses pending items. The check also means the cap of three attempts almost never binds.
 - **Hard and unauthorized returns are not modeled.** Every failed debit here is
   insufficient funds. Closed accounts, disputes, and returned landlord payouts are handled

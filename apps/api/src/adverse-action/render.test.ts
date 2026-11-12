@@ -43,7 +43,7 @@ describe('renderNotice', () => {
   it('is deterministic and free of internal terms and em dashes', () => {
     const a = renderNotice(facts());
     expect(renderNotice(facts())).toEqual(a);
-    expect(a.text).not.toMatch(/—/);
+    expect(a.text).not.toMatch(/\u2014/);
     for (const line of a.text.split('\n')) {
       if (line.includes('PLACEHOLDER')) continue;
       expect(findJargon(line), line).toBeNull();

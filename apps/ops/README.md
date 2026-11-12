@@ -39,7 +39,7 @@ The browser never holds the operator token in anything JavaScript can read.
 
 **CSRF.** The cookie is `SameSite=Strict`, so a browser does not attach it to a request another site started. On top of that every state-changing request (sign in, sign out, every proxied `POST`) must carry an `Origin` header naming the host the request was sent to, or `Sec-Fetch-Site: same-origin` when there is no `Origin`. A request with neither is refused. Proxied `POST`s must also be JSON.
 
-**Roles.** The role from `whoami` decides what the console offers: a reviewer is not offered the circuit breaker reset or clearing a confirmed match. That is a convenience. The API enforces the role on every request whatever the console shows.
+**Roles.** What each role may decide, and the reason codes a reviewer gives, are policy: see [`apps/api/CREDIT_POLICY.md`](../api/CREDIT_POLICY.md), section 9. The role from `whoami` decides what the console offers: a reviewer is not offered the circuit breaker reset or clearing a confirmed match. That is a convenience. The API enforces the role on every request whatever the console shows.
 
 **What the browser can see:** your name, your role, when the session ends, and the API's JSON responses. **What it cannot:** the token, in any response body, header, or readable storage. The console uses no localStorage or sessionStorage.
 

@@ -22,7 +22,7 @@ describe('reason catalog', () => {
       const texts = [e.title, e.applicantText, e.guidance, 'measures' in e ? e.measures : ''];
       for (const text of texts) {
         expect(findJargon(text), `${e.code}: "${text}"`).toBeNull();
-        expect(text).not.toMatch(/—/);
+        expect(text).not.toMatch(/\u2014/);
       }
       expect(e.applicantText.length, e.code).toBeGreaterThan(20);
       expect(e.guidance.length, e.code).toBeGreaterThan(15);

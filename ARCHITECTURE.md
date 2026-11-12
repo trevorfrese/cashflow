@@ -1,26 +1,35 @@
 # Architecture
 
-CashFlow is a pnpm and Turborepo monorepo with three apps and one shared package. This
-document covers how the pieces fit, the provider seams where real money would plug in,
-the ledger, and the life of a rent payment. For the underwriting model see
-[`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md).
+CashFlow is a pnpm and Turborepo monorepo with four apps and one shared package. This
+document covers how the pieces fit, the provider seams where real money would plug in, the
+data model, the ledger and its postings, the life of a rent payment, the jobs, monitoring,
+dev tools, and security. The underwriting mechanics are in
+[`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md), the credit policy in
+[`apps/api/CREDIT_POLICY.md`](apps/api/CREDIT_POLICY.md), and the open legal questions in
+[`COMPLIANCE.md`](COMPLIANCE.md).
+
+Nothing in this repository moves real money. Every provider that could is a sandbox by
+default, and the real adapters are skeletons that refuse to run without explicit
+configuration.
 
 ```mermaid
 flowchart LR
   subgraph Clients
     M[apps/mobile<br/>Expo + Expo Router]
     W[apps/web<br/>Next.js static site]
+    O[apps/ops<br/>Next.js staff console, local only]
   end
   subgraph API[apps/api: Fastify]
     R[Routes<br/>Zod validated]
     S[Services<br/>rent plan, payouts, collections, underwriting]
     L[Ledger<br/>double entry]
-    J[Jobs<br/>rescreen, reconcile, age, pay landlords, collect, provision, monitor]
-    P[Providers<br/>underwriting, bank link, payments, capital, identity]
+    J[Jobs<br/>13 jobs in a fixed order, daily]
+    P[Providers<br/>underwriting, bank link, commerce, delegated seat,<br/>payments, capital, identity]
   end
   DB[(Postgres<br/>Prisma)]
   SH[packages/shared<br/>schemas, enums, money math, brand]
   M -->|HTTPS + JWT| R
+  O -->|server-side proxy, operator token| R
   R --> S
   J --> S
   S --> L
@@ -30,6 +39,7 @@ flowchart LR
   M -.imports.-> SH
   R -.imports.-> SH
   W -.imports.-> SH
+  O -.imports.-> SH
 ```
 
 ## Packages
@@ -56,6 +66,21 @@ same schema. A field that is not in the schema does not exist.
 - **Jobs are idempotent.** Running a job twice for the same day is a no-op the second time,
   enforced by status checks and ledger idempotency keys.
 
+## Terms
+
+The docs use one word for each of these:
+
+| Term              | Meaning                                                                                                          |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Financed plan     | A `RentPlan` of kind `FINANCED`: CashFlow pays the landlord from the pool and the business repays with a fee     |
+| Pass-through plan | A `RentPlan` of kind `PASS_THROUGH`: free, CashFlow collects the rent first and then pays the landlord           |
+| Landlord payout   | One month's rent paid to the landlord (`LandlordPayout` on a financed plan, the payout of a `PassThroughPeriod`) |
+| Installment       | One scheduled repayment of a financed plan's principal and fee (`Installment`)                                   |
+| Refer, referral   | The engine sends an application to a reviewer instead of deciding (`REFER`, status `IN_REVIEW`)                  |
+| Charge-off        | Writing off a plan's unpaid principal at 90 days past due; the balance is then "charged off"                     |
+| Counter offer     | An approval for less than the rent requested. It cannot open a plan                                              |
+| Freeze            | `advanceFrozenAt` on a plan: no new period and no landlord payout until a reviewer lifts it                      |
+
 ## Provider seams
 
 Every external dependency that touches money or risk sits behind an interface in
@@ -73,6 +98,18 @@ real funds without someone deliberately configuring it to.
 | `CapitalProvider`       | `availableCents`, `reserve`, `fund`                                                                                                                 | `mock`: a pool that lives in the ledger                                               | A credit facility, a warehouse line, or a fund                                                                 |
 | `IdentityProvider`      | `verifyBusiness`, `verifyOwners`, `screenParty`                                                                                                     | `mock`: verifies and clears everything except names with a sandbox keyword            | A business and owner verification vendor and a sanctions screening vendor. No skeleton is included             |
 
+The environment variable that picks each one, and the values it accepts (`src/config.ts`):
+
+| Variable                  | Values                                          | Default    | Guard                                                                                 |
+| ------------------------- | ----------------------------------------------- | ---------- | ------------------------------------------------------------------------------------- |
+| `UNDERWRITING_PROVIDER`   | `cashflow`, `mock`                              | `cashflow` |                                                                                       |
+| `BANK_LINK_PROVIDER`      | `mock`, `plaid`                                 | `mock`     | `plaid` needs `CONNECTION_TOKEN_KEY`; `PLAID_ENV=production` is refused in production |
+| `COMMERCE_PROVIDER`       | `mock`, `square`, `shopify`, `stripe`, `clover` | `mock`     | A platform name needs `CONNECTION_TOKEN_KEY` and that platform's credentials          |
+| `DELEGATED_SEAT_PROVIDER` | `mock`, `toast`                                 | `mock`     | `toast` needs `CONNECTION_TOKEN_KEY`, and the skeleton refuses to run regardless      |
+| `PAYMENTS_PROVIDER`       | `mock`, `stripe`                                | `mock`     | A live Stripe key (`sk_live_`) is refused in production                               |
+| `CAPITAL_PROVIDER`        | `mock`                                          | `mock`     | No real adapter exists                                                                |
+| `IDENTITY_PROVIDER`       | `mock`                                          | `mock`     | No real adapter exists                                                                |
+
 ### Data connections and snapshots
 
 Every bank and point of sale connection records how its data is obtained (`DIRECT_OAUTH`,
@@ -84,7 +121,8 @@ append-only `DataSnapshot` with a sha256 over its canonical payload, and underwr
 only through snapshots, re-pulling first when the newest is older than the policy allows.
 Each decision stores the ids and hashes of the snapshots it read. There is no upload path and
 no credentialed bank login. The design, the delegated seat's limits, token handling, and the
-list for counsel are in [`apps/api/DATA_CONNECTIONS.md`](apps/api/DATA_CONNECTIONS.md); the
+list for counsel are in [`apps/api/DATA_CONNECTIONS.md`](apps/api/DATA_CONNECTIONS.md) (the
+questions are collected in [`COMPLIANCE.md`](COMPLIANCE.md)); the
 veracity checks that run on the snapshots are in
 [`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md), "Veracity".
 
@@ -106,6 +144,37 @@ sequenceDiagram
   A->>S: newest snapshot, or pull again (freshness rule)
   A->>A: veracity checks, then decide()
 ```
+
+## Data model
+
+`apps/api/prisma/schema.prisma`, Postgres through Prisma. The tables by area:
+
+| Area                  | Tables                                                                                        | Notes                                                                                        |
+| --------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| People and businesses | `User`, `RefreshToken`, `Business`, `BeneficialOwner`, `ScreeningResult`                      | Tax id last four only; owners have no date of birth or government id. Screening is a history |
+| Data connections      | `BankLink`, `CommerceLink`, `ConnectionAuthorization`, `DataSnapshot`                         | Tokens sealed. Every pull is a snapshot with a sha256                                        |
+| Underwriting          | `UnderwritingApplication`, `UnderwritingDecision`, `ApplicationReview`, `AdverseActionNotice` | Decisions are superseded, never rewritten. One current decision per application              |
+| Leases and plans      | `Lease`, `LeaseChange`, `RentPlan`, `PassThroughPeriod`, `GraduationOffer`                    | One pending landlord change per lease. A plan's `kind` is fixed for its life                 |
+| Money movements       | `LandlordDisbursement`, `LandlordPayout`, `Installment`, `Repayment`                          | One `SENT` disbursement per lease and month                                                  |
+| Ledger                | `LedgerAccount`, `LedgerTransaction`, `LedgerEntry`                                           | Balances are derived from entries, never stored                                              |
+| Operations            | `AuditEvent`, `Alert`, `CircuitBreaker`, `JobRun`                                             | The latest `JobRun.asOf` is the simulated clock in dev                                       |
+
+**Append only, enforced by a trigger** that rejects UPDATE and DELETE: `LedgerEntry`,
+`LedgerTransaction`, `AuditEvent`, `DataSnapshot`, and `AdverseActionNotice`. The last three keep
+plain id columns instead of foreign keys, so deleting a business never has to delete its
+evidence. The `books.append_only_triggers_missing` monitoring rule checks that the triggers
+exist.
+
+**Append only by convention**: `UnderwritingDecision` (a new decision sets `supersededAt` on the
+one before, and a partial unique index allows one current decision per application),
+`ApplicationReview`, and `ScreeningResult` (superseded the same way).
+
+**Unique indexes**, several of them partial, carry the invariants that would otherwise need a
+lock: one ledger transaction per idempotency key, one current decision per application, one
+periodic or eligibility review per application and month, one notice per decision and kind,
+one payout and one pass-through month per plan and month, one pending `LeaseChange` per lease,
+one open `GraduationOffer` per pass-through plan, one alert per dedupe key that is not
+resolved, and one `SENT` landlord disbursement per lease and month.
 
 ## How a real capital source plugs in
 
@@ -137,10 +206,10 @@ Five account types. Nine system accounts plus one receivable per business:
 | ------------------------- | -------------- | ----------------------------------------------------------- |
 | `capital_pool`            | Asset          | Cash available to front rent                                |
 | `cash`                    | Asset          | Installments collected, not yet swept                       |
-| `receivable:<businessId>` | Asset          | Rent fronted for a business, not yet repaid or written off  |
+| `receivable:<businessId>` | Asset          | Rent fronted for a business, not yet repaid or charged off  |
 | `allowance:credit_losses` | Asset (contra) | The part of receivables not expected back. A credit balance |
 | `fee_revenue`             | Revenue        | Fees collected                                              |
-| `recovery_income`         | Revenue        | Principal collected on balances already written off         |
+| `recovery_income`         | Revenue        | Principal collected on balances already charged off         |
 | `provision_expense`       | Expense        | Cost of building the allowance                              |
 | `pool_equity`             | Equity         | Capital contributed to the pool                             |
 | `landlord_payable`        | Liability      | Pass-through rent collected and not yet paid to a landlord  |
@@ -162,7 +231,7 @@ receivables gives the net figure.
 | Monthly provision, allowance built         | `provision_expense`       | `allowance:credit_losses`                           |
 | Monthly provision, allowance released      | `allowance:credit_losses` | `provision_expense`                                 |
 | Charge-off                                 | `allowance:credit_losses` | `receivable:<biz>` (unpaid principal)               |
-| Payment on a written off installment       | `cash` (total)            | `recovery_income` (principal), `fee_revenue` (fee)  |
+| Payment on a charged off installment       | `cash` (total)            | `recovery_income` (principal), `fee_revenue` (fee)  |
 | Pass-through rent collected                | `pass_through_cash`       | `landlord_payable`                                  |
 | Pass-through rent paid to the landlord     | `landlord_payable`        | `pass_through_cash`                                 |
 | Pass-through collection returned, unpaid   | mirror of the collection  | mirror of the collection                            |
@@ -175,9 +244,9 @@ Rules the postings follow:
   undone by posting the mirror image of the original transaction (`reverseTransaction`), never
   by editing it.
 - **A fee is revenue only when it is collected.** An unpaid fee is never booked, so a
-  charge-off writes off principal only and books no fee revenue and no fee loss.
+  charge-off charges off principal only and books no fee revenue and no fee loss.
 - **A charge-off never takes the allowance below zero.** If the allowance is short of the
-  principal being written off, the same database transaction first tops it up with
+  principal being charged off, the same database transaction first tops it up with
   DR `provision_expense` / CR `allowance:credit_losses`.
 - **Two dates.** `postedAt` is when the row was written. `effectiveDate` is the calendar
   date the movement belongs to: the job's as-of date, or the date a return arrived. They
@@ -185,10 +254,12 @@ Rules the postings follow:
 - **One posting per business event**, enforced by idempotency keys: `payout:<id>`,
   `repayment:<id>` (an installment whose payment was returned is collected again, which is a
   second repayment and a second posting), `repayment:<id>:return`, `payout:<id>:return`,
-  `provision:<YYYY-MM>`, `charge_off:<planId>:<date>`, and `payout:<id>:resend:<n>` with its
-  own `:return` for a returned payout that a reviewer sent again. Pass-through months post
-  under `pass_through:<periodId>:collect:<n>` (and its `:return`), `:payout`, and `:refund`.
-- **One landlord payment per lease and month.** Every payment of rent to a landlord, from
+  `provision:<YYYY-MM>`, `charge_off:<planId>:<date>` (and `:provision` for its allowance top
+  up), and `payout:<id>:resend:<n>` with its own `:return` for a returned payout that a
+  reviewer sent again. Pass-through months post under `pass_through:<periodId>:collect:<n>`
+  (with `:return`, or `:return_after_payout` once the landlord was paid), `:payout`, and
+  `:refund`.
+- **One landlord payout per lease and month.** Every payment of rent to a landlord, from
   either kind of plan, first claims a `LandlordDisbursement` row in the same transaction,
   before the provider is called. A partial unique index allows one `SENT` row per lease and
   period month, and the payout row is locked (`SELECT ... FOR UPDATE`) for the transaction.
@@ -259,7 +330,7 @@ stateDiagram-v2
   back in, and books the amount on the business's receivable (DR `receivable:<biz>` /
   CR `capital_pool`, net). The plan is closed and a high severity alert opens. This is the
   one way a pass-through plan can cost CashFlow money.
-- **Returned landlord payment.** Sent back by the landlord's bank: reversed, refunded to the
+- **Returned landlord payout.** Sent back by the landlord's bank: reversed, refunded to the
   business, and the plan frozen until the landlord details are corrected.
 
 Two monitoring rules watch it: `books.pass_through_payout_before_settlement` (critical, a
@@ -307,12 +378,53 @@ sequenceDiagram
   end
 ```
 
+### Payout and installment states
+
+A financed plan's landlord payout (`LandlordPayout.status`):
+
+```mermaid
+stateDiagram-v2
+  [*] --> SCHEDULED: generate-periods, 30 days ahead
+  SCHEDULED --> PAID: due date, nothing holds it, capital reserved
+  SCHEDULED --> HELD: past due, frozen, landlord change, rent increase, or paused
+  HELD --> PAID: released within 5 days of its date
+  SCHEDULED --> FAILED: capital shortfall or provider failure
+  FAILED --> PAID: retried within 5 days of its date
+  HELD --> CANCELLED: still held after 5 days
+  FAILED --> CANCELLED: still failing after 5 days
+  SCHEDULED --> CANCELLED: plan charged off, or the month was already paid
+  PAID --> FAILED: returned by the landlord's bank
+  FAILED --> PAID: a reviewer re-sends it after the details are corrected
+```
+
+Its installments (`Installment.status`). Collection starts only once the payout is `PAID`:
+
+```mermaid
+stateDiagram-v2
+  [*] --> SCHEDULED
+  SCHEDULED --> PAID: debit succeeds
+  SCHEDULED --> FAILED: debit fails or is returned, inside grace
+  FAILED --> PAID: a retry or a manual payment succeeds
+  SCHEDULED --> LATE: past the 3 day grace period
+  FAILED --> LATE: past the 3 day grace period
+  LATE --> PAID: a retry or a manual payment succeeds
+  PAID --> FAILED: returned inside grace
+  PAID --> LATE: returned after grace
+  LATE --> CHARGED_OFF: the plan reaches 90 days past due
+  CHARGED_OFF --> PAID: paid later, booked as a recovery
+  SCHEDULED --> VOIDED: payout cancelled or returned
+```
+
+The plan itself is `ACTIVE`, `PAUSED` (by the owner: no new periods, collections continue) or
+`CLOSED` (by the owner, at charge-off, or on graduation for a pass-through plan). A freeze is
+not a status: it is `advanceFrozenAt` on an active plan.
+
 ### Servicing policy
 
 Everything that happens after a landlord payout follows one object,
 `ACTIVE_SERVICING_POLICY` in `apps/api/src/servicing/policy.ts`: pure functions with no
 database or clock. The services ask it when to debit, when to hold a payout, which bucket a
-plan is in, how much to reserve, and when to write off. The portfolio simulator in
+plan is in, how much to reserve, and when to charge off. The portfolio simulator in
 `apps/api/src/evals/` calls the same functions, so the policy that is evaluated is the policy
 that runs.
 
@@ -324,7 +436,7 @@ that runs.
 | Balance check       | Before each scheduled debit. A debit the balance cannot cover is put off a day and is not an attempt                |
 | Stop-advance        | The next landlord payout is held while anything is more than 3 days past due                                        |
 | Release window      | A payout not paid within 5 days of its scheduled date is cancelled, never paid late                                 |
-| Charge-off          | At 90 days past due. The whole unpaid balance is written off and the plan is closed                                 |
+| Charge-off          | At 90 days past due. The whole unpaid balance is charged off and the plan is closed                                 |
 | Reserve rates       | 0.40% of current principal, 85% of grace, 95% of delinquent, 100% of default. Measured in the evals                 |
 | Return codes        | Retryable (R01, R09), hard (R02, R03, R04, R08, R13, R16, R20), unauthorized (R05, R07, R10, R29)                   |
 
@@ -366,7 +478,7 @@ reads the balance through the bank link provider; a debit that would obviously f
 off to the next run, the reason is recorded on the installment, and no attempt is used. Each
 debit that is presented counts, whether it fails on the spot or comes back later. After the
 third the installment is debited no more and waits for a manual payment
-(`POST /v1/repayments`), which works for a late, defaulted, or written off balance.
+(`POST /v1/repayments`), which works for a late, defaulted, or charged off balance.
 
 A bank debit is booked when it is made and can come back afterwards. There are no webhooks:
 `reconcile-payments` polls `PaymentsProvider.listReturns` and, in one database transaction
@@ -398,7 +510,7 @@ When a plan's oldest unpaid installment reaches 90 days past due, `age-receivabl
 off everything the plan still owes: DR `allowance:credit_losses` / CR the receivable for the
 unpaid principal, the installments become `CHARGED_OFF`, payouts not yet made are cancelled,
 the plan is `CLOSED` with bucket `CHARGED_OFF`, the business is `SUSPENDED`, and its other
-plans are frozen. A written off installment is still owed. If it is paid later, by a manual
+plans are frozen. A charged off installment is still owed. If it is paid later, by a manual
 payment, the principal is booked to `recovery_income` and the plan stays closed.
 
 ### Jobs
@@ -569,8 +681,9 @@ record of what it was told. One notice per decision and kind, under a unique ind
 - `UnderwritingDecision.principalReasons` holds the at most four catalog reasons the
   applicant is told, chosen by `selectPrincipalReasons` in `packages/shared`.
 
-The reasoning, the regulation sections and the questions for counsel are in
-`apps/api/UNDERWRITING.md`, "Reasons and adverse action notices".
+The reasoning and the regulation sections are in
+[`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md), "Reasons and adverse action notices";
+what is and is not settled about them is in [`COMPLIANCE.md`](COMPLIANCE.md).
 
 ## Monitoring
 
@@ -610,7 +723,7 @@ severity (`INFO`, `WARNING`, `HIGH`, `CRITICAL`), a subject, a status (`OPEN`,
 | Fraud                                      | Landlord change pending, or applied shortly before a payout. Landlord payout account is a borrower's bank account. One landlord account paid by several unrelated users. One bank account linked by several businesses. Application velocity and reapplying after a decline. Open screening hits. Unauthorized returns and account lockouts (from events)                                                                                                                                                                                                                           |
 | Payments                                   | Unauthorized, administrative and overall return rates over 60 days against the network thresholds, each with a minimum sample. Repeated failures on one bank account. Collection attempts exhausted. Returned and cancelled payouts, disabled bank links (from events)                                                                                                                                                                                                                                                                                                              |
 | Portfolio                                  | First payment default rate by origination month. Share of principal delinquent or in default. Month over month roll. Industry and single name concentration against the credit policy caps. Pool utilization. Realized against expected loss by cohort. Charge-offs (from events)                                                                                                                                                                                                                                                                                                   |
-| Books                                      | Trial balance. Operating cash left after a full run. Each receivable account against unpaid principal on paid payouts (and pass-through rent returned after payout). Allowance and pool never negative. Jobs that failed or stopped. Append-only triggers present (`pg_trigger`). Landlord paid on a pass-through plan without a settled collection. `landlord_payable` and `pass_through_cash` against collected, unpaid pass-through months. A second landlord payment for a month refused (from events)                                                                          |
+| Books                                      | Trial balance. Operating cash left after a full run. Each receivable account against unpaid principal on paid payouts (and pass-through rent returned after payout). Allowance and pool never negative. Jobs that failed or stopped. Append-only triggers present (`pg_trigger`). Landlord paid on a pass-through plan without a settled collection. `landlord_payable` and `pass_through_cash` against collected, unpaid pass-through months. A second landlord payout for a month refused (from events)                                                                           |
 | Data (alert categories FRAUD and PAYMENTS) | A bank or platform connection on a business with an active plan that needs reconnecting, fails, or has an expired token (warning, high for a bank; auto-resolves). History rewritten between pulls (high, critical when it flatters; once, closed by a person). A platform's payout destination changed after the plan started (warning; once). Settlement match fell 20 points from the decision to under 85% (warning, high under 50%; auto-resolves). Several businesses under different users on one platform account or payout account (warning, high at three; auto-resolves) |
 | Compliance                                 | Applications undecided at 20 and 30 days. Screening results older than the rescreen interval. An application deleted inside the 12 month retention period. Businesses with a plan that are not verified. Adverse action notice missing (high, critical past its deadline), or delivered late                                                                                                                                                                                                                                                                                        |
 
@@ -639,7 +752,24 @@ undone by the next run. Trip and reset are both audited.
 One thing monitoring cannot see is itself. If the scheduler stops, the `monitor` job stops
 with it and nothing alerts. A production deployment needs a heartbeat checked from outside.
 
-## Access control
+## Security and access control
+
+What protects what, in one place:
+
+| Concern                         | Control                                                                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Owner sign in                   | scrypt password hashes, 15 minute access tokens, rotating refresh tokens (see "Auth")                                                             |
+| Guessing passwords              | Per address rate limits and a per account lockout (below)                                                                                         |
+| Operator routes                 | Off unless `ENABLE_ADMIN=true`; two role tokens and a named actor on every request (below)                                                        |
+| Platform and aggregator tokens  | Sealed with AES-256-GCM under `CONNECTION_TOKEN_KEY` (`src/crypto/token-vault.ts`), never returned or logged                                      |
+| Redirected rent                 | Landlord changes wait out a 5 day cooling-off period with payouts held (see "Lease change control")                                               |
+| Paying a month twice            | One `SENT` landlord disbursement per lease and month, enforced by the database                                                                    |
+| Tampering with records          | Append only triggers on the ledger, audit, snapshot and notice tables                                                                             |
+| Real money                      | Every provider defaults to a sandbox; with `NODE_ENV=production` a live Stripe key or a production Plaid, Square or Clover environment is refused |
+| Dev tools                       | Off by default, refused in production, not registered when off, local callers only (see "Dev mode")                                               |
+| The operator token in a browser | Never reaches browser JavaScript (see "The operations console")                                                                                   |
+
+### Operator access
 
 The operator routes under `/v1/admin` exist only when `ENABLE_ADMIN=true`, and the API refuses
 to start in that mode without `ADMIN_API_TOKEN`. Every request needs:
@@ -730,9 +860,10 @@ without a password, moving the clock, wiping the database. They are kept apart a
   With it off `/v1/dev` is not registered, so it is a 404 like any unknown path. The dev
   routes also answer 404 to callers outside this machine and private networks.
 - **Personas** (`apps/api/src/dev/personas.ts`) are the demo accounts: one definition each,
-  with a builder. The seed builds them all. Three kinds: `fresh` (a login and preset
-  onboarding inputs), `instant` (a business and a real underwriting run), and `history` (a
-  plan opened months ago and replayed day by day with the whole book).
+  with a builder. The seed builds all 24. Three kinds: `fresh` (a login and preset
+  onboarding inputs, 7 of them), `instant` (a business and a real underwriting run, 10), and
+  `history` (a plan opened months ago and replayed day by day with the whole book, 7). The
+  list is in [`AGENTS.md`](AGENTS.md), "Personas".
 - **The simulated clock** has one source of truth, the latest `JobRun.asOf`, mirrored into
   `src/dates.ts` for the process. Advancing runs the full job sequence for every day
   crossed, so simulated time is made of the same job runs as real time. It is one clock for
@@ -741,8 +872,9 @@ without a password, moving the clock, wiping the database. They are kept apart a
   persona is rebuilt as a new account, and the old one is deleted only if it has no ledger
   footprint, otherwise archived and left in the book. Details in `apps/api/README.md`.
 - **The supervisor** (`scripts/dev`) is the `./dev` command: preflight, setup, one process
-  that owns the dev servers and their logs, and the dev home page on `127.0.0.1`. It uses
-  only Node built-ins so it runs before anything is installed.
+  that owns the dev servers and their logs, and the dev home page on `127.0.0.1` (port 4100 by
+  default, with the app in a phone frame and a persona picker at `/phone`). It uses only Node
+  built-ins so it runs before anything is installed.
 
 ## Testing
 

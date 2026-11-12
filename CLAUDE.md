@@ -58,7 +58,7 @@ Per package: `pnpm --filter @cashflow/api dev`, `pnpm --filter @cashflow/shared 
 
 `AGENTS.md` has the full run, verify, drive and teardown loop for an agent, the personas, and common failure signatures. This file stays the source for conventions.
 
-Docs to read before changing behavior: `ARCHITECTURE.md` (providers, ledger, payment lifecycle), `apps/api/UNDERWRITING.md` (the cash flow underwriting model and the veracity checks), and `apps/api/DATA_CONNECTIONS.md` (how data is obtained).
+Docs to read before changing behavior: `ARCHITECTURE.md` (providers, data model, ledger postings, payment lifecycle, jobs), `apps/api/CREDIT_POLICY.md` (the credit policy and its change control), `apps/api/UNDERWRITING.md` (the underwriting mechanics and the veracity checks), `apps/api/DATA_CONNECTIONS.md` (how data is obtained), `apps/api/evals/README.md` (the portfolio evaluation and its gates), and `COMPLIANCE.md` (what is and is not settled legally, and the questions for counsel).
 
 ## Conventions
 
@@ -74,16 +74,15 @@ Docs to read before changing behavior: `ARCHITECTURE.md` (providers, ledger, pay
 ## Money and provider rules
 
 - Every external dependency that touches money or risk is an interface in `apps/api/src/providers/<name>/` with `types.ts`, a mock or in-house implementation, and an `index.ts` factory that picks the implementation from an environment variable. The mock or in-house implementation is always the default.
-  - `UnderwritingProvider` (`UNDERWRITING_PROVIDER`, default `cashflow`: the in-house cash flow engine in `apps/api/src/underwriting/`, documented in `apps/api/UNDERWRITING.md`)
+  - `UnderwritingProvider` (`UNDERWRITING_PROVIDER`, default `cashflow`: the in-house cash flow engine in `apps/api/src/underwriting/`, documented in `apps/api/UNDERWRITING.md` and `apps/api/CREDIT_POLICY.md`)
   - `BankLinkProvider` (`BANK_LINK_PROVIDER`): an aggregator, never a credentialed bank login
   - `CommerceDataProvider` (`COMMERCE_PROVIDER`): read-only OAuth to Square, Shopify, Stripe, Clover
   - `DelegatedSeatProvider` (`DELEGATED_SEAT_PROVIDER`): CashFlow's own read-only seat on platforms without an API (Toast)
-  - `IdentityProvider` (`IDENTITY_PROVIDER`)
+  - `IdentityProvider` (`IDENTITY_PROVIDER`): business and owner verification, sanctions screening
   - `PaymentsProvider` (`PAYMENTS_PROVIDER`)
   - `CapitalProvider` (`CAPITAL_PROVIDER`)
 - Data for underwriting is pulled by CashFlow through a connection the owner authorized, stored as an append-only snapshot, and checked for veracity (`apps/api/src/veracity/`). No uploaded statements. Platform tokens are sealed by `src/crypto/token-vault.ts` and never returned, logged, or audited. See `apps/api/DATA_CONNECTIONS.md`.
-  - `CommerceDataProvider` (`COMMERCE_PROVIDER`)
-  - `IdentityProvider` (`IDENTITY_PROVIDER`)
+- A credit policy, pricing, PD table, or servicing change is a new policy version, and ships only when `pnpm --filter @cashflow/api eval:portfolio --strict` passes every gate, committed with the regenerated `evals/report.md` and `evals/baseline.json`. No gate threshold is loosened to make a change pass. See `apps/api/CREDIT_POLICY.md`, "Change control".
 - All money movements (landlord payouts, installment collections, fees, pool replenishment) post a `LedgerTransaction` with balanced `LedgerEntry` rows. The ledger service rejects unbalanced transactions. Balances are derived from entries, never stored.
 - Status changes and their ledger postings happen in the same database transaction.
 - Scheduled jobs are idempotent and record a `JobRun`.

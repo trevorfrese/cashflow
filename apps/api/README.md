@@ -1,10 +1,16 @@
 # @cashflow/api
 
 Fastify API for CashFlow. Postgres via Prisma, Zod validation on every route, OpenAPI docs at
-`/docs`, and ten scheduled jobs that screen parties, apply lease changes, pay landlords,
-collect installments, handle returned payments, age and write off receivables, book loss
-provisions, and monitor the result. Every provider that touches money or risk is a mock by
-default.
+`/docs`, the underwriting engine and its veracity checks, the double entry ledger, and thirteen
+scheduled jobs that screen parties, apply lease changes, refresh data, re-underwrite, pay
+landlords, collect installments, handle returned payments, age and charge off receivables, book
+loss provisions, send notices, and monitor the result. Every provider that touches money or
+risk is a sandbox by default.
+
+The other API documents: [`CREDIT_POLICY.md`](CREDIT_POLICY.md) (the policy),
+[`UNDERWRITING.md`](UNDERWRITING.md) (the mechanics), [`DATA_CONNECTIONS.md`](DATA_CONNECTIONS.md)
+(how data is obtained), [`evals/README.md`](evals/README.md) (the portfolio evaluation), and
+[`DEPLOY.md`](DEPLOY.md).
 
 ## Run it
 
@@ -17,9 +23,9 @@ From the repo root, with Docker running:
 Or by hand: `pnpm setup`, then `pnpm --filter @cashflow/api dev`. If port 5432 is taken,
 `./dev` picks the next free port and writes it to the root `.env`.
 
-Demo login after seeding: `demo@cashflow.local` / `demo-password-123`. Every seeded business
-is its own login with that password: the list is in the header of `prisma/seed.ts` and in
-`AGENTS.md`.
+Demo login after seeding: `demo@cashflow.local` / `demo-password-123`. Every seeded persona is
+its own login with that password: the 24 personas are defined in `src/dev/personas.ts` and
+listed in [`AGENTS.md`](../../AGENTS.md).
 
 `.env.example` has `ENABLE_ADMIN=true` with placeholder operator tokens so a local copy
 starts. See "Operator routes" below before the API is reachable by anyone else.
@@ -42,11 +48,28 @@ pnpm --filter @cashflow/api eval:portfolio # portfolio simulation and gates, see
 pnpm --filter @cashflow/api eval:calibrate # regenerate the PD table the pricing module reads
 ```
 
+## Environment
+
+`src/config.ts` parses and checks every variable; `.env.example` lists them with comments, and
+`./dev` writes a working `.env` with fresh secrets. The ones that change behavior:
+
+| Variable                                                      | Default         | Meaning                                                                                                   |
+| ------------------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`, `DATABASE_URL_TEST`                           | none            | Postgres. Integration tests use and wipe the second                                                       |
+| `JWT_SECRET`                                                  | none            | Signs access tokens. At least 16 characters                                                               |
+| `ACCESS_TOKEN_TTL_SECONDS`, `REFRESH_TOKEN_TTL_DAYS`          | 900, 30         | Session lifetimes                                                                                         |
+| `*_PROVIDER`                                                  | sandbox         | Which implementation of each provider. See "Provider seams" in [`ARCHITECTURE.md`](../../ARCHITECTURE.md) |
+| `CONNECTION_TOKEN_KEY`                                        | unset           | Seals platform and aggregator tokens. Required by every real adapter                                      |
+| `JOBS_ENABLED`, `JOBS_CRON`                                   | `false`, hourly | Run the job sequence inside the API process on a cron. Each run acts as of today and is idempotent        |
+| `ENABLE_ADMIN`, `ADMIN_API_TOKEN`, `REVIEWER_API_TOKEN`       | `false`         | Operator routes. See "Operator routes"                                                                    |
+| `ENABLE_DEV_TOOLS`                                            | `false`         | `/v1/dev`. Refused when `NODE_ENV=production`. See "Dev tools"                                            |
+| `RATE_LIMIT_*`, `LOGIN_MAX_FAILURES`, `LOGIN_LOCKOUT_MINUTES` | see below       | See "Rate limiting and lockout"                                                                           |
+
 ## Layout
 
 ```
 prisma/schema.prisma     data model and enums
-prisma/seed.ts           demo data: five months of jobs replayed day by day
+prisma/seed.ts           demo data: every persona, five months of jobs replayed day by day
 src/app.ts               Fastify factory: plugins, error handling, routes
 src/index.ts             server entry, starts the scheduler when JOBS_ENABLED=true
 src/config.ts            environment parsing and safety rails
@@ -57,14 +80,23 @@ src/routes/admin.ts      operator routes: the queues, the actions, the book
 src/routes/admin-console.ts  read routes for the operations console (apps/ops)
 src/services/operator.ts operator read models: businesses, applications, audit log, portfolio, policy, gates
 src/auth/lockout.ts      login lockout after repeated failures
-src/providers/           underwriting, bank-link, payments, capital, identity (mocks + skeletons)
-src/servicing/policy.ts  servicing rules as data and pure functions, shared with the evals
+src/providers/           underwriting, bank-link, commerce, delegated-seat, payments, capital,
+                         identity (sandboxes + skeletons)
+src/underwriting/        the engine: features, integrity checks, scorecard, pricing, exposure,
+                         payment history, pass-through eligibility, the policy versions
+src/veracity/            data veracity checks: ownership, settlement, completeness, consistency
+src/adverse-action/      notice deadlines, rendering, and the date driven schedule
+src/crypto/token-vault.ts  sealing platform and aggregator tokens at rest
+src/servicing/           servicing and pass-through rules as data and pure functions, shared with the evals
 src/controls/policy.ts   cooling-off, rescreen interval, retention, decision deadline
 src/monitoring/          rules (pure), data layer, engine, policy with every threshold
 src/services/            rent plans, payouts and holds, collections, returns, delinquency,
                          charge-off, provisioning, identity and screening, lease change
-                         control, the circuit breaker
-src/jobs/                the ten jobs below, cron, CLI
+                         control, connections and snapshots, reviews, pass-through,
+                         graduation, adverse action notices, the circuit breaker
+src/evals/               the portfolio simulation and its gates (see evals/README.md)
+src/dev/                 personas, builders, the simulated clock, the seed (dev tools only)
+src/jobs/                the thirteen jobs below, cron, CLI
 src/routes/              HTTP handlers grouped by resource
 src/serializers.ts       Prisma rows to API shapes from @cashflow/shared
 src/test/                integration test harness
@@ -124,13 +156,14 @@ contains `return_r03` has its landlord payout sent back. The mock remembers pend
 for the life of one process, so they show up when the jobs run inside the API server, the
 seed, or a test, and not across separate `job:run` invocations.
 
-The seed has one business in each state: Blue Door Bakery is current, Cedar Street Cycles is
-delinquent with a held payout, and Juniper Print Studio was charged off and has since paid
-one of its two written off installments. Alder & Ash Florist has
-a landlord payout change inside its cooling-off period with the payout held, Meridian Supply
-is in review on a possible screening match, and Tidewater Sign Works has been in review for
-34 days. The seed replays the `monitor` job with the others, so the open alerts (at least one
-of each severity) were raised by the rules, not inserted.
+The seed builds every persona, one business in each state (the list is in
+[`AGENTS.md`](../../AGENTS.md), "Personas"). For example: Blue Door Bakery is current, Cedar
+Street Cycles is delinquent with a held payout, Juniper Print Studio was charged off and has
+since paid one of its two charged off installments, Alder & Ash Florist has a landlord payout
+change inside its cooling-off period with the payout held, Meridian Supply is in review on a
+possible screening match, and Tidewater Sign Works has been in review for 34 days. The seed
+replays the `monitor` job with the others, so the open alerts (at least one of each severity)
+were raised by the rules, not inserted.
 
 ## Sandbox identity keywords
 
@@ -212,6 +245,24 @@ connected and continue from there.
 | `OAUTH_REDIRECT_URI`                                                                                                                                                             | app route | Where a platform sends the owner back                                                                           |
 | `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `STRIPE_CONNECT_CLIENT_ID`, `CLOVER_APP_ID`, `CLOVER_APP_SECRET`, `CLOVER_ENV`, `TOAST_SEAT_SERVICE_USER`, `TOAST_SEAT_CREDENTIALS_REF` | unset     | Credentials the skeletons check for. `TOAST_SEAT_CREDENTIALS_REF` is a secret store reference, never a password |
 
+## Owner routes
+
+Paths below are under `/v1` and need a bearer access token from `/v1/auth/login`, except
+register, login, refresh and `/health`. Every body and response is a Zod schema in `packages/shared`;
+the full contract is at `/docs`.
+
+| Area           | Routes                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auth           | `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /me`                                                                                                                                                                                                                                                                                                       |
+| Businesses     | `POST /businesses`, `GET /businesses`, `GET /businesses/:id`, `PATCH /businesses/:id`                                                                                                                                                                                                                                                                                                                 |
+| Bank           | `POST /bank-links/link-token`, `POST /bank-links`, `GET /businesses/:id/bank-links`                                                                                                                                                                                                                                                                                                                   |
+| Point of sale  | `POST /connections/oauth/start`, `POST /connections/oauth/mock-authorize` (sandbox), `POST /connections/oauth/callback`, `POST /connections/seats`, `POST /connections/:id/verify-seat`, `POST /connections/:id/disconnect`, `GET /connections/:id`, `GET /businesses/:id/connections`, and the older `POST /commerce-links/link-token`, `POST /commerce-links`, `GET /businesses/:id/commerce-links` |
+| Applications   | `POST /underwriting/applications`, `POST /underwriting/applications/:id/submit`, `GET /underwriting/applications/:id`, `GET /underwriting/applications/:id/explanation`, `GET /underwriting/applications/:id/notices`, `POST /underwriting/applications/:id/decline-offer`, `GET /businesses/:id/applications`                                                                                        |
+| Leases         | `POST /leases`, `GET /businesses/:id/leases`, `GET /leases/:id`, `PATCH /leases/:id`, `POST /leases/:id/pending-change/cancel`                                                                                                                                                                                                                                                                        |
+| Financed plans | `POST /rent-plans`, `GET /businesses/:id/rent-plans`, `GET /rent-plans/:id`, `PATCH /rent-plans/:id` (pause, resume, close, cadence), `GET /rent-plans/:id/installments`, `GET /rent-plans/:id/payouts`, `GET /rent-plans/:id/repayments`, `POST /repayments` (a manual payment)                                                                                                                      |
+| Pass-through   | `GET /underwriting/applications/:id/pass-through`, `POST /pass-through-plans`, `GET /businesses/:id/payment-history`, `POST /graduation-offers/:id/accept`                                                                                                                                                                                                                                            |
+| Health         | `GET /health`, at the root rather than under `/v1`, with no token                                                                                                                                                                                                                                                                                                                                     |
+
 ## Operator routes
 
 The routes under `/v1/admin` are mounted only with `ENABLE_ADMIN=true`, and the API refuses
@@ -263,16 +314,18 @@ The operations console (`apps/ops`) reads through these as well. They are all re
 terms on a referral, integrity flags, the fee build-up, screening detail, policy numbers), so
 no customer route uses them.
 
-| Route                                     | Role     | What it does                                                                                                                                                  |
-| ----------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /v1/admin/businesses`                | reviewer | Businesses by name. `?q=` matches legal name, trading name, owner email, or an id. `status`, `verification`, `limit`, `cursor`                                |
-| `GET /v1/admin/businesses/:id`            | reviewer | One business: verification, owners, bank links, leases (never the payout token), applications, pending lease changes, hits, alerts                            |
-| `GET /v1/admin/businesses/:id/rent-plans` | reviewer | Its plans with standing and freeze, every payout (with hold reason) and every installment with its debits and return codes                                    |
-| `GET /v1/admin/applications/:id`          | reviewer | One application for review: recommendation, score factors, flags, triggers, fee build-up, cash flow, history, reviews, audit trail                            |
-| `GET /v1/admin/audit-log`                 | reviewer | Audit events across every subject, newest first. `subjectType`, `subjectId`, `eventType`, `actorType`, `actor`, `businessId`, `from`, `to`, `limit`, `cursor` |
-| `GET /v1/admin/portfolio`                 | reviewer | The live book: delinquency, pool and utilization, concentration against the caps, first payment default by origination month                                  |
-| `GET /v1/admin/policy`                    | reviewer | The credit, servicing, controls, and monitoring numbers in force                                                                                              |
-| `GET /v1/admin/policy/evaluation`         | reviewer | Gate results of the last default evaluation run, read from `evals/baseline.json`. Simulation, not the live book                                               |
+| Route                                        | Role     | What it does                                                                                                                                                   |
+| -------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/admin/businesses`                   | reviewer | Businesses by name. `?q=` matches legal name, trading name, owner email, or an id. `status`, `verification`, `limit`, `cursor`                                 |
+| `GET /v1/admin/businesses/:id`               | reviewer | One business: verification, owners, bank links, leases (never the payout token), applications, pending lease changes, hits, alerts                             |
+| `GET /v1/admin/businesses/:id/connections`   | reviewer | A business's connections: method, trust tier, health, what the platform or bank reported, snapshots, the latest veracity findings with evidence. Never a token |
+| `GET /v1/admin/applications/:id/connections` | reviewer | The same, with the veracity assessment of that application's current decision                                                                                  |
+| `GET /v1/admin/businesses/:id/rent-plans`    | reviewer | Its plans with standing and freeze, every payout (with hold reason) and every installment with its debits and return codes                                     |
+| `GET /v1/admin/applications/:id`             | reviewer | One application for review: recommendation, score factors, flags, triggers, fee build-up, cash flow, history, reviews, audit trail                             |
+| `GET /v1/admin/audit-log`                    | reviewer | Audit events across every subject, newest first. `subjectType`, `subjectId`, `eventType`, `actorType`, `actor`, `businessId`, `from`, `to`, `limit`, `cursor`  |
+| `GET /v1/admin/portfolio`                    | reviewer | The live book: delinquency, pool and utilization, concentration against the caps, first payment default by origination month                                   |
+| `GET /v1/admin/policy`                       | reviewer | The credit, servicing, controls, and monitoring numbers in force                                                                                               |
+| `GET /v1/admin/policy/evaluation`            | reviewer | Gate results of the last default evaluation run, read from `evals/baseline.json`. Simulation, not the live book                                                |
 
 `GET /v1/admin/reviews` also returns `ageDays` and `decisionDueOn` on each item.
 

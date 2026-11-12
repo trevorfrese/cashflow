@@ -9,7 +9,7 @@ How a coding agent runs, verifies, drives and tears down this project without a 
 - No em dashes anywhere. `pnpm check:copy` enforces it.
 - Shared schemas first: an API input or output is a Zod schema in `packages/shared` before it is used on either side.
 - Money is integer cents, rates are basis points, calendar dates are `YYYY-MM-DD`.
-- Do not change underwriting policy, eval gates, servicing rules or monitoring thresholds unless that is the task.
+- Do not change underwriting policy, eval gates, servicing rules or monitoring thresholds unless that is the task. When it is, follow "Change control" in [`apps/api/CREDIT_POLICY.md`](apps/api/CREDIT_POLICY.md): a new policy version, and every gate passing in strict mode.
 - Ask the owner before adding a paid service or doing something hard to reverse.
 
 ## The loop
@@ -54,6 +54,12 @@ Operator routes need `ADMIN_API_TOKEN` from `apps/api/.env` and an `X-Admin-Acto
 pnpm lint && pnpm typecheck && pnpm test && pnpm build && npx prettier --check .
 ```
 
+After a change to credit policy, pricing, the PD table or servicing rules (a few minutes; rewrites `apps/api/evals/report.md` and `baseline.json`, which are committed with the change):
+
+```sh
+pnpm --filter @cashflow/api eval:portfolio --strict
+```
+
 One test file:
 
 ```sh
@@ -84,7 +90,7 @@ Defined in `apps/api/src/dev/personas.ts`. Each is its own login (password `demo
 | ------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------- |
 | `active-plan`            | Blue Door Bakery     | Approved, a $10,000 plan, three months paid on time. Login `demo@cashflow.local`                         |
 | `delinquent`             | Cedar Street Cycles  | Debits failing for a month, plan delinquent, latest landlord payout held                                 |
-| `charged-off`            | Juniper Print Studio | Written off at 90 days past due, plan closed, one payment recovered                                      |
+| `charged-off`            | Juniper Print Studio | Charged off at 90 days past due, plan closed, one payment recovered                                      |
 | `landlord-change`        | Alder & Ash Florist  | Landlord payout change in its cooling-off period, payout held                                            |
 | `pass-through`           | Ridgeline Coffee     | Declined (too new), on the free pass-through plan, two months collected early and paid on time           |
 | `pass-through-missed`    | Foundry Bike Works   | Pass-through: one month paid, the next not collected, so the landlord was not paid and the owner told    |
@@ -101,7 +107,7 @@ Defined in `apps/api/src/dev/personas.ts`. Each is its own login (password `demo
 | `toast-seat`             | Saltwater Taqueria   | Toast read-only seat invited and waiting: the steps, then Check connection                               |
 | `fresh-approved`         | none yet             | Onboarding preset to end in an approval                                                                  |
 | `fresh-declined`         | none yet             | Onboarding preset to end in a decline for overdrafts                                                     |
-| `fresh-referred`         | none yet             | Onboarding preset to end in manual review (tax id ending 0000)                                           |
+| `fresh-referred`         | none yet             | Onboarding preset to end in a referral (tax id ending 0000)                                              |
 | `fresh-counter-offer`    | none yet             | Onboarding preset to end in an approval below the requested rent                                         |
 | `fresh-payout-elsewhere` | none yet             | Preset: Square through the sandbox consent page, paying out elsewhere: needs info                        |
 | `fresh-ownership`        | none yet             | Preset: a bank account held by another business: referred                                                |

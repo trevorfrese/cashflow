@@ -138,7 +138,7 @@ The design a real puller must follow:
   counts and the failure reason), and the snapshot is kept.
 - **Terms.** Automated access through a seat must be permitted by the platform's terms of
   service and any partner agreement. That is a question for counsel before a single real pull
-  (see below). A platform partnership with API access replaces the seat as soon as one exists.
+  (see below, and question 22 in [`COMPLIANCE.md`](../../COMPLIANCE.md)). A platform partnership with API access replaces the seat as soon as one exists.
 
 ## Banks
 
@@ -190,7 +190,10 @@ settlement match, snapshot ids and hashes. Never a payload, never a token.
 
 ## For counsel and platform partnership review
 
-These are open questions and working assumptions, not conclusions.
+These are open questions and working assumptions, not conclusions. They are kept here in
+context and collected with the rest of the repository's questions in
+[`COMPLIANCE.md`](../../COMPLIANCE.md), section 14: items 1 to 5 below are its questions 22 to
+26, item 6 is part of 12, 7 is part of 8, 8 is 20, and 9 is 27.
 
 1. **Automated access through a delegated seat.** Whether each platform's terms of service
    permit a third party's user, invited by the merchant, to sign in programmatically and

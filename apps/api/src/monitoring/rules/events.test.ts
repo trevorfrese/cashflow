@@ -33,6 +33,8 @@ describe('alerts from audit events', () => {
       ['BANK_LINK_DISABLED', 'payments.bank_link_disabled', 'WARNING'],
       ['PAYOUT_CANCELLED', 'payments.payout_cancelled', 'WARNING'],
       ['LOGIN_LOCKED', 'fraud.login_lockout', 'INFO'],
+      ['PASS_THROUGH_RETURNED_AFTER_PAYOUT', 'payments.pass_through_returned_after_payout', 'HIGH'],
+      ['DUPLICATE_PAYOUT_PREVENTED', 'payments.duplicate_payout_prevented', 'HIGH'],
     ];
     expect(ALERTED_EVENT_TYPES.sort()).toEqual(expected.map((e) => e[0]).sort());
     for (const [eventType, type, severity] of expected) {

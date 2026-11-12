@@ -1,7 +1,10 @@
 import type { CreditGrade } from '@cashflow/shared';
 
 import type { VeracityPolicy } from '../veracity/types.ts';
+import type { PaymentHistoryPolicy } from './payment-history.ts';
 import { PD_TABLE_V2, type PdTable } from './pd-table.ts';
+
+export type { PaymentHistoryPolicy } from './payment-history.ts';
 
 /**
  * The credit policy as data.
@@ -154,6 +157,20 @@ export interface ReunderwritingPolicy {
   watchScore: number;
 }
 
+/**
+ * Moving a pass-through customer onto a financed plan (policy version 4). The
+ * refresh-eligibility job re-underwrites a pass-through customer on freshly pulled data and
+ * its payment history once it has this many on time months in a row, at most once a calendar
+ * month, and offers a financed plan when the result is an approval for at least the lease
+ * rent. The owner has to accept, and the financed plan starts from the next period.
+ */
+export interface GraduationPolicy {
+  /** On time pass-through months in a row before the business is re-underwritten. */
+  minOnTimeMonths: number;
+  /** Days an offer stays open. */
+  offerValidDays: number;
+}
+
 export interface CreditPolicy {
   version: string;
   /** Full months of bank history before we can score at all. */
@@ -211,6 +228,14 @@ export interface CreditPolicy {
   reunderwriting: ReunderwritingPolicy;
   /** Data veracity checks (`src/veracity/`). Null turns them off, as in versions 1 and 2. */
   veracity: VeracityPolicy | null;
+  /**
+   * The payment history factor (version 4): on time months through CashFlow add points, late
+   * and missed months take them away. Neutral without history. Null turns it off, as in
+   * versions 1 to 3.
+   */
+  paymentHistory: PaymentHistoryPolicy | null;
+  /** Graduation from a pass-through plan. Null: no refresh-eligibility reviews. */
+  graduation: GraduationPolicy | null;
 }
 
 const GRADE_FLOORS: CreditPolicy['gradeFloors'] = [
@@ -267,6 +292,8 @@ export const POLICY_V1: CreditPolicy = {
   escalation: null,
   reunderwriting: { watchScore: 45 },
   veracity: null,
+  paymentHistory: null,
+  graduation: null,
 };
 
 /**
@@ -406,7 +433,33 @@ export const POLICY_V3: CreditPolicy = {
   veracity: VERACITY_POLICY_V3,
 };
 
-export const CURRENT_POLICY: CreditPolicy = POLICY_V3;
+/**
+ * The payment history factor of version 4. The reasoning for each number is in
+ * `apps/api/UNDERWRITING.md`, "Payment history".
+ */
+export const PAYMENT_HISTORY_POLICY_V4: PaymentHistoryPolicy = {
+  lookbackMonths: 12,
+  pointsPerOnTimeMonth: 2,
+  maxBonusPoints: 8,
+  latePenaltyPoints: 4,
+  missPenaltyPoints: 10,
+  maxPenaltyPoints: 20,
+};
+
+/**
+ * Version 4: version 3 plus the payment history factor and graduation from a pass-through
+ * plan. Every other number is version 3's. The factor is neutral without history, so a first
+ * time applicant gets exactly the version 3 decision; the PD table is not regenerated (see
+ * UNDERWRITING.md for why).
+ */
+export const POLICY_V4: CreditPolicy = {
+  ...POLICY_V3,
+  version: 'cashflow-v4',
+  paymentHistory: PAYMENT_HISTORY_POLICY_V4,
+  graduation: { minOnTimeMonths: 3, offerValidDays: 30 },
+};
+
+export const CURRENT_POLICY: CreditPolicy = POLICY_V4;
 export const POLICY_VERSION: string = CURRENT_POLICY.version;
 
 /** Policies by version, for reading a stored decision back against the rules that made it. */
@@ -414,6 +467,7 @@ export const POLICIES: Readonly<Record<string, CreditPolicy>> = {
   [POLICY_V1.version]: POLICY_V1,
   [POLICY_V2.version]: POLICY_V2,
   [POLICY_V3.version]: POLICY_V3,
+  [POLICY_V4.version]: POLICY_V4,
 };
 
 /** The cutoffs in force, for the decision snapshot. Internal: never sent to applicants. */
@@ -438,6 +492,8 @@ export function thresholdsInForce(policy: CreditPolicy) {
     maxFeeBps: policy.expectedLossPricing?.maxFeeBps ?? null,
     minFeeCents: policy.expectedLossPricing?.minFeeCents ?? null,
     veracity: policy.veracity,
+    paymentHistory: policy.paymentHistory,
+    graduation: policy.graduation,
   };
 }
 export type PolicyThresholds = ReturnType<typeof thresholdsInForce>;

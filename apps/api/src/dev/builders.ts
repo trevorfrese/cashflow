@@ -28,6 +28,7 @@ import {
   verifySeat,
 } from '../services/connections.ts';
 import { currentDecision } from '../services/decisions.ts';
+import { startPassThroughPlan } from '../services/pass-through.ts';
 import { createRentPlan } from '../services/rent-plan.ts';
 import { underwriteApplication } from '../services/underwriting.ts';
 
@@ -303,4 +304,58 @@ export async function approvedLimitCents(
 ): Promise<number | null> {
   const decision = await currentDecision(ctx.db, applicationId);
   return decision?.outcome === 'APPROVED' ? decision.approvedMonthlyLimitCents : null;
+}
+
+export interface PassThroughSeed extends BusinessSeed {
+  /** Months in business stated on the application: under six, so it is declined. */
+  timeInBusinessMonths: number;
+  rentCents: number;
+  dueDayOfMonth: number;
+  /** The day the business applies, is declined, and starts the pass-through plan. */
+  start: IsoDate;
+  bankToken: string;
+  landlordName: string;
+  landlordPayoutToken: string;
+}
+
+/**
+ * A business declined for credit capacity (too new, on healthy cash flow) that links its
+ * lease and starts a free pass-through plan as of `start`. Fails if the engine did not
+ * decline it, or if the decline does not offer a pass-through plan.
+ */
+export async function seedPassThrough(ctx: AppContext, userId: string, seed: PassThroughSeed) {
+  const at = effectiveAt(seed.start);
+  const business = await createBusiness(ctx, userId, seed, {
+    createdAt: effectiveAt(addDays(seed.start, -2)),
+  });
+  const { bankLink, accountToken } = await linkBank(ctx, business.id, seed.bankToken, at);
+  const application = await apply(ctx, {
+    businessId: business.id,
+    bankLink,
+    monthlyRevenueCents: seed.monthlyRevenueCents,
+    timeInBusinessMonths: seed.timeInBusinessMonths,
+    rentCents: seed.rentCents,
+    asOf: seed.start,
+    createdAt: at,
+  });
+  if (application.status !== 'DECLINED') {
+    throw new Error(`Expected ${seed.legalName} to be declined, got ${application.status}`);
+  }
+  const lease = await createLease(ctx, {
+    businessId: business.id,
+    landlordName: seed.landlordName,
+    landlordPayoutToken: seed.landlordPayoutToken,
+    addressLine1: seed.addressLine1,
+    postalCode: seed.postalCode,
+    rentCents: seed.rentCents,
+    dueDayOfMonth: seed.dueDayOfMonth,
+    startsOn: seed.start,
+  });
+  const plan = await startPassThroughPlan(ctx, {
+    userId,
+    applicationId: application.id,
+    leaseId: lease.id,
+    asOf: seed.start,
+  });
+  return { business, bankLink, application, lease, plan, goodToken: accountToken };
 }

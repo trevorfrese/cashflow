@@ -4,12 +4,20 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { Button, Card, Notice, Screen, ScoreGauge, Text } from '@/components';
+import { Button, Card, Notice, Pill, Screen, ScoreGauge, Text } from '@/components';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { formatPeriod } from '@/lib/forms';
 import { IN_REVIEW_COPY } from '@/lib/plan-notices';
-import { useApplication, useBankLinks, useResubmitApplication } from '@/lib/queries';
+import { leaseForPassThrough } from '@/lib/pass-through';
+import {
+  useApplication,
+  useBankLinks,
+  useLeases,
+  usePassThroughOffer,
+  useResubmitApplication,
+  useStartPassThroughPlan,
+} from '@/lib/queries';
 import { border, colors, radii, spacing } from '@/theme';
 
 export default function Decision() {
@@ -87,7 +95,7 @@ export default function Decision() {
             <Card>
               <View style={styles.gaugeRow}>
                 <ScoreGauge score={d.score} grade={d.grade} />
-                <View style={{ flex: 1, gap: spacing.sm }}>
+                <View style={styles.gaugeDetail}>
                   {app.status === 'APPROVED' ? (
                     <>
                       <Stat
@@ -116,6 +124,10 @@ export default function Decision() {
             />
           )}
 
+          {app.status === 'DECLINED' && business ? (
+            <PassThroughCard applicationId={app.id} businessId={business.id} />
+          ) : null}
+
           <Section
             title={
               app.status === 'DECLINED'
@@ -137,6 +149,83 @@ export default function Decision() {
         </>
       )}
     </Screen>
+  );
+}
+
+/**
+ * The free pass-through plan, offered on a declined application: CashFlow collects the rent
+ * a few days early and pays the landlord on the due date. Starting it needs a linked lease.
+ */
+function PassThroughCard({
+  applicationId,
+  businessId,
+}: {
+  applicationId: string;
+  businessId: string;
+}) {
+  const offer = usePassThroughOffer(applicationId);
+  const leases = useLeases(businessId);
+  const start = useStartPassThroughPlan();
+  const [error, setError] = useState<string | null>(null);
+  const o = offer.data;
+  if (!o || !o.eligible) return null;
+  const lease = leaseForPassThrough(leases.data);
+
+  const onStart = async () => {
+    setError(null);
+    if (!lease) {
+      router.push({ pathname: '/lease/new', params: { passThroughFor: applicationId } });
+      return;
+    }
+    try {
+      await start.mutateAsync({ applicationId, leaseId: lease.id });
+      router.replace('/(tabs)');
+    } catch (e) {
+      setError(describeError(e));
+    }
+  };
+
+  return (
+    <Card shadowColor={colors.azure}>
+      <Pill label="Free plan" tone="info" />
+      <Text variant="heading">{o.headline}</Text>
+      <Text variant="body">{o.explanation}</Text>
+      <View style={{ gap: spacing.xs }}>
+        <Text variant="body" tone="muted">
+          {`Rent: ${formatCents(o.monthlyRentCents)} a month, collected from your bank ${o.collectionLeadBusinessDays} business days before it is due.`}
+        </Text>
+        <Text variant="body" tone="muted">
+          {`Fee: ${formatCents(o.feeCents)}. No late fees.`}
+        </Text>
+      </View>
+      {error ? <Notice tone="danger" message={error} /> : null}
+      {o.existingPlanId ? (
+        <>
+          <Notice tone="success" message="Your free pass-through plan is running." />
+          <Button
+            title="See it on home"
+            variant="secondary"
+            onPress={() => router.replace('/(tabs)')}
+          />
+        </>
+      ) : (
+        <>
+          {lease ? (
+            <Text variant="caption" tone="muted">
+              {`For your lease with ${lease.landlordName}.`}
+            </Text>
+          ) : null}
+          <Button
+            title={lease ? 'Start the free plan' : 'Link your lease to start'}
+            variant="azure"
+            icon="arrow-right"
+            onPress={() => void onStart()}
+            loading={start.isPending}
+            disabled={leases.isLoading}
+          />
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -302,7 +391,9 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
-  gaugeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
+  // Side by side when there is room, stacked on a phone so the text keeps its full width.
+  gaugeRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.lg },
+  gaugeDetail: { flexGrow: 1, flexBasis: 220, minWidth: 220, gap: spacing.sm },
   reason: { flexDirection: 'row', gap: spacing.smd, alignItems: 'flex-start' },
   marker: {
     width: 14,

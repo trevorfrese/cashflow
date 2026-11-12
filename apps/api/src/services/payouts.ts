@@ -11,6 +11,12 @@ import { InsufficientCapitalError } from '../providers/capital/index.ts';
 import { ACTIVE_SERVICING_POLICY, payoutAction, shouldHoldPayout } from '../servicing/policy.ts';
 import { recordAudit, type AuditActor } from './audit.ts';
 import { oldestUnpaidDueDate } from './delinquency.ts';
+import {
+  claimDisbursement,
+  confirmDisbursement,
+  isUniqueViolation,
+  releaseDisbursement,
+} from './disbursements.ts';
 import { openHitsForPlan } from './identity.ts';
 
 export type PayoutOutcome = 'paid' | 'failed' | 'held' | 'cancelled' | 'skipped';
@@ -45,7 +51,18 @@ export const HOLD_MESSAGES: Record<PayoutHoldReason, string> = {
     "Your landlord's details were changed recently. For your security, rent payments wait until the change takes effect.",
   RENT_INCREASE_PENDING:
     'Your rent went up past the amount you are approved for. Apply for the new amount to resume rent payments.',
+  PERIOD_ALREADY_PAID:
+    'Your landlord was already paid for this month, so this payment was not sent again.',
 };
+
+/**
+ * Lock a payout row for the rest of the transaction. Two runs of the payout job, or a
+ * release and a run, that reach the same payout at once are serialized here: the second
+ * reads the payout as the first left it.
+ */
+export async function lockPayout(tx: Tx, payoutId: string): Promise<void> {
+  await tx.$queryRaw`SELECT "id" FROM "LandlordPayout" WHERE "id" = ${payoutId} FOR UPDATE`;
+}
 
 /** Last date on which a payout scheduled for `scheduledFor` can still be paid, if there is one. */
 export function releaseBy(scheduledFor: IsoDate): IsoDate | null {
@@ -142,10 +159,31 @@ export async function processPayout(
   payoutId: string,
   asOf: IsoDate,
 ): Promise<PayoutOutcome> {
-  const { db, providers } = ctx;
   const policy = ACTIVE_SERVICING_POLICY;
   const at = effectiveAt(asOf);
+  try {
+    return await processPayoutTx(ctx, payoutId, asOf, policy, at);
+  } catch (err) {
+    // Another transaction claimed this lease and month first (see `disbursements.ts`).
+    // Nothing was sent by this one: its transaction rolled back before the provider call.
+    if (isUniqueViolation(err)) {
+      ctx.log.warn({ payoutId }, 'landlord payout skipped: the month was claimed concurrently');
+      return 'skipped';
+    }
+    throw err;
+  }
+}
+
+async function processPayoutTx(
+  ctx: AppContext,
+  payoutId: string,
+  asOf: IsoDate,
+  policy: typeof ACTIVE_SERVICING_POLICY,
+  at: Date,
+): Promise<PayoutOutcome> {
+  const { db, providers } = ctx;
   return db.$transaction(async (tx) => {
+    await lockPayout(tx, payoutId);
     const payout = await tx.landlordPayout.findUnique({
       where: { id: payoutId },
       include: { rentPlan: { include: { lease: true, business: true } }, installments: true },
@@ -224,6 +262,43 @@ export async function processPayout(
       throw err;
     }
 
+    // One landlord payment per lease and month, whichever plan makes it. Claimed before the
+    // provider is called, so a month already paid is never sent again.
+    const claim = await claimDisbursement(tx, {
+      leaseId: plan.leaseId,
+      periodMonth: payout.periodMonth,
+      rentPlanId: plan.id,
+      kind: 'FINANCED',
+      sourceId: payout.id,
+      idempotencyKey: payoutKey(payout),
+      amountCents: payout.amountCents,
+      effectiveDate: asOf,
+    });
+    if (!claim.ok) {
+      await cancelPayout(tx, payout, 'PERIOD_ALREADY_PAID', asOf, ACTOR);
+      await recordAudit(tx, {
+        actor: ACTOR,
+        eventType: 'DUPLICATE_PAYOUT_PREVENTED',
+        subjectType: 'rent_plan',
+        subjectId: plan.id,
+        payload: {
+          payoutId: payout.id,
+          leaseId: plan.leaseId,
+          periodMonth: payout.periodMonth,
+          amountCents: payout.amountCents,
+          alreadyPaidBy: claim.existing,
+          asOf,
+        },
+        severity: 'high',
+        at,
+      });
+      ctx.log.error(
+        { payoutId: payout.id, existing: claim.existing },
+        'landlord payout refused: this month was already paid',
+      );
+      return 'cancelled';
+    }
+
     const result = await providers.payments.payout({
       amountCents: payout.amountCents,
       destinationToken: plan.lease.landlordPayoutToken,
@@ -231,7 +306,11 @@ export async function processPayout(
       description: `Rent ${payout.periodMonth} for ${plan.business.legalName} to ${plan.lease.landlordName}`,
       effectiveDate: asOf,
     });
-    if (!result.ok) return fail(result.failureReason, result.returnCode);
+    if (!result.ok) {
+      await releaseDisbursement(tx, claim.id);
+      return fail(result.failureReason, result.returnCode);
+    }
+    await confirmDisbursement(tx, claim.id, result.providerRef);
 
     await postTransaction(tx, {
       description: `Landlord payout ${payout.periodMonth}: ${plan.business.legalName}`,
@@ -393,6 +472,23 @@ export async function resendReturnedPayout(
       }
       throw err;
     }
+    const claim = await claimDisbursement(tx, {
+      leaseId: plan.leaseId,
+      periodMonth: payout.periodMonth,
+      rentPlanId: plan.id,
+      kind: 'FINANCED',
+      sourceId: payout.id,
+      idempotencyKey: key,
+      amountCents: payout.amountCents,
+      effectiveDate: args.asOf,
+    });
+    if (!claim.ok) {
+      throw unprocessable(
+        'PERIOD_ALREADY_PAID',
+        'The landlord has already been paid for this month',
+        { existing: claim.existing },
+      );
+    }
     const result = await providers.payments.payout({
       amountCents: payout.amountCents,
       destinationToken: plan.lease.landlordPayoutToken,
@@ -405,6 +501,7 @@ export async function resendReturnedPayout(
         returnCode: result.returnCode ?? null,
       });
     }
+    await confirmDisbursement(tx, claim.id, result.providerRef);
     await postTransaction(tx, {
       description: `Landlord payout ${payout.periodMonth} sent again: ${plan.business.legalName}`,
       effectiveDate: args.asOf,

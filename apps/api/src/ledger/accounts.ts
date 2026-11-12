@@ -22,6 +22,17 @@ export const ACCOUNTS = {
   PROVISION_EXPENSE: 'provision_expense',
   /** Payments received on balances already written off. Revenue. */
   RECOVERY_INCOME: 'recovery_income',
+  /**
+   * Rent a business has paid CashFlow on a pass-through plan and CashFlow has not yet paid
+   * on to the landlord. Liability: money held for someone else, never CashFlow's own.
+   */
+  LANDLORD_PAYABLE: 'landlord_payable',
+  /**
+   * The cash behind `landlord_payable`: pass-through collections held until the landlord is
+   * paid. Asset. Kept apart from operating `cash` so the daily sweep never moves a
+   * business's rent into the capital pool.
+   */
+  PASS_THROUGH_CASH: 'pass_through_cash',
 } as const;
 
 export const SYSTEM_ACCOUNTS: ReadonlyArray<{
@@ -36,6 +47,12 @@ export const SYSTEM_ACCOUNTS: ReadonlyArray<{
   { code: ACCOUNTS.ALLOWANCE, name: 'Allowance for credit losses', type: 'ASSET' },
   { code: ACCOUNTS.PROVISION_EXPENSE, name: 'Provision for credit losses', type: 'EXPENSE' },
   { code: ACCOUNTS.RECOVERY_INCOME, name: 'Recoveries on charged off balances', type: 'REVENUE' },
+  { code: ACCOUNTS.LANDLORD_PAYABLE, name: 'Rent payable to landlords', type: 'LIABILITY' },
+  {
+    code: ACCOUNTS.PASS_THROUGH_CASH,
+    name: 'Pass-through rent held for landlords',
+    type: 'ASSET',
+  },
 ];
 
 /** Prefix shared by every per business receivable account. */

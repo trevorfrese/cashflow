@@ -13,12 +13,14 @@ import type {
  * on the one before it.
  *
  * "The decision" an applicant sees, a plan is priced from, and a limit is read from is
- * always the current origination decision: not superseded, and not a periodic review.
+ * always the current origination decision: not superseded, and not a periodic review or a
+ * pass-through eligibility review. A GRADUATION decision, written when the owner accepts a
+ * graduation offer, is an origination decision: it becomes current.
  * Everything that reads a decision goes through this module so that rule lives in one place.
  */
 export const CURRENT_DECISION = {
   supersededAt: null,
-  kind: { not: 'PERIODIC_REVIEW' },
+  kind: { notIn: ['PERIODIC_REVIEW', 'ELIGIBILITY_REVIEW'] },
 } as const satisfies Prisma.UnderwritingDecisionWhereInput;
 
 /** `include` fragment that loads only the current decision, as a zero or one element list. */

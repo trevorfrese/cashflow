@@ -139,6 +139,10 @@ describe('dev tools on', () => {
       delinquent: 'Delinquent, payout held',
       'charged-off': 'Written off, plan closed',
       'landlord-change': 'Active plan, payout held',
+      'pass-through': 'Pass-through plan, current',
+      'pass-through-missed': 'Pass-through, last month missed',
+      'graduation-offer': 'Pass-through, graduation offered',
+      'pass-through-offer': 'Declined, free plan available',
       declined: 'Declined',
       'needs-info': 'Needs info',
       'manual-review': 'In review',
@@ -157,8 +161,12 @@ describe('dev tools on', () => {
     });
     for (const p of seeded.personas) {
       expect(p.state.exists).toBe(true);
-      expect(p.resettable).toBe(
-        p.group === 'FRESH' || p.section === 'Decisions' || p.section === 'Data connections',
+      // Everything but replayed history can be rebuilt on its own.
+      expect(p.resettable, p.key).toBe(
+        p.group === 'FRESH' ||
+          p.section === 'Decisions' ||
+          p.section === 'Data connections' ||
+          p.key === 'pass-through-offer',
       );
       expect(p.walkthrough === null).toBe(p.group !== 'FRESH');
     }
@@ -523,7 +531,15 @@ describe('dev tools on', () => {
     });
 
     it('refuses a persona whose state is replayed ledger history, and says what to do', async () => {
-      for (const key of ['active-plan', 'delinquent', 'charged-off', 'landlord-change']) {
+      for (const key of [
+        'active-plan',
+        'delinquent',
+        'charged-off',
+        'landlord-change',
+        'pass-through',
+        'pass-through-missed',
+        'graduation-offer',
+      ]) {
         const res = await dev.post<{ error: { code: string; message: string } }>(
           `/v1/dev/personas/${key}/reset`,
         );
@@ -586,7 +602,7 @@ describe('dev tools on', () => {
       // Every job ran once for each day crossed.
       for (const day of [addDays(wall(), 1), addDays(wall(), 2)]) {
         const runs = await h.db.jobRun.findMany({ where: { asOf: day } });
-        expect(runs.length, day).toBe(11);
+        expect(runs.length, day).toBe(12);
         expect(runs.every((r) => r.ok)).toBe(true);
       }
 

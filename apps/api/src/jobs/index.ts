@@ -11,6 +11,7 @@ import { monitorJob } from './monitor.ts';
 import { processPayoutsJob } from './process-payouts.ts';
 import { provisionJob } from './provision.ts';
 import { reconcilePaymentsJob } from './reconcile-payments.ts';
+import { refreshEligibilityJob } from './refresh-eligibility.ts';
 import { refreshConnectionsJob } from './refresh-connections.ts';
 import { rescreenJob } from './rescreen.ts';
 import { reunderwriteJob } from './reunderwrite.ts';
@@ -21,6 +22,7 @@ export const JOBS = {
   'lease-changes': leaseChangesJob,
   'refresh-connections': refreshConnectionsJob,
   reunderwrite: reunderwriteJob,
+  'refresh-eligibility': refreshEligibilityJob,
   'reconcile-payments': reconcilePaymentsJob,
   'age-receivables': ageReceivablesJob,
   'generate-periods': generatePeriodsJob,
@@ -36,6 +38,7 @@ export const JOB_NAMES = [
   'lease-changes',
   'refresh-connections',
   'reunderwrite',
+  'refresh-eligibility',
   'reconcile-payments',
   'age-receivables',
   'generate-periods',
@@ -58,23 +61,32 @@ export const JOB_NAMES = [
  *                            plan are pulled again on the cadence and their veracity checked.
  *                            Before re-underwriting, which then reads the fresh pull.
  *   4. reunderwrite          A plan it freezes must get no new period and no payout today.
- *   5. reconcile-payments    Payments that came back are undone before anything reads who
+ *   5. refresh-eligibility   Graduation offers expire, accepted ones become financed plans
+ *                            (before periods are generated, so the first financed period
+ *                            exists today), and pass-through customers with enough on time
+ *                            months are re-underwritten with their payment history.
+ *   6. reconcile-payments    Payments that came back are undone before anything reads who
  *                            is paid up: a return can make a plan past due, or freeze it.
- *   6. age-receivables       Buckets and LATE marks are brought up to today, and plans at
+ *                            A pass-through collection that comes back before its landlord
+ *                            payout makes that month missed, so it is never paid.
+ *   7. age-receivables       Buckets and LATE marks are brought up to today, and plans at
  *                            the charge-off age are written off and closed, before periods
  *                            are generated or payouts decided for them.
- *   7. generate-periods      Next month's payout and installments exist, 30 days ahead, for
- *                            plans that are active and not frozen.
- *   8. process-payouts       Each due payout is paid, held, or cancelled, on the state the
+ *   8. generate-periods      Next month's payout and installments exist, 30 days ahead, for
+ *                            plans that are active and not frozen. Pass-through months too.
+ *   9. process-payouts       Each due payout is paid, held, or cancelled, on the state the
  *                            three jobs above left. It runs before collections, so a
  *                            business has to be current at the start of the day for its
  *                            landlord to be paid, and so the first installment of a period
- *                            is collected on the day its payout goes out.
- *   9. collect-installments  Scheduled debits, a payment's effect on the bucket, and then
- *                            the cash sweep: operating cash is settled with the pool.
- *  10. provision             So the allowance is set on the day's closing balances. Posts
+ *                            is collected on the day its payout goes out. Pass-through
+ *                            collections past the return window settle here, and settled
+ *                            months that are due are paid to the landlord.
+ *  10. collect-installments  Scheduled debits, a payment's effect on the bucket, and then
+ *                            the cash sweep: operating cash is settled with the pool. Then
+ *                            pass-through collections whose window is open.
+ *  11. provision             So the allowance is set on the day's closing balances. Posts
  *                            at most once per calendar month.
- *  11. monitor               Last: the rules read the state every other job left, and can
+ *  12. monitor               Last: the rules read the state every other job left, and can
  *                            tell whether each of them ran.
  */
 export async function runAllJobs(ctx: AppContext, asOf: IsoDate = todayIso()) {
@@ -82,6 +94,7 @@ export async function runAllJobs(ctx: AppContext, asOf: IsoDate = todayIso()) {
   const leaseChanges = await leaseChangesJob(ctx, asOf);
   const refreshConnections = await refreshConnectionsJob(ctx, asOf);
   const reunderwrite = await reunderwriteJob(ctx, asOf);
+  const refreshEligibility = await refreshEligibilityJob(ctx, asOf);
   const reconcilePayments = await reconcilePaymentsJob(ctx, asOf);
   const ageReceivables = await ageReceivablesJob(ctx, asOf);
   const generatePeriods = await generatePeriodsJob(ctx, asOf);
@@ -95,6 +108,7 @@ export async function runAllJobs(ctx: AppContext, asOf: IsoDate = todayIso()) {
     leaseChanges,
     refreshConnections,
     reunderwrite,
+    refreshEligibility,
     reconcilePayments,
     ageReceivables,
     generatePeriods,

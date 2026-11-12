@@ -128,141 +128,153 @@ export async function createRentPlan(
   { db, providers }: { db: Db; providers: Providers },
   args: CreateRentPlanArgs,
 ) {
-  return db.$transaction(async (tx) => {
-    const lease = await tx.lease.findUnique({
-      where: { id: args.leaseId },
-      include: { business: { include: { bankLinks: { where: { status: 'LINKED' } } } } },
-    });
-    if (!lease) throw notFound('Lease');
-    if (lease.business.ownerUserId !== args.userId) throw forbidden();
-    if (lease.status !== 'ACTIVE') throw unprocessable('LEASE_NOT_ACTIVE', 'Lease is not active');
-    // Suspended by a charge-off: no new plan on any lease.
-    if (lease.business.status === 'SUSPENDED') {
-      throw unprocessable('BUSINESS_SUSPENDED', 'This business cannot open a new rent plan');
-    }
+  return db.$transaction((tx) => createRentPlanTx(tx, providers, args));
+}
 
-    const application = await tx.underwritingApplication.findUnique({
-      where: { id: args.applicationId },
+/**
+ * `createRentPlan` inside a transaction the caller owns. Graduation from a pass-through plan
+ * uses it to close the pass-through plan, record the new decision, and open the financed
+ * plan in one transaction.
+ */
+export async function createRentPlanTx(tx: Tx, providers: Providers, args: CreateRentPlanArgs) {
+  const lease = await tx.lease.findUnique({
+    where: { id: args.leaseId },
+    include: { business: { include: { bankLinks: { where: { status: 'LINKED' } } } } },
+  });
+  if (!lease) throw notFound('Lease');
+  if (lease.business.ownerUserId !== args.userId) throw forbidden();
+  if (lease.status !== 'ACTIVE') throw unprocessable('LEASE_NOT_ACTIVE', 'Lease is not active');
+  // Suspended by a charge-off: no new plan on any lease.
+  if (lease.business.status === 'SUSPENDED') {
+    throw unprocessable('BUSINESS_SUSPENDED', 'This business cannot open a new rent plan');
+  }
+
+  const application = await tx.underwritingApplication.findUnique({
+    where: { id: args.applicationId },
+  });
+  if (!application) throw notFound('Application');
+  if (application.businessId !== lease.businessId) {
+    throw unprocessable(
+      'BUSINESS_MISMATCH',
+      'Application and lease belong to different businesses',
+    );
+  }
+  const decision = await currentDecision(tx, application.id);
+  if (application.status !== 'APPROVED' || !decision || decision.outcome !== 'APPROVED') {
+    throw unprocessable('APPLICATION_NOT_APPROVED', 'Application has not been approved');
+  }
+  const limit = decision.approvedMonthlyLimitCents ?? 0;
+  if (lease.monthlyRentCents > limit) {
+    throw unprocessable('RENT_OVER_LIMIT', 'Monthly rent exceeds the approved limit', {
+      monthlyRentCents: lease.monthlyRentCents,
+      approvedMonthlyLimitCents: limit,
     });
-    if (!application) throw notFound('Application');
-    if (application.businessId !== lease.businessId) {
-      throw unprocessable(
-        'BUSINESS_MISMATCH',
-        'Application and lease belong to different businesses',
-      );
-    }
-    const decision = await currentDecision(tx, application.id);
-    if (application.status !== 'APPROVED' || !decision || decision.outcome !== 'APPROVED') {
-      throw unprocessable('APPLICATION_NOT_APPROVED', 'Application has not been approved');
-    }
-    const limit = decision.approvedMonthlyLimitCents ?? 0;
-    if (lease.monthlyRentCents > limit) {
-      throw unprocessable('RENT_OVER_LIMIT', 'Monthly rent exceeds the approved limit', {
+  }
+
+  // An open screening hit on the business, an owner, or this landlord: nothing new is
+  // fronted until a reviewer has cleared it. The owner is told only that we are reviewing.
+  const hits = await openHitsForPlan(tx, { businessId: lease.businessId, leaseId: lease.id });
+  if (hits.length > 0) {
+    throw unprocessable(
+      'ACCOUNT_UNDER_REVIEW',
+      'Your account is under review, so a new rent plan cannot start yet. Contact support and we will help',
+    );
+  }
+  const pendingChange = await tx.leaseChange.findFirst({
+    where: { leaseId: lease.id, status: 'PENDING' },
+  });
+  if (pendingChange) {
+    throw unprocessable(
+      'LEASE_CHANGE_PENDING',
+      `A change to the landlord details on this lease takes effect on ${pendingChange.effectiveOn}. The plan can start after that`,
+    );
+  }
+
+  // Any plan on the lease that is not closed, of either kind. A paused plan still holds the
+  // lease: two plans on one lease could both pay the landlord for the same month.
+  const open = await tx.rentPlan.findFirst({
+    where: { leaseId: lease.id, status: { not: 'CLOSED' } },
+  });
+  if (open) throw conflict('PLAN_EXISTS', 'This lease already has a rent plan');
+
+  if (landlordIsApplicant(lease, lease.business.bankLinks, lease.business)) {
+    throw unprocessable(
+      'LANDLORD_ACCOUNT_MATCH',
+      'The landlord payout account matches a bank account linked to this business. Rent has to be paid to the landlord',
+    );
+  }
+
+  // The rules in force today apply, whichever policy version made the decision.
+  const policy = CURRENT_POLICY;
+  if (policy.exposure) {
+    const context = await gatherExposureContext(tx, providers, {
+      businessId: lease.businessId,
+      industry: lease.business.industry,
+    });
+    const refusal = checkNewPlan(policy.exposure, {
+      rentCents: lease.monthlyRentCents,
+      approvedLimitCents: limit,
+      observedRentCents:
+        (decision.cashFlow as unknown as CashFlowSummary | null)?.observedRentCents ?? null,
+      // A reviewer who set the terms has verified the lease another way. A graduation comes
+      // after months of paying this landlord through a pass-through plan.
+      leaseVerified: decision.kind === 'REVIEW' || decision.kind === 'GRADUATION',
+      context,
+    });
+    if (refusal?.code === 'RENT_OVER_LIMIT') {
+      throw unprocessable('RENT_OVER_LIMIT', refusal.message, {
         monthlyRentCents: lease.monthlyRentCents,
         approvedMonthlyLimitCents: limit,
       });
     }
-
-    // An open screening hit on the business, an owner, or this landlord: nothing new is
-    // fronted until a reviewer has cleared it. The owner is told only that we are reviewing.
-    const hits = await openHitsForPlan(tx, { businessId: lease.businessId, leaseId: lease.id });
-    if (hits.length > 0) {
-      throw unprocessable(
-        'ACCOUNT_UNDER_REVIEW',
-        'Your account is under review, so a new rent plan cannot start yet. Contact support and we will help',
-      );
+    if (refusal?.code === 'EXPOSURE_CAP') {
+      throw unprocessable('EXPOSURE_CAP_EXCEEDED', refusal.message, { cap: refusal.cap });
     }
-    const pendingChange = await tx.leaseChange.findFirst({
-      where: { leaseId: lease.id, status: 'PENDING' },
-    });
-    if (pendingChange) {
-      throw unprocessable(
-        'LEASE_CHANGE_PENDING',
-        `A change to the landlord details on this lease takes effect on ${pendingChange.effectiveOn}. The plan can start after that`,
-      );
+    if (refusal?.code === 'FUNDING_UNAVAILABLE') {
+      throw unprocessable('FUNDING_UNAVAILABLE', refusal.message, { blockers: refusal.blockers });
     }
+  }
 
-    const active = await tx.rentPlan.findFirst({ where: { leaseId: lease.id, status: 'ACTIVE' } });
-    if (active) throw conflict('PLAN_EXISTS', 'This lease already has an active rent plan');
+  const feeBps = planFeeBps(policy, decision.feeBps ?? 0, lease.monthlyRentCents);
+  if (feeBps === null) {
+    throw unprocessable(
+      'RENT_BELOW_MINIMUM',
+      'This rent is too small for our minimum fee to stay within the maximum fee rate',
+    );
+  }
 
-    if (landlordIsApplicant(lease, lease.business.bankLinks, lease.business)) {
-      throw unprocessable(
-        'LANDLORD_ACCOUNT_MATCH',
-        'The landlord payout account matches a bank account linked to this business. Rent has to be paid to the landlord',
-      );
-    }
-
-    // The rules in force today apply, whichever policy version made the decision.
-    const policy = CURRENT_POLICY;
-    if (policy.exposure) {
-      const context = await gatherExposureContext(tx, providers, {
-        businessId: lease.businessId,
-        industry: lease.business.industry,
-      });
-      const refusal = checkNewPlan(policy.exposure, {
-        rentCents: lease.monthlyRentCents,
-        approvedLimitCents: limit,
-        observedRentCents:
-          (decision.cashFlow as unknown as CashFlowSummary | null)?.observedRentCents ?? null,
-        // A reviewer who set the terms has verified the lease another way.
-        leaseVerified: decision.kind === 'REVIEW',
-        context,
-      });
-      if (refusal?.code === 'RENT_OVER_LIMIT') {
-        throw unprocessable('RENT_OVER_LIMIT', refusal.message, {
-          monthlyRentCents: lease.monthlyRentCents,
-          approvedMonthlyLimitCents: limit,
-        });
-      }
-      if (refusal?.code === 'EXPOSURE_CAP') {
-        throw unprocessable('EXPOSURE_CAP_EXCEEDED', refusal.message, { cap: refusal.cap });
-      }
-      if (refusal?.code === 'FUNDING_UNAVAILABLE') {
-        throw unprocessable('FUNDING_UNAVAILABLE', refusal.message, { blockers: refusal.blockers });
-      }
-    }
-
-    const feeBps = planFeeBps(policy, decision.feeBps ?? 0, lease.monthlyRentCents);
-    if (feeBps === null) {
-      throw unprocessable(
-        'RENT_BELOW_MINIMUM',
-        'This rent is too small for our minimum fee to stay within the maximum fee rate',
-      );
-    }
-
-    const plan = await tx.rentPlan.create({
-      data: {
-        businessId: lease.businessId,
-        leaseId: lease.id,
-        applicationId: application.id,
-        installmentsPerMonth: args.installmentsPerMonth,
-        feeBps,
-        monthlyRentCents: lease.monthlyRentCents,
-        dueDayOfMonth: lease.dueDayOfMonth,
-      },
-    });
-
-    await ensureReceivableAccount(tx, lease.businessId, lease.business.legalName);
-    await ensureUpcomingPeriods(tx, { ...plan, startsOn: lease.startsOn }, args.asOf);
-    await recordAudit(tx, {
-      actor: { type: 'user', id: args.userId },
-      eventType: 'PLAN_CREATED',
-      subjectType: 'rent_plan',
-      subjectId: plan.id,
-      payload: {
-        businessId: lease.businessId,
-        leaseId: lease.id,
-        applicationId: application.id,
-        decisionId: decision.id,
-        monthlyRentCents: plan.monthlyRentCents,
-        feeBps: plan.feeBps,
-        installmentsPerMonth: plan.installmentsPerMonth,
-      },
-      at: effectiveAt(args.asOf),
-    });
-
-    return plan;
+  const plan = await tx.rentPlan.create({
+    data: {
+      businessId: lease.businessId,
+      leaseId: lease.id,
+      applicationId: application.id,
+      installmentsPerMonth: args.installmentsPerMonth,
+      feeBps,
+      monthlyRentCents: lease.monthlyRentCents,
+      dueDayOfMonth: lease.dueDayOfMonth,
+    },
   });
+
+  await ensureReceivableAccount(tx, lease.businessId, lease.business.legalName);
+  await ensureUpcomingPeriods(tx, { ...plan, startsOn: lease.startsOn }, args.asOf);
+  await recordAudit(tx, {
+    actor: { type: 'user', id: args.userId },
+    eventType: 'PLAN_CREATED',
+    subjectType: 'rent_plan',
+    subjectId: plan.id,
+    payload: {
+      businessId: lease.businessId,
+      leaseId: lease.id,
+      applicationId: application.id,
+      decisionId: decision.id,
+      monthlyRentCents: plan.monthlyRentCents,
+      feeBps: plan.feeBps,
+      installmentsPerMonth: plan.installmentsPerMonth,
+    },
+    at: effectiveAt(args.asOf),
+  });
+
+  return plan;
 }
 
 /**

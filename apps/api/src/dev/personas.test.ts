@@ -39,6 +39,10 @@ describe('the persona registry', () => {
       'fresh-payout-elsewhere',
       'fresh-ownership',
       'fresh-toast',
+      'pass-through',
+      'pass-through-missed',
+      'graduation-offer',
+      'pass-through-offer',
     ]) {
       expect(personaByKey(key), key).toBeDefined();
     }
@@ -81,7 +85,15 @@ describe('the persona registry', () => {
 
   it('builds only fresh and instant personas one at a time', () => {
     const history = PERSONAS.filter((p) => p.build.kind === 'history').map((p) => p.key);
-    expect(history.sort()).toEqual(['active-plan', 'charged-off', 'delinquent', 'landlord-change']);
+    expect(history.sort()).toEqual([
+      'active-plan',
+      'charged-off',
+      'delinquent',
+      'graduation-offer',
+      'landlord-change',
+      'pass-through',
+      'pass-through-missed',
+    ]);
   });
 });
 
@@ -143,6 +155,30 @@ describe('describePersonaState', () => {
     expect(state({ approvedLimitCents: 430_000, leaseRentCents: 600_000 })).toBe(
       'Approved below the lease rent',
     );
+    expect(state({ applicationStatus: 'DECLINED', passThroughAvailable: true })).toBe(
+      'Declined, free plan available',
+    );
+    // Offered, but no lease to run it on yet.
+    expect(
+      state({ applicationStatus: 'DECLINED', passThroughAvailable: true, leaseRentCents: null }),
+    ).toBe('Declined');
+  });
+
+  it('labels pass-through plans by their latest month and any offer', () => {
+    const plan = { status: 'ACTIVE', delinquencyStatus: 'CURRENT', kind: 'PASS_THROUGH' };
+    const state = (over: Partial<PersonaFacts>) =>
+      describePersonaState(facts({ applicationStatus: 'DECLINED', plan, ...over }));
+    expect(state({})).toMatchObject({ label: 'Pass-through plan, current', tone: 'paid' });
+    expect(state({ passThroughMissed: true })).toMatchObject({
+      label: 'Pass-through, last month missed',
+      tone: 'late',
+    });
+    expect(state({ graduationOffered: true })).toMatchObject({
+      label: 'Pass-through, graduation offered',
+      tone: 'gold',
+    });
+    // A graduated plan is closed and its financed successor is the plan shown.
+    expect(state({ plan: { ...plan, status: 'CLOSED' } }).label).toBe('Plan closed');
   });
 });
 

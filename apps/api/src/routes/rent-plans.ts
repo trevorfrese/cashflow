@@ -19,6 +19,7 @@ import { toInstallment, toPayout, toRentPlan, toRepayment } from '../serializers
 import { recordAudit } from '../services/audit.ts';
 import { collectInstallment } from '../services/collections.ts';
 import { planStandings } from '../services/delinquency.ts';
+import { passThroughDetail, planGraduationOffer } from '../services/pass-through-views.ts';
 import { createRentPlan } from '../services/rent-plan.ts';
 import { currentUserId, getOwnedBusiness, getOwnedRentPlan } from './helpers.ts';
 
@@ -72,6 +73,15 @@ export async function rentPlanRoutes(app: FastifyInstance) {
     async (request) => {
       const plan = await getOwnedRentPlan(db, request.params.id, currentUserId(request));
       const today = todayIso();
+      const lease = await db.lease.findUniqueOrThrow({ where: { id: plan.leaseId } });
+      const passThrough =
+        plan.kind === 'PASS_THROUGH'
+          ? await passThroughDetail(db, plan.id, lease.landlordName)
+          : null;
+      const graduationOffer =
+        plan.kind === 'PASS_THROUGH'
+          ? await planGraduationOffer(db, plan.id, plan.monthlyRentCents)
+          : null;
       const [installments, payouts] = await Promise.all([
         db.installment.findMany({
           where: { rentPlanId: plan.id },
@@ -99,6 +109,8 @@ export async function rentPlanRoutes(app: FastifyInstance) {
         upcomingInstallments: upcoming.map(toInstallment),
         payouts: payouts.map(toPayout),
         heldPayout: heldPayout ? toPayout(heldPayout) : null,
+        passThrough,
+        graduationOffer,
       };
     },
   );

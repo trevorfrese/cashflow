@@ -93,6 +93,10 @@ export function makeCustomer(overrides: Partial<CustomerResult> = {}): CustomerR
     outcomeWithoutVeracity: null,
     usableWithoutVeracity: null,
     veracityTags: [],
+    graduated: false,
+    passThroughMonths: 0,
+    passThroughOnTimeMonths: 0,
+    passThroughMissedMonths: 0,
     ...overrides,
   };
 }

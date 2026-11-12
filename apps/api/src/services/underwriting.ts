@@ -12,6 +12,7 @@ import { approvalsPaused } from './circuit-breaker.ts';
 import { supersedeCurrentDecision } from './decisions.ts';
 import { gatherIdentityFacts, runBusinessIdentity } from './identity.ts';
 import { applyApprovedRentIncreases } from './lease-changes.ts';
+import { paymentHistorySummary } from './payment-history.ts';
 import { gatherExposureContext, gatherIntegrityContext } from './portfolio-state.ts';
 
 /**
@@ -81,13 +82,14 @@ export async function underwriteApplication({
   const pendingRentPlan = await db.rentPlan.findFirst({
     where: {
       businessId: application.businessId,
+      kind: 'FINANCED',
       status: { not: 'CLOSED' },
       pendingRentCents: { not: null },
     },
     orderBy: { pendingRentSince: 'asc' },
     select: { id: true },
   });
-  const [integrityBase, identity, exposureContext, paused] = await Promise.all([
+  const [integrityBase, identity, exposureContext, paused, paymentHistory] = await Promise.all([
     gatherIntegrityContext(db, application.business, { bankLink }),
     gatherIdentityFacts(db, application.businessId),
     gatherExposureContext(db, providers, {
@@ -96,6 +98,9 @@ export async function underwriteApplication({
       ...(pendingRentPlan ? { excludePlanId: pendingRentPlan.id } : {}),
     }),
     approvalsPaused(db),
+    // Rent paid through CashFlow before, on either kind of plan. Empty for a first time
+    // applicant, and then the payment history factor is neutral.
+    paymentHistorySummary(db, application.businessId, asOf),
   ]);
   const integrityContext = {
     ...integrityBase,
@@ -114,6 +119,7 @@ export async function underwriteApplication({
     exposureContext,
     controls: { approvalsPaused: paused },
     veracity,
+    paymentHistory,
   });
 
   return db.$transaction(async (tx) => {

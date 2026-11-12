@@ -930,6 +930,141 @@ function veracitySection(e: Evaluation): string[] {
   ];
 }
 
+const share = (part: number, whole: number) =>
+  pct(whole === 0 ? 0 : Math.round((part * 10_000) / whole));
+
+/** Pass-through plans and the cohort that graduated from them, base and stress. */
+function passThroughSection(e: Evaluation): string[] {
+  const scenarios = [
+    ['Base', e.base],
+    ['Mild stress', e.mild],
+    ['Severe stress', e.severe],
+  ] as const;
+  if (!e.base.passThrough) return [];
+  const statRows = scenarios.map(([name, m]) => {
+    const s = m.passThrough!.stats;
+    return [
+      name,
+      count(s.declined),
+      count(s.eligible),
+      count(s.plans),
+      count(s.months),
+      share(s.onTimeMonths, s.months),
+      share(s.missedMonths, s.months),
+      dollars(s.volumeCents),
+      count(s.reviews),
+      count(s.reviewReferred),
+      count(s.offers),
+      count(s.graduated),
+    ];
+  });
+  const cohortRows = scenarios.map(([name, m]) => {
+    const g = m.passThrough!.graduated;
+    return [
+      name,
+      count(g.plans),
+      count(g.planMonths),
+      dollars(g.volumeCents),
+      pct(g.badRateBps),
+      `${g.netLossBps} bps`,
+      dollars(g.netMarginCents),
+      `${g.netMarginBps} bps`,
+      pct(g.profitableShareBps),
+    ];
+  });
+  const bookRows = scenarios.map(([name, m]) => {
+    const o = m.overall;
+    const b = m.passThrough!.bookWithGraduates;
+    return [
+      name,
+      `${o.netLossBps} bps`,
+      `${b.netLossBps} bps`,
+      `${o.netMarginBps} bps`,
+      `${b.netMarginBps} bps`,
+      pct(o.badRateBps),
+      pct(b.badRateBps),
+    ];
+  });
+  const grades = e.base.passThrough.graduatedByGrade;
+  const s = e.base.passThrough.stats;
+  return [
+    '## Pass-through plans and graduation',
+    '',
+    `Every applicant the gated policy declines for credit capacity alone is put on the free`,
+    'pass-through plan: the rent is debited five business days before the due date after a',
+    'balance check, and the landlord is paid on the due date only from what was collected. A',
+    'month with nothing collected in time is missed and the business pays its landlord itself.',
+    'The day a month completes, a plan with three on time months in a row is re-underwritten',
+    'on its bank history and payment history, at most once a month. An approval for at least',
+    'the rent is an offer; every offer is assumed accepted, and the graduate gets a financed',
+    'plan from the next rent date, from the same pool, played like any other plan.',
+    '',
+    'Graduates are not in the headline numbers or the gates above, which judge the origination',
+    'decisions, but they share the pool, so the pool gate and the pool path include them. The',
+    'last table puts the two books together.',
+    '',
+    markdownTable(
+      [
+        'Scenario',
+        'Declined',
+        'Offered pass-through',
+        'Plans',
+        'Months',
+        'On time',
+        'Missed',
+        'Rent passed through',
+        'Reviews',
+        'Would refer',
+        'Offers',
+        'Graduated',
+      ],
+      statRows,
+      ['left', ...Array<Align>(11).fill('right')],
+    ),
+    '',
+    `"Would refer" is a review whose engine outcome was a referral. It is not offered and not sent to the review queue, so pass-through and the payment history factor add no referrals: the refer rate gate reads origination decisions, which are the same as \`v3_standard\`'s for every applicant (the factor is neutral without history). Graduated fraud applicants: ${count(s.graduatedFraud)} in the base case.`,
+    '',
+    '### The graduated cohort',
+    '',
+    markdownTable(
+      [
+        'Scenario',
+        'Plans',
+        'Plan months',
+        'Volume',
+        'Bad rate',
+        'Net loss',
+        'Net margin',
+        'Margin',
+        'Profitable',
+      ],
+      cohortRows,
+      ['left', ...Array<Align>(8).fill('right')],
+    ),
+    '',
+    'By grade at graduation (base case):',
+    '',
+    segmentTable(grades, 'Grade', true),
+    '',
+    '### The book with graduates',
+    '',
+    markdownTable(
+      [
+        'Scenario',
+        'Net loss, origination',
+        'Net loss, with graduates',
+        'Margin, origination',
+        'Margin, with graduates',
+        'Bad rate, origination',
+        'Bad rate, with graduates',
+      ],
+      bookRows,
+      ['left', ...Array<Align>(6).fill('right')],
+    ),
+    '',
+  ];
+}
+
 export function renderMarkdown(e: Evaluation): string {
   const passed = e.gates.filter((g) => g.pass).length;
   const v1 = e.comparisons.find((c) => c.name === 'v1_baseline');
@@ -965,10 +1100,12 @@ export function renderMarkdown(e: Evaluation): string {
     '',
     '## What underwriting bought and what servicing bought',
     '',
-    'The same applicants under five configurations. Reading left to right along the top:',
+    'The same applicants under six configurations. Reading left to right along the top:',
     'changing only servicing (`v1_baseline` to `v1_standard`), changing only the credit policy',
-    '(`v1_baseline` to `v2_baseline`), both (`v2_standard`), and the data veracity checks on',
-    `top (\`${e.run.gated}\`, the gated configuration).`,
+    '(`v1_baseline` to `v2_baseline`), both (`v2_standard`), the data veracity checks on top',
+    '(`v3_standard`), and payment history with pass-through plans and graduation on top of',
+    `that (\`${e.run.gated}\`, the gated configuration). Its origination decisions are`,
+    "version 3's for every applicant; it differs in the pool its graduates share.",
     '',
     ...e.comparisons.map((c) => `- \`${c.name}\`: ${c.description}`),
     '',
@@ -993,6 +1130,7 @@ export function renderMarkdown(e: Evaluation): string {
     segmentTable(e.base.byScoreBand, 'Score', true),
     '',
     ...throughTheDoorSection(e),
+    ...passThroughSection(e),
     ...veracitySection(e),
     '## Calibration: expected against realized (base case)',
     '',
@@ -1290,6 +1428,31 @@ export function renderJson(e: Evaluation): string {
   });
 }
 
+function passThroughSummary(m: PortfolioMetrics) {
+  const p = m.passThrough;
+  if (!p) return null;
+  const g = p.graduated;
+  return {
+    stats: p.stats,
+    graduated: {
+      plans: g.plans,
+      planMonths: g.planMonths,
+      volumeCents: g.volumeCents,
+      bad: g.bad,
+      badRateBps: g.badRateBps,
+      netLossCents: g.netLossCents,
+      netLossBps: g.netLossBps,
+      netMarginCents: g.netMarginCents,
+      netMarginBps: g.netMarginBps,
+    },
+    bookWithGraduates: {
+      netLossBps: p.bookWithGraduates.netLossBps,
+      netMarginBps: p.bookWithGraduates.netMarginBps,
+      badRateBps: p.bookWithGraduates.badRateBps,
+    },
+  };
+}
+
 function veracitySummary(e: Evaluation) {
   const h = e.base.veracity.honest;
   return {
@@ -1342,6 +1505,15 @@ export function renderBaseline(e: Evaluation): string {
     throughTheDoor: throughTheDoorSummary(e.throughTheDoor, e.run.seeds),
     gates: gateSummary(e.gates),
     veracity: veracitySummary(e),
+    ...(e.base.passThrough
+      ? {
+          passThrough: {
+            base: passThroughSummary(e.base),
+            mild: passThroughSummary(e.mild),
+            severe: passThroughSummary(e.severe),
+          },
+        }
+      : {}),
   };
   // The same decisions and servicing as the gated configuration, with one assumption of the
   // simulation changed. Recorded so a change to either shows up in the diff.

@@ -379,6 +379,33 @@ async function applyRentChange(ctx: Ctx, tx: Tx, args: RentChangeArgs): Promise<
     });
     return;
   }
+  // A pass-through plan fronts nothing, so there is no limit to check: months not yet
+  // collected move to the new rent, and a month already collected keeps its amount.
+  if (plan.kind === 'PASS_THROUGH') {
+    await tx.rentPlan.update({
+      where: { id: plan.id },
+      data: { monthlyRentCents: toCents, pendingRentCents: null, pendingRentSince: null },
+    });
+    await tx.passThroughPeriod.updateMany({
+      where: { rentPlanId: plan.id, status: 'SCHEDULED', collectionAttempts: 0 },
+      data: { amountCents: toCents },
+    });
+    await recordAudit(tx, {
+      actor,
+      eventType: 'RENT_CHANGED',
+      subjectType: 'rent_plan',
+      subjectId: plan.id,
+      payload: {
+        leaseId: lease.id,
+        businessId: lease.businessId,
+        fromCents: plan.monthlyRentCents,
+        toCents,
+        appliesFrom: 'The next month that has not been collected',
+      },
+      at,
+    });
+    return;
+  }
   // Compared with what the plan fronts, not with the lease's last value: putting the rent
   // back after a pending increase is a return to the plan's rent.
   const refusal =
@@ -451,6 +478,7 @@ export async function applyApprovedRentIncreases(
   const plans = await tx.rentPlan.findMany({
     where: {
       businessId: args.businessId,
+      kind: 'FINANCED',
       ...OPEN_PLAN,
       pendingRentCents: { not: null, lte: args.approvedMonthlyLimitCents },
     },

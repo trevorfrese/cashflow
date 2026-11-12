@@ -26,6 +26,7 @@ import { updateLease } from '../services/lease-changes.ts';
 import { ACTIVE_SERVICING_POLICY } from '../servicing/policy.ts';
 import { createSeatInvitation } from '../services/connections.ts';
 import { latestAssessment } from '../services/connection-views.ts';
+import { passThroughOffer } from '../services/pass-through.ts';
 import { reunderwritePlan } from '../services/reunderwriting.ts';
 import {
   apply,
@@ -36,6 +37,7 @@ import {
   linkPointOfSale,
   monthsAgo,
   monthsBefore,
+  seedPassThrough,
   seedPlan,
   seedReferred,
 } from './builders.ts';
@@ -395,6 +397,247 @@ export const PERSONAS: readonly PersonaDefinition[] = [
             }
           },
         };
+      },
+    },
+  },
+
+  // ---- Existing customers: pass-through ----
+  {
+    key: 'pass-through',
+    title: 'Ridgeline Coffee',
+    group: 'CUSTOMER',
+    section: 'Pass-through',
+    demonstrates:
+      'Declined (five months in business), now on the free pass-through plan: rent collected five business days early, landlord paid on the due date, two months on time.',
+    screens: ['Home (next collection, landlord paid)', 'History', 'Ops console, Customers'],
+    email: 'pass-through@cashflow.local',
+    fullName: 'Mara Lindqvist',
+    landing: 'HOME',
+    build: {
+      kind: 'history',
+      script: ({ ctx, userId, today }) => {
+        const { dueDay, lastDue } = recentDue(today);
+        const firstDue = monthsBefore(lastDue, 1);
+        const start = addDays(firstDue, -12);
+        let planId = '';
+        return {
+          replayFrom: start,
+          open: async () => {
+            const built = await seedPassThrough(ctx, userId, {
+              legalName: 'Ridgeline Coffee LLC',
+              dba: 'Ridgeline Coffee',
+              industry: 'RESTAURANT',
+              addressLine1: '2510 SE Clinton St',
+              postalCode: '97202',
+              foundedOn: addDays(start, -150),
+              monthlyRevenueCents: 4_000_000,
+              taxIdLast4: '5530',
+              owner: { fullName: 'Mara Lindqvist', title: 'Owner' },
+              timeInBusinessMonths: 5,
+              rentCents: 360_000,
+              dueDayOfMonth: dueDay,
+              start,
+              bankToken: 'seed_ridgeline_healthy_rev_40000_rent_3600',
+              landlordName: 'Clinton Street Partners',
+              landlordPayoutToken: 'mock_landlord_clinton_street',
+            });
+            planId = built.plan.id;
+          },
+          beforeJobs: async () => undefined,
+          verify: async () => {
+            const paid = await ctx.db.passThroughPeriod.count({
+              where: { rentPlanId: planId, status: 'PAID' },
+            });
+            const offers = await ctx.db.graduationOffer.count({
+              where: { passThroughPlanId: planId },
+            });
+            if (paid !== 2 || offers !== 0) {
+              throw new Error(
+                `Expected Ridgeline Coffee to have two pass-through months paid and no offer, got ${paid} paid and ${offers} offers`,
+              );
+            }
+          },
+        };
+      },
+    },
+  },
+  {
+    key: 'pass-through-missed',
+    title: 'Foundry Bike Works',
+    group: 'CUSTOMER',
+    section: 'Pass-through',
+    demonstrates:
+      'On the free pass-through plan: the first month was collected and paid, the second could not be collected, so CashFlow did not pay the landlord and told the owner to pay directly. No fee.',
+    screens: ['Home (missed month notice)', 'History', 'Ops console, Customers'],
+    email: 'pass-through-missed@cashflow.local',
+    fullName: 'Theo Marchetti',
+    landing: 'HOME',
+    build: {
+      kind: 'history',
+      script: ({ ctx, userId, today }) => {
+        const { dueDay, lastDue } = recentDue(today);
+        const firstDue = monthsBefore(lastDue, 1);
+        const start = addDays(firstDue, -12);
+        let planId = '';
+        let bankLinkId = '';
+        return {
+          replayFrom: start,
+          open: async () => {
+            const built = await seedPassThrough(ctx, userId, {
+              legalName: 'Foundry Bike Works LLC',
+              dba: 'Foundry Bike Works',
+              industry: 'RETAIL',
+              addressLine1: '640 N Albina Ave',
+              postalCode: '97227',
+              foundedOn: addDays(start, -150),
+              monthlyRevenueCents: 3_600_000,
+              taxIdLast4: '6624',
+              owner: { fullName: 'Theo Marchetti', title: 'Owner' },
+              timeInBusinessMonths: 5,
+              rentCents: 330_000,
+              dueDayOfMonth: dueDay,
+              start,
+              bankToken: 'seed_foundry_healthy_rev_36000_rent_3300',
+              landlordName: 'Albina Yards LLC',
+              landlordPayoutToken: 'mock_landlord_albina_yards',
+            });
+            planId = built.plan.id;
+            bankLinkId = built.bankLink.id;
+          },
+          // The second month's debits fail.
+          beforeJobs: async (asOf) => {
+            if (asOf === addDays(lastDue, -12)) {
+              await setAccountToken(ctx, bankLinkId, 'mock_acct_foundry_fail');
+            }
+          },
+          verify: async () => {
+            const months = await ctx.db.passThroughPeriod.findMany({
+              where: { rentPlanId: planId, status: { in: ['PAID', 'MISSED'] } },
+              orderBy: { dueDate: 'asc' },
+            });
+            const statuses = months.map((m) => m.status).join(', ');
+            if (statuses !== 'PAID, MISSED') {
+              throw new Error(
+                `Expected Foundry Bike Works to have one month paid then one missed, got ${statuses || 'none'}`,
+              );
+            }
+          },
+        };
+      },
+    },
+  },
+  {
+    key: 'graduation-offer',
+    title: 'Willow & Wren Bakery',
+    group: 'CUSTOMER',
+    section: 'Pass-through',
+    demonstrates:
+      'Three months on time on the free pass-through plan. The refresh-eligibility job re-underwrote it with its payment history yesterday and offered a financed plan from the next rent month. Accept it on Home.',
+    screens: ['Home (graduation offer, Accept)', 'Ops console, Customers'],
+    email: 'graduation-offer@cashflow.local',
+    fullName: 'Ines Ferreira',
+    landing: 'HOME',
+    build: {
+      kind: 'history',
+      script: ({ ctx, userId, today }) => {
+        const { dueDay, lastDue } = recentDue(today);
+        const firstDue = monthsBefore(lastDue, 2);
+        const start = addDays(firstDue, -12);
+        let planId = '';
+        return {
+          replayFrom: start,
+          open: async () => {
+            const built = await seedPassThrough(ctx, userId, {
+              legalName: 'Willow & Wren Bakery LLC',
+              dba: 'Willow & Wren',
+              industry: 'RESTAURANT',
+              addressLine1: '3725 N Mississippi Ave',
+              postalCode: '97227',
+              foundedOn: addDays(start, -150),
+              monthlyRevenueCents: 4_500_000,
+              taxIdLast4: '7718',
+              owner: { fullName: 'Ines Ferreira', title: 'Owner' },
+              timeInBusinessMonths: 5,
+              rentCents: 400_000,
+              dueDayOfMonth: dueDay,
+              start,
+              bankToken: 'seed_willow_wren_healthy_rev_45000_rent_4000',
+              landlordName: 'Mississippi Avenue Holdings',
+              landlordPayoutToken: 'mock_landlord_mississippi_ave',
+            });
+            planId = built.plan.id;
+          },
+          beforeJobs: async () => undefined,
+          verify: async () => {
+            const offer = await ctx.db.graduationOffer.findFirst({
+              where: { passThroughPlanId: planId },
+            });
+            if (offer?.status !== 'OFFERED') {
+              throw new Error(
+                `Expected Willow & Wren to have an open graduation offer, got ${offer?.status ?? 'none'}`,
+              );
+            }
+          },
+        };
+      },
+    },
+  },
+  {
+    key: 'pass-through-offer',
+    title: 'Larkspur Tailoring',
+    group: 'CUSTOMER',
+    section: 'Pass-through',
+    demonstrates:
+      'Just declined (four months in business) with its lease linked. The decision offers the free pass-through plan: start it from the Application screen.',
+    screens: ['Application (free plan offer, Start)', 'Home'],
+    email: 'pass-through-offer@cashflow.local',
+    fullName: 'Kofi Mensah',
+    landing: 'APPLICATION',
+    build: {
+      kind: 'instant',
+      run: async ({ ctx, userId, today }) => {
+        const business = await createBusiness(ctx, userId, {
+          legalName: 'Larkspur Tailoring LLC',
+          dba: 'Larkspur Tailoring',
+          industry: 'RETAIL',
+          addressLine1: '1407 NE Broadway',
+          postalCode: '97232',
+          foundedOn: addDays(today, -125),
+          monthlyRevenueCents: 3_200_000,
+          taxIdLast4: '3391',
+          owner: { fullName: 'Kofi Mensah', title: 'Owner' },
+        });
+        const { bankLink } = await linkBank(
+          ctx,
+          business.id,
+          'seed_larkspur_healthy_rev_32000_rent_3000',
+        );
+        const application = await apply(ctx, {
+          businessId: business.id,
+          bankLink,
+          monthlyRevenueCents: 3_200_000,
+          timeInBusinessMonths: 4,
+          rentCents: 300_000,
+        });
+        if (application.status !== 'DECLINED') {
+          throw new Error(`Expected Larkspur Tailoring to be declined, got ${application.status}`);
+        }
+        await createLease(ctx, {
+          businessId: business.id,
+          landlordName: 'Broadway Commons LLC',
+          landlordPayoutToken: 'mock_landlord_broadway_commons',
+          addressLine1: '1407 NE Broadway',
+          postalCode: '97232',
+          rentCents: 300_000,
+          dueDayOfMonth: 1,
+          startsOn: today,
+        });
+        const offer = await passThroughOffer(ctx.db, application.id);
+        if (!offer.eligible) {
+          throw new Error(
+            `Expected Larkspur Tailoring to be offered a pass-through plan, got ${offer.ineligibleReason}`,
+          );
+        }
       },
     },
   },

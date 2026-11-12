@@ -18,7 +18,7 @@ import { runJob } from './runner.ts';
 export function reunderwriteJob(ctx: AppContext, asOf: IsoDate) {
   return runJob(ctx, 'reunderwrite', asOf, async () => {
     const plans = await ctx.db.rentPlan.findMany({
-      where: { status: 'ACTIVE' },
+      where: { kind: 'FINANCED', status: 'ACTIVE' },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });

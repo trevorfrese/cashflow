@@ -105,6 +105,12 @@ export const ASSUMPTIONS = {
 
   /** First month of applications. Fixed so runs are reproducible. */
   startDate: '2026-01-01',
+  /**
+   * Graduation offers accepted: all of them. A financed plan costs a fee the pass-through
+   * plan did not, so some owners would decline; assuming every one accepts makes the
+   * graduated cohort, and the risk it adds to the pool, as large as the policy allows.
+   */
+  graduationAcceptShareBps: 10_000,
 } as const;
 
 export type Assumptions = { readonly [K in keyof typeof ASSUMPTIONS]: (typeof ASSUMPTIONS)[K] };

@@ -131,7 +131,7 @@ which is what pays the facility's interest and the company's costs.
 
 ## Ledger
 
-Five account types. Seven system accounts plus one receivable per business:
+Five account types. Nine system accounts plus one receivable per business:
 
 | Code                      | Type           | Meaning                                                     |
 | ------------------------- | -------------- | ----------------------------------------------------------- |
@@ -143,6 +143,8 @@ Five account types. Seven system accounts plus one receivable per business:
 | `recovery_income`         | Revenue        | Principal collected on balances already written off         |
 | `provision_expense`       | Expense        | Cost of building the allowance                              |
 | `pool_equity`             | Equity         | Capital contributed to the pool                             |
+| `landlord_payable`        | Liability      | Pass-through rent collected and not yet paid to a landlord  |
+| `pass_through_cash`       | Asset          | The cash behind `landlord_payable`, never swept to the pool |
 
 Net receivables are the receivable accounts less the allowance. The allowance is typed as an
 asset with a credit balance, so its natural balance reads negative and adding it to the
@@ -161,6 +163,11 @@ receivables gives the net figure.
 | Monthly provision, allowance released      | `allowance:credit_losses` | `provision_expense`                                 |
 | Charge-off                                 | `allowance:credit_losses` | `receivable:<biz>` (unpaid principal)               |
 | Payment on a written off installment       | `cash` (total)            | `recovery_income` (principal), `fee_revenue` (fee)  |
+| Pass-through rent collected                | `pass_through_cash`       | `landlord_payable`                                  |
+| Pass-through rent paid to the landlord     | `landlord_payable`        | `pass_through_cash`                                 |
+| Pass-through collection returned, unpaid   | mirror of the collection  | mirror of the collection                            |
+| Pass-through rent refunded to the business | `landlord_payable`        | `pass_through_cash`                                 |
+| Pass-through collection returned after pay | `receivable:<biz>`        | `capital_pool` (via `pass_through_cash`)            |
 
 Rules the postings follow:
 
@@ -179,13 +186,86 @@ Rules the postings follow:
   `repayment:<id>` (an installment whose payment was returned is collected again, which is a
   second repayment and a second posting), `repayment:<id>:return`, `payout:<id>:return`,
   `provision:<YYYY-MM>`, `charge_off:<planId>:<date>`, and `payout:<id>:resend:<n>` with its
-  own `:return` for a returned payout that a reviewer sent again.
+  own `:return` for a returned payout that a reviewer sent again. Pass-through months post
+  under `pass_through:<periodId>:collect:<n>` (and its `:return`), `:payout`, and `:refund`.
+- **One landlord payment per lease and month.** Every payment of rent to a landlord, from
+  either kind of plan, first claims a `LandlordDisbursement` row in the same transaction,
+  before the provider is called. A partial unique index allows one `SENT` row per lease and
+  period month, and the payout row is locked (`SELECT ... FOR UPDATE`) for the transaction.
+  So a held payout that is released twice, two payout runs at once, or two plans on one lease
+  (a paused plan and a new one, a pass-through plan and its financed successor) can never
+  pay the same month twice. A payment the landlord's bank returned is marked `RETURNED` and
+  stops counting, so a reviewer's re-send works. A refused second payment cancels the payout
+  with `PERIOD_ALREADY_PAID` and opens a high severity alert.
 
 Balances are derived by summing entries, never stored. `GET /v1/admin/ledger/trial-balance`
 proves debits equal credits at any moment, the integration tests assert it after every
 lifecycle step, and the `monitor` job checks it, and each receivable account against the
 installments behind it, on every run. `GET /v1/admin/delinquency` reports receivables, the allowance, charge-offs
 and recoveries to date, and plans and principal by delinquency bucket.
+
+## Plan kinds
+
+A `RentPlan` has a `kind`, fixed for its life:
+
+| Kind           | Who                                                | What CashFlow does                                                                           | Fee  |
+| -------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---- |
+| `FINANCED`     | Approved                                           | Pays the landlord in full from the pool on the due date; the business repays in installments | Yes  |
+| `PASS_THROUGH` | Declined for credit capacity (see UNDERWRITING.md) | Collects the rent from the business first, pays the landlord once the collection has settled | None |
+
+A pass-through customer with enough on time months can graduate: a new financed plan opens on
+the same lease from the next month and the pass-through plan closes (`GRADUATED`). Exposure,
+the pool, provisioning, delinquency buckets and the monitoring portfolio rules read financed
+plans only.
+
+### Pass-through plans
+
+`src/services/pass-through.ts`, with the rules as pure functions in
+`src/servicing/pass-through.ts` (`STANDARD_PASS_THROUGH_POLICY`). One `PassThroughPeriod` per
+month, through these statuses:
+
+```mermaid
+stateDiagram-v2
+  [*] --> SCHEDULED: generate-periods, 30 days ahead
+  SCHEDULED --> COLLECTING: debit accepted (5 business days before due)
+  SCHEDULED --> MISSED: nothing collected by the last day that still settles in time
+  SCHEDULED --> CANCELLED: plan closed, paused, frozen, or graduated first
+  COLLECTING --> MISSED: debit returned inside the window
+  COLLECTING --> SETTLED: past the return window (3 business days)
+  SETTLED --> PAID: due date, nothing holds it
+  SETTLED --> MISSED: debit returned before the landlord was paid
+  SETTLED --> REFUNDED: held past the release window, or the month was already paid
+  PAID --> RETURNED_AFTER_PAYOUT: debit returned weeks later
+```
+
+- **Collect.** From `collectOn` (five business days before the due date, counted back from
+  the last business day on or before it) the whole rent is debited after a balance check,
+  at most twice, until `lastCollectOn` (three business days before). A debit the balance
+  cannot cover is put off a day without using an attempt. Posted DR `pass_through_cash` /
+  CR `landlord_payable`. The daily cash sweep never touches it.
+- **Settle.** Three business days is longer than the window in which an insufficient funds
+  return comes back (two banking days; `MOCK_RETURN_DAYS` in the sandbox), so a bounced debit
+  makes the month `MISSED` with the reversing posting before the landlord would be paid.
+- **Pay.** On the due date, `process-payouts` pays a settled month: a disbursement claim, the
+  provider call, DR `landlord_payable` / CR `pass_through_cash`. Only from settled money,
+  never before the due date. A landlord change in its cooling-off period, a frozen plan or an
+  open screening hit holds it; past five days the money goes back to the business (`REFUNDED`).
+- **Missed.** CashFlow does not pay the landlord. The owner is told plainly, on the plan and in
+  the app, to pay the landlord directly. No fee, no late fee. The month is `MISSED` in the
+  payment history and withdraws an open graduation offer.
+- **Returned after payout.** An unauthorized return can arrive weeks after the landlord was
+  paid. The rent has gone out and cannot be taken back, so CashFlow's own money covers the
+  hole: one posting takes the collection out of `pass_through_cash`, puts the pool's money
+  back in, and books the amount on the business's receivable (DR `receivable:<biz>` /
+  CR `capital_pool`, net). The plan is closed and a high severity alert opens. This is the
+  one way a pass-through plan can cost CashFlow money.
+- **Returned landlord payment.** Sent back by the landlord's bank: reversed, refunded to the
+  business, and the plan frozen until the landlord details are corrected.
+
+Two monitoring rules watch it: `books.pass_through_payout_before_settlement` (critical, a
+landlord paid on a pass-through plan without a settled collection behind it, which should be
+impossible) and `books.landlord_payable_mismatch` (critical, `landlord_payable` and
+`pass_through_cash` must both equal the months collected and not yet paid or sent back).
 
 ## The life of a rent payment
 
@@ -323,7 +403,7 @@ payment, the principal is booked to `recovery_income` and the plan stays closed.
 
 ### Jobs
 
-Eleven jobs in `apps/api/src/jobs/` run in this order, on a cron inside the API process
+Twelve jobs in `apps/api/src/jobs/` run in this order, on a cron inside the API process
 (`JOBS_ENABLED=true`) or by hand with `pnpm --filter @cashflow/api job:run --as-of
 YYYY-MM-DD`. Each is idempotent for a given date:
 
@@ -337,27 +417,34 @@ YYYY-MM-DD`. Each is idempotent for a given date:
    same path a decision uses), runs the veracity checks on the result, and audits the
    assessment, which the monitoring rules read. A failed pull marks the connection. Once a
    day per business.
-4. **reunderwrite** re-scores each active plan once a month and freezes one that has
-   deteriorated. Before payouts, so a plan it freezes gets no new period and no payout the
+4. **reunderwrite** re-scores each active financed plan once a month and freezes one that
+   has deteriorated. Before payouts, so a plan it freezes gets no new period and no payout the
    same day.
-5. **reconcile-payments** polls for returned payments and undoes each one. Before anything
-   reads who is paid up.
-6. **age-receivables** recomputes every plan's delinquency bucket, marks installments
+5. **refresh-eligibility** expires stale graduation offers, opens the financed plan for an
+   accepted one once no pass-through month is in flight, and re-underwrites pass-through
+   customers with three on time months in a row on fresh data and payment history, at most
+   once a month, offering a financed plan when they now qualify. See UNDERWRITING.md,
+   "Graduation".
+6. **reconcile-payments** polls for returned payments and undoes each one, pass-through
+   collections included. Before anything reads who is paid up.
+7. **age-receivables** recomputes every plan's delinquency bucket, marks installments
    `LATE` once past grace whether or not a debit was attempted, writes an audit event on
    every change of bucket, and charges off plans at 90 days.
-7. **generate-periods** creates next month's landlord payout and its installments for every
-   active plan that is not frozen, 30 days before the due date, using
-   `buildInstallmentSchedule` from `packages/shared`.
-8. **process-payouts** pays, holds, releases, or cancels every payout that is due: reserve
-   capital, call the payments provider, post the ledger, mark `PAID`. A capital shortfall or
-   a provider failure marks the payout `FAILED` with the reason and it is tried again on the
-   next run.
-9. **collect-installments** makes the debits the policy schedules for today on every
-   installment whose payout has been paid, posts the ledger, and settles operating cash with
-   the pool.
-10. **provision** sets the allowance to the policy's reserve on outstanding principal by
+8. **generate-periods** creates next month's landlord payout and its installments for every
+   active financed plan that is not frozen, 30 days before the due date, using
+   `buildInstallmentSchedule` from `packages/shared`, and next month's pass-through month for
+   every active pass-through plan.
+9. **process-payouts** pays, holds, releases, or cancels every payout that is due: reserve
+   capital, claim the month, call the payments provider, post the ledger, mark `PAID`. A
+   capital shortfall or a provider failure marks the payout `FAILED` with the reason and it is
+   tried again on the next run. Then pass-through collections past their return window
+   settle, and settled months that are due are paid to the landlord.
+10. **collect-installments** makes the debits the policy schedules for today on every
+    installment whose payout has been paid, posts the ledger, and settles operating cash with
+    the pool. Then the pass-through debits whose window is open.
+11. **provision** sets the allowance to the policy's reserve on outstanding principal by
     bucket and posts the change. It posts on the first run of each calendar month only.
-11. **monitor** runs every monitoring rule on the state the others left and opens, refreshes,
+12. **monitor** runs every monitoring rule on the state the others left and opens, refreshes,
     and resolves alerts. See "Monitoring".
 
 Each run records a `JobRun` row with a summary so a dashboard or an on-call engineer can see
@@ -499,7 +586,7 @@ severity (`INFO`, `WARNING`, `HIGH`, `CRITICAL`), a subject, a status (`OPEN`,
 | Fraud                                      | Landlord change pending, or applied shortly before a payout. Landlord payout account is a borrower's bank account. One landlord account paid by several unrelated users. One bank account linked by several businesses. Application velocity and reapplying after a decline. Open screening hits. Unauthorized returns and account lockouts (from events)                                                                                                                                                                                                                           |
 | Payments                                   | Unauthorized, administrative and overall return rates over 60 days against the network thresholds, each with a minimum sample. Repeated failures on one bank account. Collection attempts exhausted. Returned and cancelled payouts, disabled bank links (from events)                                                                                                                                                                                                                                                                                                              |
 | Portfolio                                  | First payment default rate by origination month. Share of principal delinquent or in default. Month over month roll. Industry and single name concentration against the credit policy caps. Pool utilization. Realized against expected loss by cohort. Charge-offs (from events)                                                                                                                                                                                                                                                                                                   |
-| Books                                      | Trial balance. Operating cash left after a full run. Each receivable account against unpaid principal on paid payouts. Allowance and pool never negative. Jobs that failed or stopped. Append-only triggers present (`pg_trigger`)                                                                                                                                                                                                                                                                                                                                                  |
+| Books                                      | Trial balance. Operating cash left after a full run. Each receivable account against unpaid principal on paid payouts (and pass-through rent returned after payout). Allowance and pool never negative. Jobs that failed or stopped. Append-only triggers present (`pg_trigger`). Landlord paid on a pass-through plan without a settled collection. `landlord_payable` and `pass_through_cash` against collected, unpaid pass-through months. A second landlord payment for a month refused (from events)                                                                          |
 | Data (alert categories FRAUD and PAYMENTS) | A bank or platform connection on a business with an active plan that needs reconnecting, fails, or has an expired token (warning, high for a bank; auto-resolves). History rewritten between pulls (high, critical when it flatters; once, closed by a person). A platform's payout destination changed after the plan started (warning; once). Settlement match fell 20 points from the decision to under 85% (warning, high under 50%; auto-resolves). Several businesses under different users on one platform account or payout account (warning, high at three; auto-resolves) |
 | Compliance                                 | Applications undecided at 20 and 30 days. Screening results older than the rescreen interval. An application deleted inside the 12 month retention period. Businesses with a plan that are not verified. Adverse action notice missing (inactive until a later phase stores the notice)                                                                                                                                                                                                                                                                                             |
 

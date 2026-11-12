@@ -89,6 +89,8 @@ function portfolio(customers: CustomerResult[], label = 'base'): PortfolioResult
     plansNeverFunded: 0,
     bucketRoll: emptyBucketRoll(),
     bucketEntryRoll: emptyBucketRoll(),
+    passThrough: null,
+    graduates: [],
     pool: [
       {
         month: '2026-02',

@@ -1,7 +1,10 @@
+import { feeForRent } from '@cashflow/shared';
 import type {
   BankLink as BankLinkDto,
   Business as BusinessDto,
   CommerceLink as CommerceLinkDto,
+  GraduationOffer as GraduationOfferDto,
+  PassThroughPeriod as PassThroughPeriodDto,
   Installment as InstallmentDto,
   LandlordPayout as PayoutDto,
   Lease as LeaseDto,
@@ -19,8 +22,10 @@ import type {
   BankLink,
   Business,
   CommerceLink,
+  GraduationOffer,
   Installment,
   LandlordPayout,
+  PassThroughPeriod,
   Lease,
   RentPlan,
   Repayment,
@@ -32,6 +37,8 @@ import type {
   User,
 } from './generated/prisma/client.ts';
 import type { PlanStanding } from './services/delinquency.ts';
+import { graduationMessage } from './services/graduation.ts';
+import { periodMessage } from './services/pass-through.ts';
 import { ownerVerificationView } from './services/identity.ts';
 import { pendingChangeMessage, pendingRentMessage } from './services/lease-changes.ts';
 import { HOLD_MESSAGES, releaseBy } from './services/payouts.ts';
@@ -206,6 +213,7 @@ export const toLease = (l: Lease, extras: LeaseExtras = {}): LeaseDto => ({
  */
 export const toRentPlan = (p: RentPlan, standing?: PlanStanding): RentPlanDto => ({
   id: p.id,
+  kind: p.kind,
   businessId: p.businessId,
   leaseId: p.leaseId,
   applicationId: p.applicationId,
@@ -289,4 +297,50 @@ export const toReview = (r: ApplicationReview): ReviewDto => ({
   feeBps: r.feeBps,
   isOverride: r.isOverride,
   createdAt: iso(r.createdAt),
+});
+
+/** One pass-through month as the owner sees it, with what to do about it in plain words. */
+export const toPassThroughPeriod = (
+  p: PassThroughPeriod,
+  landlordName: string,
+): PassThroughPeriodDto => ({
+  id: p.id,
+  rentPlanId: p.rentPlanId,
+  periodMonth: p.periodMonth,
+  amountCents: p.amountCents,
+  dueDate: p.dueDate,
+  collectOn: p.collectOn,
+  lastCollectOn: p.lastCollectOn,
+  status: p.status,
+  collectedOn: p.collectedOn,
+  settlesOn: p.settlesOn,
+  paidOn: p.paidOn,
+  landlordPaid: p.status === 'PAID' || p.status === 'RETURNED_AFTER_PAYOUT',
+  heldReason: p.heldReason,
+  missedReason: p.missedReason,
+  returnCode: p.returnCode,
+  message: periodMessage(p, landlordName),
+});
+
+/** A graduation offer, with the fee in dollars at the lease rent. */
+export const toGraduationOffer = (
+  o: GraduationOffer,
+  monthlyRentCents: number,
+): GraduationOfferDto => ({
+  id: o.id,
+  businessId: o.businessId,
+  passThroughPlanId: o.passThroughPlanId,
+  status: o.status,
+  monthlyRentCents,
+  approvedMonthlyLimitCents: o.approvedMonthlyLimitCents,
+  feeBps: o.feeBps,
+  feeCentsPerMonth: feeForRent(monthlyRentCents, o.feeBps),
+  installmentsPerMonth: o.installmentsPerMonth,
+  onTimeMonths: o.onTimeMonths,
+  offeredOn: o.offeredOn,
+  expiresOn: o.expiresOn,
+  acceptedOn: o.acceptedOn,
+  effectivePeriod: o.effectivePeriod,
+  financedPlanId: o.financedPlanId,
+  message: graduationMessage(o, monthlyRentCents),
 });

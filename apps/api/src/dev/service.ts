@@ -24,6 +24,7 @@ import { ACCOUNTS } from '../ledger/accounts.ts';
 import { accountBalance, receivablesBalance, trialBalance } from '../ledger/service.ts';
 import { recordAudit } from '../services/audit.ts';
 import { currentDecision } from '../services/decisions.ts';
+import { passThroughOffer } from '../services/pass-through.ts';
 import { clearDevClock, loadDevClock, nextEventFor, readDevClock } from './clock.ts';
 import { PERSONA_PASSWORD, PERSONAS, personaByKey, type PersonaDefinition } from './personas.ts';
 import { seedDemoData } from './seed.ts';
@@ -53,8 +54,14 @@ export interface PersonaFacts {
   applicationStatus: string | null;
   approvedLimitCents: number | null;
   leaseRentCents: number | null;
-  plan: { status: string; delinquencyStatus: string } | null;
+  plan: { status: string; delinquencyStatus: string; kind?: string } | null;
   heldPayout: boolean;
+  /** Pass-through plans: the latest finished month was missed. */
+  passThroughMissed?: boolean;
+  /** An open graduation offer from a pass-through plan. */
+  graduationOffered?: boolean;
+  /** A declined application that is offered a pass-through plan, with no plan yet. */
+  passThroughAvailable?: boolean;
 }
 
 /** A short label and a tone for where an account stands. Pure: see the unit test. */
@@ -63,6 +70,15 @@ export function describePersonaState(facts: PersonaFacts): DevPersonaState {
   if (!facts.exists) return { ...base, label: 'Not created yet', tone: 'neutral' };
   if (facts.businessName === null) return { ...base, label: 'Nothing created yet', tone: 'info' };
   const held = facts.heldPayout ? ', payout held' : '';
+  if (facts.plan?.kind === 'PASS_THROUGH' && facts.plan.status !== 'CLOSED') {
+    if (facts.graduationOffered) {
+      return { ...base, label: 'Pass-through, graduation offered', tone: 'gold' };
+    }
+    if (facts.passThroughMissed) {
+      return { ...base, label: 'Pass-through, last month missed', tone: 'late' };
+    }
+    return { ...base, label: 'Pass-through plan, current', tone: 'paid' };
+  }
   if (facts.plan) {
     const { status, delinquencyStatus } = facts.plan;
     if (delinquencyStatus === 'CHARGED_OFF') {
@@ -89,7 +105,9 @@ export function describePersonaState(facts: PersonaFacts): DevPersonaState {
         ? { ...base, label: 'Approved below the lease rent', tone: 'due' }
         : { ...base, label: 'Lease linked, no plan yet', tone: 'paid' };
     case 'DECLINED':
-      return { ...base, label: 'Declined', tone: 'late' };
+      return facts.passThroughAvailable && facts.leaseRentCents !== null
+        ? { ...base, label: 'Declined, free plan available', tone: 'due' }
+        : { ...base, label: 'Declined', tone: 'late' };
     case 'NEEDS_INFO':
       return { ...base, label: 'Needs info', tone: 'gold' };
     case 'IN_REVIEW':
@@ -129,6 +147,24 @@ async function personaFacts(db: Db, user: User | null): Promise<PersonaFacts> {
   ]);
   const plan = plans.find((p) => p.status === 'ACTIVE') ?? plans[0] ?? null;
   const decision = application ? await currentDecision(db, application.id) : null;
+  const lastMonth =
+    plan?.kind === 'PASS_THROUGH'
+      ? await db.passThroughPeriod.findFirst({
+          where: {
+            rentPlanId: plan.id,
+            status: { in: ['PAID', 'MISSED', 'RETURNED_AFTER_PAYOUT', 'REFUNDED'] },
+          },
+          orderBy: { dueDate: 'desc' },
+        })
+      : null;
+  const offered =
+    plan?.kind === 'PASS_THROUGH'
+      ? await db.graduationOffer.count({ where: { passThroughPlanId: plan.id, status: 'OFFERED' } })
+      : 0;
+  const available =
+    application?.status === 'DECLINED' && plans.length === 0
+      ? (await passThroughOffer(db, application.id)).eligible
+      : false;
   return {
     exists: true,
     businessName: business.dba ?? business.legalName,
@@ -136,8 +172,13 @@ async function personaFacts(db: Db, user: User | null): Promise<PersonaFacts> {
     approvedLimitCents:
       decision?.outcome === 'APPROVED' ? decision.approvedMonthlyLimitCents : null,
     leaseRentCents: lease?.monthlyRentCents ?? null,
-    plan: plan ? { status: plan.status, delinquencyStatus: plan.delinquencyStatus } : null,
+    plan: plan
+      ? { status: plan.status, delinquencyStatus: plan.delinquencyStatus, kind: plan.kind }
+      : null,
     heldPayout: held > 0,
+    passThroughMissed: lastMonth !== null && lastMonth.status !== 'PAID',
+    graduationOffered: offered > 0,
+    passThroughAvailable: available,
   };
 }
 

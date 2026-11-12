@@ -26,6 +26,7 @@ import {
 } from '@cashflow/shared';
 
 import { CONTROLS_POLICY } from '../controls/policy.ts';
+import { todayIso } from '../dates.ts';
 import type { Db } from '../db.ts';
 import { notFound } from '../errors.ts';
 import type {
@@ -44,7 +45,14 @@ import { bps } from '../monitoring/rules/payments.ts';
 import { toAlert, toAuditEventView } from '../monitoring/service.ts';
 import type { Providers } from '../providers/index.ts';
 import { leaseChangeViews, screeningViews } from '../routes/admin.ts';
-import { toInstallment, toPayout, toRentPlan, toRepayment, toReview } from '../serializers.ts';
+import {
+  toInstallment,
+  toPassThroughPeriod,
+  toPayout,
+  toRentPlan,
+  toRepayment,
+  toReview,
+} from '../serializers.ts';
 import {
   ACTIVE_SERVICING_POLICY,
   classifyReturnCode,
@@ -61,6 +69,8 @@ import { scoreCashFlow } from '../underwriting/scorecard.ts';
 import { AUDIT_EVENTS, AUDIT_SUBJECT_TYPES } from './audit.ts';
 import { CURRENT_DECISION } from './decisions.ts';
 import { planStandings } from './delinquency.ts';
+import { graduationOffers, openGraduationOffer } from './pass-through-views.ts';
+import { paymentHistoryView } from './payment-history.ts';
 import { OPEN_HIT, openHitsForBusiness } from './identity.ts';
 import { gatherPoolState } from './portfolio-state.ts';
 import { delinquencySummary } from './provisioning.ts';
@@ -192,7 +202,7 @@ function decisionSummary(
 type DecisionWithReview = UnderwritingDecision & { review: ApplicationReview | null };
 
 const isCurrent = (d: UnderwritingDecision) =>
-  d.supersededAt === null && d.kind !== CURRENT_DECISION.kind.not;
+  d.supersededAt === null && !(CURRENT_DECISION.kind.notIn as readonly string[]).includes(d.kind);
 
 function applicationSummary(
   a: UnderwritingApplication & {
@@ -253,7 +263,7 @@ export async function businessDetail(db: Db, businessId: string): Promise<Operat
   });
   if (!b) throw notFound('Business');
   const subjects = await businessSubjects(db, b.id);
-  const [pendingLeaseChanges, screenings, alerts] = await Promise.all([
+  const [pendingLeaseChanges, screenings, alerts, offers, openOffer] = await Promise.all([
     leaseChangeViews(db, { businessId: b.id, status: 'PENDING' }),
     screeningViews(db, { businessId: b.id, supersededAt: null }),
     db.alert.findMany({
@@ -261,7 +271,10 @@ export async function businessDetail(db: Db, businessId: string): Promise<Operat
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
     }),
+    graduationOffers(db, b.id),
+    openGraduationOffer(db, b.id),
   ]);
+  const paymentHistory = await paymentHistoryView(db, b.id, todayIso(), openOffer);
   return {
     business: {
       id: b.id,
@@ -316,6 +329,8 @@ export async function businessDetail(db: Db, businessId: string): Promise<Operat
     pendingLeaseChanges,
     screenings,
     alerts: alerts.map(toAlert),
+    paymentHistory,
+    graduationOffers: offers,
   };
 }
 
@@ -333,6 +348,7 @@ export async function businessRentPlans(
     include: {
       lease: { select: { landlordName: true } },
       payouts: { orderBy: { scheduledFor: 'desc' } },
+      passThroughPeriods: { orderBy: { dueDate: 'desc' } },
       installments: {
         orderBy: [{ dueDate: 'desc' }, { sequence: 'desc' }],
         include: { repayments: { orderBy: { createdAt: 'asc' } } },
@@ -362,6 +378,9 @@ export async function businessRentPlans(
         returnClass: r.returnCode ? classifyReturnCode(r.returnCode) : null,
       })),
     })),
+    passThroughPeriods: p.passThroughPeriods.map((period) =>
+      toPassThroughPeriod(period, p.lease.landlordName),
+    ),
   }));
 }
 
@@ -389,7 +408,8 @@ function factorsFor(d: UnderwritingDecision, requestedCents: number) {
             rentCoverageRatio: coverageRatio(freeCashCents(cashFlow), requestedCents, 0),
           }
         : cashFlow;
-    const card = scoreCashFlow(scored, policy);
+    const history = snapshotOf(d).paymentHistory?.summary ?? null;
+    const card = scoreCashFlow(scored, policy, null, history);
     return { factors: card.factors, factorsMatchScore: card.score === d.score };
   } catch {
     // A cash flow summary from before a field existed. No factors beats wrong ones.

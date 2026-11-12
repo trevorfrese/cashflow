@@ -52,4 +52,28 @@ describe('deriveStage', () => {
       deriveStage({ applications: [app('APPROVED')], leases: [lease('ENDED')], plans: [] }).kind,
     ).toBe('APPROVED_NO_LEASE');
   });
+
+  it('shows a pass-through plan on a declined application', () => {
+    const declined = app('DECLINED');
+    const passThrough = {
+      id: 'pt',
+      status: 'ACTIVE',
+      kind: 'PASS_THROUGH',
+      applicationId: declined.id,
+    } as unknown as RentPlan;
+    const stage = deriveStage({
+      applications: [declined],
+      leases: [lease('ACTIVE')],
+      plans: [passThrough],
+    });
+    expect(stage.kind).toBe('ACTIVE_PLAN');
+    // A financed plan still needs an approved application.
+    expect(
+      deriveStage({
+        applications: [declined],
+        leases: [lease('ACTIVE')],
+        plans: [{ ...passThrough, kind: 'FINANCED' }],
+      }).kind,
+    ).toBe('DECLINED');
+  });
 });

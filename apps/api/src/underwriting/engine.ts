@@ -34,6 +34,7 @@ import {
   type CreditPolicy,
   type PolicyThresholds,
 } from './policy.ts';
+import type { PaymentHistoryFactor, PaymentHistorySummary } from './payment-history.ts';
 import { priceFee, type FeeBuildUp } from './pricing.ts';
 import { scoreCashFlow } from './scorecard.ts';
 import { assessVeracity, depthCredit, findingsWith } from '../veracity/assess.ts';
@@ -95,6 +96,13 @@ export interface EngineInput {
    * policy's thresholds. Absent, or a policy without `veracity`, means not checked.
    */
   veracity?: VeracityInput | null;
+  /**
+   * How the business has paid rent through CashFlow, on either kind of plan, summarized by
+   * the service from repayment and pass-through facts. Absent or empty means no history:
+   * the payment history factor is then neutral. Read only under a policy with
+   * `paymentHistory` (version 4).
+   */
+  paymentHistory?: PaymentHistorySummary | null;
 }
 
 /**
@@ -124,6 +132,15 @@ export interface DecisionSnapshot {
   referTriggers: string[];
   /** The data veracity assessment, with the snapshot ids and hashes it read. */
   veracity: VeracityAssessment | null;
+  /**
+   * The payment history factor: the summary it read, the points, and the score before them.
+   * Null when the policy has no payment history factor or the business has no history.
+   */
+  paymentHistory: {
+    summary: PaymentHistorySummary;
+    factor: PaymentHistoryFactor;
+    baseScore: number;
+  } | null;
   /** What the engine would have done had nothing sent the application to a reviewer. */
   recommendation: {
     outcome: DecisionOutcome;
@@ -281,6 +298,7 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
     funding: null,
     referTriggers: [],
     veracity: null,
+    paymentHistory: null,
     recommendation: { outcome: 'NEEDS_INFO', approvedMonthlyLimitCents: null, feeBps: null },
   };
   const veracity =
@@ -415,7 +433,15 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
     cashFlow,
     policy,
     veracity && policy.veracity ? depthCredit(veracity, policy.veracity) : null,
+    input.paymentHistory ?? null,
   );
+  if (card.paymentHistory && input.paymentHistory) {
+    snapshot.paymentHistory = {
+      summary: input.paymentHistory,
+      factor: card.paymentHistory,
+      baseScore: card.baseScore,
+    };
+  }
   const reasons: DecisionReason[] = card.factors.map((f) => reason(f.code, f.message, f.impact));
   const knockouts: DecisionReason[] = [];
 
@@ -714,7 +740,9 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
   };
   const triggers = referTriggers(policy, {
     flags,
-    score: card.score,
+    // The score band referral reads the score before payment history: the factor can move
+    // a business across the cutoff, never into a reviewer's queue.
+    score: card.baseScore,
     limitCents,
     requestedCents: requested,
     firstPlan: exposureContext.onTimePeriods === 0 && exposureContext.businessCommittedCents === 0,

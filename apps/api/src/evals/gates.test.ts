@@ -69,6 +69,8 @@ function resultOf(customers: CustomerResult[]): PortfolioResult {
     plansNeverFunded: 0,
     bucketRoll: emptyBucketRoll(),
     bucketEntryRoll: emptyBucketRoll(),
+    passThrough: null,
+    graduates: [],
     pool: [],
     customers,
   };

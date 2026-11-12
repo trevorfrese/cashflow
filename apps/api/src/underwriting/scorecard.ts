@@ -2,6 +2,11 @@ import type { CashFlowSummary, CreditGrade, DecisionReason } from '@cashflow/sha
 import { COMMERCE_PLATFORM_LABELS as PLATFORM_LABEL, formatCents } from '@cashflow/shared';
 
 import type { DepthCredit } from '../veracity/assess.ts';
+import {
+  paymentHistoryFactor,
+  type PaymentHistoryFactor,
+  type PaymentHistorySummary,
+} from './payment-history.ts';
 import { CURRENT_POLICY, type CreditPolicy } from './policy.ts';
 
 /**
@@ -28,6 +33,14 @@ export interface Scorecard {
   score: number;
   grade: CreditGrade;
   factors: Factor[];
+  /**
+   * The score before the payment history factor: the eight cash flow factors alone. Equal
+   * to `score` without history. Escalation reads this one, so payment history can never
+   * send an application to a reviewer that would not have gone without it.
+   */
+  baseScore: number;
+  /** The payment history factor, or null when the policy has none or there is no history. */
+  paymentHistory: PaymentHistoryFactor | null;
 }
 
 /** Piecewise linear interpolation over sorted [x, y] breakpoints, clamped at the ends. */
@@ -79,6 +92,8 @@ export function scoreCashFlow(
   policy: CreditPolicy = CURRENT_POLICY,
   /** From the veracity assessment. Read by scorecard 3 only. */
   depth: DepthCredit | null = null,
+  /** Rent paid through CashFlow so far. Read only under a policy with `paymentHistory`. */
+  history: PaymentHistorySummary | null = null,
 ): Scorecard {
   const factors: Factor[] = [];
   const add = (
@@ -274,14 +289,30 @@ export function scoreCashFlow(
     }`,
   );
 
-  const score = Math.min(
+  const baseScore = Math.min(
     100,
     Math.max(
       0,
       factors.reduce((sum, f) => sum + f.points, 0),
     ),
   );
-  return { score, grade: gradeFor(score, policy), factors };
+
+  // 9. Payment history through CashFlow (version 4). Outside the eight weights: it adds or
+  // takes points on top of them, and is absent, not zero, with no history, so a first time
+  // applicant is scored exactly as under version 3.
+  const ph = policy.paymentHistory ? paymentHistoryFactor(history, policy.paymentHistory) : null;
+  if (ph) {
+    factors.push({
+      code: 'PAYMENT_HISTORY',
+      label: 'Payment history',
+      points: ph.points,
+      maxPoints: ph.maxPoints,
+      impact: ph.impact,
+      message: ph.message,
+    });
+  }
+  const score = Math.min(100, Math.max(0, baseScore + (ph?.points ?? 0)));
+  return { score, grade: gradeFor(score, policy), factors, baseScore, paymentHistory: ph };
 }
 
 function trendMessage(s: CashFlowSummary): string {

@@ -8,7 +8,10 @@ import {
   StartOAuthResponse,
   Installment,
   LandlordPayout,
+  GraduationOffer,
   Lease,
+  PassThroughOffer,
+  PaymentHistory,
   RentPlan,
   RentPlanDetail,
   Repayment,
@@ -22,6 +25,7 @@ import type {
   CreateLeaseRequest,
   CreateRentPlanRequest,
   PayInstallmentRequest,
+  StartPassThroughPlanRequest,
   UpdateRentPlanRequest,
 } from '@cashflow/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -42,6 +46,9 @@ export const keys = {
   installments: (planId: string) => ['rent-plans', planId, 'installments'] as const,
   payouts: (planId: string) => ['rent-plans', planId, 'payouts'] as const,
   repayments: (planId: string) => ['rent-plans', planId, 'repayments'] as const,
+  passThroughOffer: (applicationId: string) =>
+    ['applications', applicationId, 'pass-through'] as const,
+  paymentHistory: (businessId: string) => ['businesses', businessId, 'payment-history'] as const,
 };
 
 export function useBusinesses(enabled = true) {
@@ -225,6 +232,61 @@ export function useResubmitApplication() {
     onSuccess: (app) => {
       void qc.invalidateQueries({ queryKey: keys.applications(app.businessId) });
       void qc.invalidateQueries({ queryKey: keys.businesses });
+    },
+  });
+}
+
+// ---------- Pass-through plan and graduation ----------
+
+/** The free pass-through offer on a declined application. */
+export function usePassThroughOffer(applicationId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: keys.passThroughOffer(applicationId ?? ''),
+    queryFn: () =>
+      api(`/underwriting/applications/${applicationId}/pass-through`, {
+        schema: PassThroughOffer,
+      }),
+    enabled: Boolean(applicationId) && enabled,
+  });
+}
+
+export function useStartPassThroughPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: StartPassThroughPlanRequest) =>
+      api('/pass-through-plans', { method: 'POST', body, schema: RentPlan }),
+    onSuccess: (plan) => {
+      void qc.invalidateQueries({ queryKey: keys.rentPlans(plan.businessId) });
+      void qc.invalidateQueries({ queryKey: keys.leases(plan.businessId) });
+      void qc.invalidateQueries({ queryKey: keys.paymentHistory(plan.businessId) });
+      void qc.invalidateQueries({ queryKey: keys.passThroughOffer(plan.applicationId) });
+      void qc.invalidateQueries({ queryKey: keys.businesses });
+    },
+  });
+}
+
+export function usePaymentHistory(businessId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: keys.paymentHistory(businessId ?? ''),
+    queryFn: () => api(`/businesses/${businessId}/payment-history`, { schema: PaymentHistory }),
+    enabled: Boolean(businessId) && enabled,
+  });
+}
+
+export function useAcceptGraduationOffer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (offerId: string) =>
+      api(`/graduation-offers/${offerId}/accept`, {
+        method: 'POST',
+        body: {},
+        schema: GraduationOffer,
+      }),
+    onSuccess: (offer) => {
+      void qc.invalidateQueries({ queryKey: keys.plan(offer.passThroughPlanId) });
+      void qc.invalidateQueries({ queryKey: keys.paymentHistory(offer.businessId) });
+      void qc.invalidateQueries({ queryKey: keys.rentPlans(offer.businessId) });
+      void qc.invalidateQueries({ queryKey: keys.applications(offer.businessId) });
     },
   });
 }

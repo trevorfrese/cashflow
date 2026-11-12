@@ -25,8 +25,18 @@ export type DecisionOutcome = z.infer<typeof DecisionOutcome>;
 export const ReviewDecision = z.enum(['APPROVE', 'DECLINE', 'REQUEST_INFO']);
 export type ReviewDecision = z.infer<typeof ReviewDecision>;
 
-/** Why a decision row exists: the engine ran, a reviewer decided, or a periodic review ran. */
-export const DecisionKind = z.enum(['ENGINE', 'REVIEW', 'PERIODIC_REVIEW']);
+/**
+ * Why a decision row exists: the engine ran, a reviewer decided, a periodic review ran, the
+ * refresh-eligibility job re-scored a pass-through customer, or the owner accepted a
+ * graduation offer.
+ */
+export const DecisionKind = z.enum([
+  'ENGINE',
+  'REVIEW',
+  'PERIODIC_REVIEW',
+  'ELIGIBILITY_REVIEW',
+  'GRADUATION',
+]);
 export type DecisionKind = z.infer<typeof DecisionKind>;
 
 export const LeaseStatus = z.enum(['DRAFT', 'ACTIVE', 'ENDED']);
@@ -34,6 +44,49 @@ export type LeaseStatus = z.infer<typeof LeaseStatus>;
 
 export const RentPlanStatus = z.enum(['ACTIVE', 'PAUSED', 'CLOSED']);
 export type RentPlanStatus = z.infer<typeof RentPlanStatus>;
+
+/**
+ * `FINANCED`: CashFlow pays the landlord in full on the due date and the business repays in
+ * installments plus a fee. `PASS_THROUGH`: free. CashFlow collects the rent from the business
+ * a few business days early and pays the landlord once that collection has settled.
+ */
+export const RentPlanKind = z.enum(['FINANCED', 'PASS_THROUGH']);
+export type RentPlanKind = z.infer<typeof RentPlanKind>;
+
+/** One month of a pass-through plan. */
+export const PassThroughPeriodStatus = z.enum([
+  /** Generated. Nothing debited yet. */
+  'SCHEDULED',
+  /** Debited, and inside the window in which the debit can still come back. */
+  'COLLECTING',
+  /** Collected and settled. The landlord is paid on the due date. */
+  'SETTLED',
+  /** The landlord was paid. */
+  'PAID',
+  /** Nothing collected in time, or the debit came back: CashFlow did not pay the landlord. */
+  'MISSED',
+  /** Collected, but the landlord payout was held too long: the money went back. */
+  'REFUNDED',
+  /** The debit came back after the landlord was paid. The business owes the rent to CashFlow. */
+  'RETURNED_AFTER_PAYOUT',
+  /** Closed before any money moved. */
+  'CANCELLED',
+]);
+export type PassThroughPeriodStatus = z.infer<typeof PassThroughPeriodStatus>;
+
+/** An offer to move from a pass-through plan to a financed one. */
+export const GraduationOfferStatus = z.enum([
+  'OFFERED',
+  'ACCEPTED',
+  'COMPLETED',
+  'EXPIRED',
+  'WITHDRAWN',
+]);
+export type GraduationOfferStatus = z.infer<typeof GraduationOfferStatus>;
+
+/** How a month of rent through CashFlow went. */
+export const PaymentMonthOutcome = z.enum(['ON_TIME', 'LATE', 'MISSED']);
+export type PaymentMonthOutcome = z.infer<typeof PaymentMonthOutcome>;
 
 /**
  * `HELD`: due, but not paid while something holds it (a past due balance, a frozen or paused
@@ -86,6 +139,8 @@ export const PayoutHoldReason = z.enum([
   'LEASE_CHANGE_PENDING',
   /** The lease's rent went up past the approved amount and a new decision is needed. */
   'RENT_INCREASE_PENDING',
+  /** The landlord was already paid for this month, by this plan or another on the lease. */
+  'PERIOD_ALREADY_PAID',
 ]);
 export type PayoutHoldReason = z.infer<typeof PayoutHoldReason>;
 

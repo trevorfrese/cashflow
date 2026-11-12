@@ -19,7 +19,10 @@ import { landlordIsApplicant, type IntegrityContext } from '../underwriting/inte
  * themselves stay in `underwriting/exposure.ts` and `underwriting/integrity.ts`.
  */
 
-/** A plan counts toward exposure while it can still draw a landlord payout. */
+/**
+ * A financed plan counts toward exposure while it can still draw a landlord payout. A
+ * pass-through plan never does: CashFlow advances nothing on it.
+ */
 const COMMITTED_STATUSES = ['ACTIVE', 'PAUSED'] as const;
 
 /**
@@ -39,7 +42,7 @@ export async function gatherPoolState(tx: Tx, providers: Providers): Promise<Poo
     accountBalance(tx, ACCOUNTS.CASH),
     receivablesBalance(tx),
     tx.rentPlan.aggregate({
-      where: { status: { in: [...COMMITTED_STATUSES] } },
+      where: { kind: 'FINANCED', status: { in: [...COMMITTED_STATUSES] } },
       _sum: { monthlyRentCents: true },
     }),
   ]);
@@ -109,6 +112,7 @@ export async function gatherExposureContext(
     tx.rentPlan.aggregate({
       where: {
         businessId: lookup.businessId,
+        kind: 'FINANCED',
         status: { in: [...COMMITTED_STATUSES] },
         ...notThisPlan,
       },
@@ -116,6 +120,7 @@ export async function gatherExposureContext(
     }),
     tx.rentPlan.aggregate({
       where: {
+        kind: 'FINANCED',
         status: { in: [...COMMITTED_STATUSES] },
         business: { industry: lookup.industry },
         ...notThisPlan,

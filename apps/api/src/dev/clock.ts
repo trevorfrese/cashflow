@@ -193,7 +193,7 @@ export async function nextEventFor(
 ): Promise<DevNextEvent | null> {
   const policy = ACTIVE_SERVICING_POLICY;
   const owned = { business: { ownerUserId: userId } };
-  const [payouts, installments, changes, reviews] = await Promise.all([
+  const [payouts, installments, changes, reviews, months, offers] = await Promise.all([
     db.landlordPayout.findMany({
       where: { rentPlan: owned, status: { in: ['SCHEDULED', 'HELD'] } },
       select: { status: true, scheduledFor: true },
@@ -210,6 +210,14 @@ export async function nextEventFor(
     db.underwritingApplication.findMany({
       where: { ...owned, status: 'IN_REVIEW', submittedAt: { not: null } },
       select: { submittedAt: true },
+    }),
+    db.passThroughPeriod.findMany({
+      where: { rentPlan: owned, status: { in: ['SCHEDULED', 'COLLECTING', 'SETTLED'] } },
+      select: { status: true, collectOn: true, dueDate: true },
+    }),
+    db.graduationOffer.findMany({
+      where: { passThroughPlan: owned, status: 'OFFERED' },
+      select: { expiresOn: true },
     }),
   ]);
 
@@ -244,6 +252,15 @@ export async function nextEventFor(
   }
   for (const c of changes) {
     candidates.push({ date: c.effectiveOn, label: 'Landlord change takes effect' });
+  }
+  for (const m of months) {
+    if (m.status === 'SCHEDULED') {
+      candidates.push({ date: m.collectOn, label: 'Pass-through rent collected' });
+    }
+    candidates.push({ date: m.dueDate, label: 'Landlord paid from the pass-through collection' });
+  }
+  for (const o of offers) {
+    candidates.push({ date: addDays(o.expiresOn, 1), label: 'Graduation offer expires' });
   }
   for (const r of reviews) {
     const submittedOn = r.submittedAt!.toISOString().slice(0, 10);

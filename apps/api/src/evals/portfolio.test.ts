@@ -6,12 +6,13 @@ import {
   type ServicingPolicy,
 } from '../servicing/policy.ts';
 import { decide } from '../underwriting/engine.ts';
-import { POLICY_V1, POLICY_V2 } from '../underwriting/policy.ts';
+import { POLICY_V1, POLICY_V2, POLICY_V4 } from '../underwriting/policy.ts';
 import { STRESS } from './assumptions.ts';
 import { makeApplicant } from './fixtures.ts';
 import { computeMetrics } from './metrics.ts';
 import { drawPopulation } from './population.ts';
 import {
+  defaultPassThroughSim,
   runPortfolio,
   runThroughTheDoor,
   throughTheDoorCustomers,
@@ -677,5 +678,80 @@ describe('portfolio simulator: through the door', () => {
       bad: false,
     });
     expect(unscored).toMatchObject({ outcome: 'NEEDS_INFO', score: null, payoutCount: 0 });
+  });
+});
+
+describe('portfolio simulator: pass-through plans and graduation', () => {
+  const population = drawPopulation({ n: 300, seed: 'pass-through' });
+  const v4 = {
+    decide: (input: Parameters<typeof decide>[0]) => decide(input, POLICY_V4),
+    exposure: POLICY_V4.exposure,
+    servicing: STANDARD_SERVICING_POLICY,
+    returnDelayDays: 2,
+  };
+  const without = runPortfolio(population, v4);
+  const withPassThrough = runPortfolio(population, {
+    ...v4,
+    passThrough: defaultPassThroughSim(POLICY_V4.graduation!, 12),
+  });
+
+  it('leaves every origination decision as it was', () => {
+    expect(withPassThrough.customers.map((c) => [c.applicantId, c.outcome, c.score])).toEqual(
+      without.customers.map((c) => [c.applicantId, c.outcome, c.score]),
+    );
+    expect(without.passThrough).toBeNull();
+    expect(without.graduates).toEqual([]);
+  });
+
+  it('puts credit declines, and only them, on a pass-through plan', () => {
+    const stats = withPassThrough.passThrough!;
+    expect(stats.declined).toBe(
+      withPassThrough.customers.filter((c) => c.engineOutcome === 'DECLINED').length,
+    );
+    expect(stats.eligible).toBeGreaterThan(0);
+    expect(stats.onTimeMonths + stats.missedMonths).toBe(stats.months);
+    for (const c of withPassThrough.customers) {
+      if (c.passThroughMonths > 0) expect(c.engineOutcome).toBe('DECLINED');
+      // A pass-through plan never fronts anything.
+      if (c.outcome !== 'APPROVED') expect(c.payoutCount).toBe(0);
+    }
+    expect(withPassThrough.customers.reduce((n, c) => n + c.passThroughMonths, 0)).toBe(
+      stats.months,
+    );
+  });
+
+  it('graduates only after enough on time months, as financed plans from the same pool', () => {
+    const stats = withPassThrough.passThrough!;
+    expect(withPassThrough.graduates).toHaveLength(stats.graduated);
+    expect(stats.graduated).toBeLessThanOrEqual(stats.offers);
+    expect(stats.offers).toBeLessThanOrEqual(stats.reviewApproved);
+    for (const g of withPassThrough.graduates) {
+      expect(g.graduated).toBe(true);
+      expect(g.outcome).toBe('APPROVED');
+      expect(g.passThroughOnTimeMonths).toBeGreaterThanOrEqual(
+        POLICY_V4.graduation!.minOnTimeMonths,
+      );
+      expect(g.approvedLimitCents!).toBeGreaterThanOrEqual(g.requestedRentCents);
+      expect(g.payoutCents).toBe(
+        g.principalCollectedCents + g.chargedOffCents + g.outstandingCents,
+      );
+    }
+    // The pool conserves cash across the origination book and the graduates together.
+    const all = [...withPassThrough.customers, ...withPassThrough.graduates];
+    const total = (f: (c: (typeof all)[number]) => number) => all.reduce((s, c) => s + f(c), 0);
+    expect(
+      withPassThrough.poolStartCents +
+        total((c) => c.feesCollectedCents) -
+        total((c) => c.chargedOffCents - c.recoveredCents),
+    ).toBe(withPassThrough.poolEndCents + total((c) => c.outstandingCents));
+  });
+
+  it('is deterministic', () => {
+    const again = runPortfolio(population, {
+      ...v4,
+      passThrough: defaultPassThroughSim(POLICY_V4.graduation!, 12),
+    });
+    expect(again.passThrough).toEqual(withPassThrough.passThrough);
+    expect(again.graduates).toEqual(withPassThrough.graduates);
   });
 });

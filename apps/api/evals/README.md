@@ -9,8 +9,11 @@ It draws a synthetic population, runs every applicant through the real `decide()
 by day against simulated bank accounts and a finite capital pool. Nothing touches the
 database, the network, or a clock. The same seeds always give the same report.
 
-**Current state: 10 of 10 gates pass** under `cashflow-v3` (version 2 plus the data veracity
-checks) on a population extended with connection data, honest messiness, and five more fraud
+**Current state: 10 of 10 gates pass** under `cashflow-v4` (version 3 plus the payment history
+factor, with credit declines put on the free pass-through plan and graduated from it; see
+"Pass-through and graduation" below). Its origination decisions are version 3's for every
+applicant, so every gated number equals `v3_standard`'s. Version 3 was version 2 plus the data veracity
+checks on a population extended with connection data, honest messiness, and five more fraud
 archetypes. See "Data veracity" below for what changed and what it cost. The AUC gate is
 judged on every scored honest applicant, through a counterfactual run that funds the declined
 ones too (0.873 against 0.70). Measured the old way, on funded plans only, it is still 0.669, and that figure is
@@ -316,6 +319,42 @@ Definitions used by the gates and the report:
 - **First payment default**: an installment of the first period reached 30 days past due.
 - **Net profitable customer**: fees collected exceed that customer's cost of funds,
   servicing, and net loss.
+
+## Pass-through and graduation
+
+Phase 6 added the free pass-through plan to the gated configuration only (`v4_standard`).
+Every applicant the engine declines for credit capacity alone gets one: the rent is debited
+five business days before the due date after the balance check, retried while it can still
+settle, and the landlord is paid on the due date only from what was collected. A month with
+nothing collected in time is missed, and the business pays the landlord itself. The day a
+month completes, a plan with three on time months in a row is re-underwritten through the
+same `decide` on its bank history up to that day with its payment history, at most once a
+month; an approval for at least the rent is an offer, and every offer is assumed accepted
+(`graduationAcceptShareBps`). A graduate gets a financed plan from the next rent date, from
+the same pool, played like any other.
+
+Graduates are kept out of `customers`, so every applicant metric and gate reads origination
+decisions exactly as before, and are reported as their own cohort in `report.md`, "Pass-through
+plans and graduation", with a table of the book with and without them. They share the pool, so
+the pool path and the pool gate include them. Challengers, sensitivities and every
+counterfactual run without pass-through. Default run, seeds pooled:
+
+| Scenario | Offered pass-through | Months | On time | Reviews | Would refer | Graduated | Graduates bad | Net loss | Margin |
+| -------- | -------------------: | -----: | ------: | ------: | ----------: | --------: | ------------: | -------: | -----: |
+| Base     |                2,844 | 32,362 |   44.2% |   8,068 |         980 |       229 |          8.3% |   56 bps | 37 bps |
+| Mild     |                3,381 | 37,622 |   42.5% |   9,130 |         629 |       417 |          6.0% |   33 bps | 59 bps |
+| Severe   |                3,853 | 43,479 |   44.5% |  11,846 |         244 |       424 |          4.5% |   23 bps | 69 bps |
+
+With graduates the base book's net loss is 21 bps (19 without) and its margin 77 bps (79).
+Graduates go bad two to three times as often as first time approvals at the same scores, but
+the cohort still makes money at the fees the PD table sets. "Would refer" counts reviews whose
+outcome was a referral: they are not offered and not queued, so the refer rate is unchanged.
+
+Limits: the review reads the raw bank history (no veracity facts or point of sale), uptake of
+both the plan and the offer is assumed to be 100%, and late unauthorized returns of a
+pass-through collection are not simulated (the services and integration tests cover them).
+The missed share is high because a declined business often cannot hold a whole month's rent
+in the account five business days early; that is a property of this population, not a measurement.
 
 ## Data veracity
 

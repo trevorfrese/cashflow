@@ -4,7 +4,7 @@ import { StyleSheet, View } from 'react-native';
 import { Card, EmptyState, ListRow, Pill, Screen, Text, statusPill } from '@/components';
 import { useBusiness } from '@/lib/business';
 import { formatDate } from '@/lib/forms';
-import { usePayouts, useRentPlans, useRepayments } from '@/lib/queries';
+import { usePayouts, useRentPlan, useRentPlans, useRepayments } from '@/lib/queries';
 import { border, colors, hardShadow, spacing } from '@/theme';
 
 type Entry = { id: string; date: string; title: string; amountCents: number; status: string };
@@ -13,8 +13,12 @@ export default function History() {
   const { business } = useBusiness();
   const plans = useRentPlans(business?.id);
   const plan = plans.data?.find((p) => p.status === 'ACTIVE') ?? plans.data?.[0];
-  const repayments = useRepayments(plan?.id);
-  const payouts = usePayouts(plan?.id);
+  const passThrough = plan?.kind === 'PASS_THROUGH';
+  const repayments = useRepayments(passThrough ? undefined : plan?.id);
+  const payouts = usePayouts(passThrough ? undefined : plan?.id);
+  // A pass-through plan has no payouts or repayments: its months carry the money movements.
+  const detail = useRentPlan(passThrough ? plan?.id : undefined);
+  const periods = detail.data?.passThrough?.periods ?? [];
 
   const entries: Entry[] = [
     ...(payouts.data ?? [])
@@ -26,6 +30,30 @@ export default function History() {
         amountCents: p.amountCents,
         status: p.status,
       })),
+    ...periods.flatMap((p) => [
+      ...(p.collectedOn
+        ? [
+            {
+              id: `${p.id}-collected`,
+              date: p.collectedOn,
+              title: 'Collected from your bank',
+              amountCents: p.amountCents,
+              status: p.status === 'COLLECTING' ? 'PENDING' : 'SUCCEEDED',
+            },
+          ]
+        : []),
+      ...(p.landlordPaid && p.paidOn
+        ? [
+            {
+              id: `${p.id}-paid`,
+              date: p.paidOn,
+              title: 'To your landlord',
+              amountCents: p.amountCents,
+              status: 'PAID',
+            },
+          ]
+        : []),
+    ]),
     ...(repayments.data ?? []).map((r) => ({
       id: r.id,
       date: r.createdAt.slice(0, 10),
@@ -37,9 +65,9 @@ export default function History() {
   const totalRepaid = (repayments.data ?? [])
     .filter((r) => r.status === 'SUCCEEDED')
     .reduce((s, r) => s + r.amountCents, 0);
-  const totalPaidOut = (payouts.data ?? [])
-    .filter((p) => p.status === 'PAID')
-    .reduce((s, p) => s + p.amountCents, 0);
+  const totalPaidOut =
+    (payouts.data ?? []).filter((p) => p.status === 'PAID').reduce((s, p) => s + p.amountCents, 0) +
+    periods.filter((p) => p.landlordPaid).reduce((s, p) => s + p.amountCents, 0);
 
   if (!plans.isLoading && !plan) {
     return (
@@ -62,9 +90,9 @@ export default function History() {
           </Text>
         </View>
         <View style={[styles.tile, hardShadow('m')]}>
-          <Text variant="label">Repaid</Text>
+          <Text variant="label">{passThrough ? 'Fees' : 'Repaid'}</Text>
           <Text variant="number" style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-            {formatCents(totalRepaid, { showCents: false })}
+            {formatCents(passThrough ? 0 : totalRepaid, { showCents: false })}
           </Text>
         </View>
       </View>

@@ -186,6 +186,16 @@ const STATUS_TONES: Record<string, Tone> = {
   OPEN: 'bad',
   // In flight
   SCHEDULED: 'info',
+  // Pass-through months, payment history, and graduation offers
+  ON_TIME: 'good',
+  ACCEPTED: 'good',
+  COMPLETED: 'good',
+  COLLECTING: 'info',
+  SETTLED: 'info',
+  OFFERED: 'info',
+  MISSED: 'bad',
+  REFUNDED: 'bad',
+  RETURNED_AFTER_PAYOUT: 'bad',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -196,6 +206,7 @@ const STATUS_LABELS: Record<string, string> = {
   REVIEW: 'Under review',
   DEFAULT: 'In default',
   CLEAR: 'Clear',
+  RETURNED_AFTER_PAYOUT: 'Returned after payout',
 };
 
 /** A status code as a tag: the words to show and the tone to show them in. */

@@ -8,6 +8,8 @@ import {
   appendOnlyTriggersMissing,
   cashNotSwept,
   jobStale,
+  landlordPayableMismatch,
+  passThroughPaidBeforeSettlement,
   poolNegative,
   receivableMismatch,
   trialBalanceUnbalanced,
@@ -190,5 +192,77 @@ describe('books.append_only_triggers_missing', () => {
 
   it('does not fire when all three are in place', () => {
     expect(run(appendOnlyTriggersMissing, inputs())).toEqual([]);
+  });
+});
+
+describe('books.pass_through_payout_before_settlement', () => {
+  const unsettled = {
+    periodId: 'ptp1',
+    rentPlanId: 'plan1',
+    businessId: 'biz1',
+    periodMonth: '2026-12',
+    status: 'PAID',
+    collectedOn: '2026-11-24',
+    settlesOn: '2026-11-27',
+    paidOn: '2026-11-25',
+    dueDate: '2026-12-01',
+    reason: 'PAID_BEFORE_SETTLEMENT',
+  };
+
+  it('is critical for a landlord paid without a settled collection, one alert per month', () => {
+    const data = books({ passThroughUnsettledPayouts: [unsettled] });
+    expect(run(passThroughPaidBeforeSettlement, data)).toMatchObject([
+      {
+        severity: 'CRITICAL',
+        subjectType: 'rent_plan',
+        subjectId: 'plan1',
+        dedupeKey: 'pass_through_unsettled_payout:ptp1',
+        detail: { reason: 'PAID_BEFORE_SETTLEMENT' },
+      },
+    ]);
+    expectDedupes(passThroughPaidBeforeSettlement, data);
+    // Money that went out cannot be unsent: a person closes it.
+    expect(passThroughPaidBeforeSettlement.autoResolves).toBe(false);
+  });
+
+  it('does not fire when every pass-through payment had settled money behind it', () => {
+    expect(run(passThroughPaidBeforeSettlement, inputs())).toEqual([]);
+  });
+});
+
+describe('books.landlord_payable_mismatch', () => {
+  it('is critical when the liability is not the collected and unpaid months', () => {
+    const data = books({
+      landlordPayableCents: 500_000,
+      passThroughCashCents: 500_000,
+      passThroughHeldCents: 300_000,
+    });
+    expect(run(landlordPayableMismatch, data)).toMatchObject([
+      { severity: 'CRITICAL', detail: { differenceCents: 200_000 } },
+    ]);
+    expectDedupes(landlordPayableMismatch, data);
+  });
+
+  it('is critical when the cash behind it is short', () => {
+    const data = books({
+      landlordPayableCents: 300_000,
+      passThroughCashCents: 100_000,
+      passThroughHeldCents: 300_000,
+    });
+    expect(run(landlordPayableMismatch, data)).toHaveLength(1);
+  });
+
+  it('does not fire when all three agree', () => {
+    expect(
+      run(
+        landlordPayableMismatch,
+        books({
+          landlordPayableCents: 300_000,
+          passThroughCashCents: 300_000,
+          passThroughHeldCents: 300_000,
+        }),
+      ),
+    ).toEqual([]);
+    expect(run(landlordPayableMismatch, inputs())).toEqual([]);
   });
 });

@@ -225,6 +225,64 @@ export const appendOnlyTriggersMissing: Rule = {
   },
 };
 
+export const passThroughPaidBeforeSettlement: Rule = {
+  type: 'books.pass_through_payout_before_settlement',
+  category: 'BOOKS',
+  description:
+    'A landlord was paid on a pass-through plan without a settled collection behind it: before the collection cleared its return window, before the due date, or with no collection at all. The service never does this, so it means money was moved around it, and CashFlow may have advanced its own money on a plan that must never carry credit risk.',
+  // A payment that went out cannot be unsent. A person closes it.
+  autoResolves: false,
+  once: false,
+  tripsCircuitBreaker: false,
+  evaluate: (inputs) =>
+    inputs.books.passThroughUnsettledPayouts.map((p): AlertCandidate => ({
+      type: 'books.pass_through_payout_before_settlement',
+      category: 'BOOKS',
+      severity: 'CRITICAL',
+      subjectType: 'rent_plan',
+      subjectId: p.rentPlanId,
+      title: `Pass-through rent for ${p.periodMonth} was paid to the landlord without a settled collection (${p.reason})`,
+      detail: { ...p },
+      dedupeKey: `pass_through_unsettled_payout:${p.periodId}`,
+    })),
+};
+
+export const landlordPayableMismatch: Rule = {
+  type: 'books.landlord_payable_mismatch',
+  category: 'BOOKS',
+  description:
+    'The landlord_payable liability does not equal the pass-through rent collected and not yet paid to landlords or sent back, or the pass-through cash account does not hold the same amount. Either a posting was missed or money moved without one.',
+  autoResolves: true,
+  once: false,
+  tripsCircuitBreaker: false,
+  evaluate: (inputs) => {
+    const { landlordPayableCents, passThroughCashCents, passThroughHeldCents } = inputs.books;
+    if (
+      landlordPayableCents === passThroughHeldCents &&
+      passThroughCashCents === passThroughHeldCents
+    ) {
+      return [];
+    }
+    return [
+      {
+        type: 'books.landlord_payable_mismatch',
+        category: 'BOOKS',
+        severity: 'CRITICAL',
+        subjectType: 'ledger',
+        subjectId: 'landlord_payable',
+        title: `Landlord payable is ${usd(landlordPayableCents)}, pass-through cash ${usd(passThroughCashCents)}, collected and unpaid months ${usd(passThroughHeldCents)}`,
+        detail: {
+          landlordPayableCents,
+          passThroughCashCents,
+          passThroughHeldCents,
+          differenceCents: landlordPayableCents - passThroughHeldCents,
+        },
+        dedupeKey: 'books.landlord_payable_mismatch',
+      },
+    ];
+  },
+};
+
 export const BOOKS_RULES: Rule[] = [
   trialBalanceUnbalanced,
   cashNotSwept,
@@ -233,4 +291,6 @@ export const BOOKS_RULES: Rule[] = [
   poolNegative,
   jobStale,
   appendOnlyTriggersMissing,
+  passThroughPaidBeforeSettlement,
+  landlordPayableMismatch,
 ];

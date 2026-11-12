@@ -102,7 +102,7 @@ async function applicationFacts(
             some: {
               supersededAt: null,
               outcome: 'DECLINED',
-              kind: { not: 'PERIODIC_REVIEW' },
+              kind: { notIn: ['PERIODIC_REVIEW', 'ELIGIBILITY_REVIEW'] },
               decidedAt: { gte: startOf(addDays(asOf, -window)) },
             },
           },
@@ -112,7 +112,7 @@ async function applicationFacts(
     include: {
       business: { select: { legalName: true, ownerUserId: true } },
       decisions: {
-        where: { supersededAt: null, kind: { not: 'PERIODIC_REVIEW' } },
+        where: { supersededAt: null, kind: { notIn: ['PERIODIC_REVIEW', 'ELIGIBILITY_REVIEW'] } },
         orderBy: { decidedAt: 'desc' },
         take: 1,
         select: { outcome: true, decidedAt: true },
@@ -180,13 +180,18 @@ async function exhaustedFacts(tx: Tx): Promise<ExhaustedFact[]> {
 
 /** Every plan with its installments, as the portfolio rules and the operator views read it. */
 export async function planFacts(tx: Tx): Promise<PlanFact[]> {
+  // Financed plans only: a pass-through plan fronts nothing and has no installments.
   const plans = await tx.rentPlan.findMany({
+    where: { kind: 'FINANCED' },
     include: {
       business: { select: { legalName: true, industry: true } },
       application: {
         select: {
           decisions: {
-            where: { supersededAt: null, kind: { not: 'PERIODIC_REVIEW' } },
+            where: {
+              supersededAt: null,
+              kind: { notIn: ['PERIODIC_REVIEW', 'ELIGIBILITY_REVIEW'] },
+            },
             orderBy: { decidedAt: 'desc' },
             take: 1,
             select: { snapshot: true },
@@ -235,7 +240,7 @@ export async function planFacts(tx: Tx): Promise<PlanFact[]> {
 export async function exposureFacts(tx: Tx, providers: Providers): Promise<ExposureFact> {
   const pool = await gatherPoolState(tx, providers);
   const plans = await tx.rentPlan.findMany({
-    where: { status: { in: ['ACTIVE', 'PAUSED'] } },
+    where: { kind: 'FINANCED', status: { in: ['ACTIVE', 'PAUSED'] } },
     select: {
       businessId: true,
       monthlyRentCents: true,
@@ -321,6 +326,15 @@ async function booksFacts(tx: Tx): Promise<BooksFact> {
       (expected.get(i.rentPlan.businessId) ?? 0) + sign * i.principalCents,
     );
   }
+  // A pass-through collection that came back after its landlord was paid is owed on the
+  // receivable account until the business pays it.
+  const returnedAfterPayout = await tx.passThroughPeriod.findMany({
+    where: { status: 'RETURNED_AFTER_PAYOUT' },
+    select: { amountCents: true, rentPlan: { select: { businessId: true } } },
+  });
+  for (const p of returnedAfterPayout) {
+    expected.set(p.rentPlan.businessId, (expected.get(p.rentPlan.businessId) ?? 0) + p.amountCents);
+  }
   const businesses = await tx.business.findMany({ select: { id: true, legalName: true } });
   const names = new Map(businesses.map((b) => [b.id, b.legalName]));
   const receivables = tb.accounts
@@ -346,7 +360,87 @@ async function booksFacts(tx: Tx): Promise<BooksFact> {
     }
   }
 
+  const balanceOf = (code: string) =>
+    tb.accounts.find((a) => a.account.code === code)?.balanceCents ?? 0;
+  const held = await tx.passThroughPeriod.aggregate({
+    where: { status: { in: ['COLLECTING', 'SETTLED'] } },
+    _sum: { amountCents: true },
+  });
+  const paidPeriods = await tx.passThroughPeriod.findMany({
+    where: { status: { in: ['PAID', 'RETURNED_AFTER_PAYOUT'] } },
+    select: {
+      id: true,
+      rentPlanId: true,
+      periodMonth: true,
+      status: true,
+      collectedOn: true,
+      settlesOn: true,
+      settledOn: true,
+      paidOn: true,
+      dueDate: true,
+      rentPlan: { select: { businessId: true } },
+    },
+  });
+  const passThroughUnsettledPayouts: BooksFact['passThroughUnsettledPayouts'] = [];
+  for (const p of paidPeriods) {
+    const reason =
+      p.collectedOn === null || p.settlesOn === null || p.settledOn === null
+        ? 'NO_SETTLED_COLLECTION'
+        : p.paidOn === null
+          ? 'NO_PAYOUT_DATE'
+          : p.paidOn < p.settlesOn
+            ? 'PAID_BEFORE_SETTLEMENT'
+            : p.paidOn < p.dueDate
+              ? 'PAID_BEFORE_DUE_DATE'
+              : null;
+    if (reason) {
+      passThroughUnsettledPayouts.push({
+        periodId: p.id,
+        rentPlanId: p.rentPlanId,
+        businessId: p.rentPlan.businessId,
+        periodMonth: p.periodMonth,
+        status: p.status,
+        collectedOn: p.collectedOn,
+        settlesOn: p.settlesOn,
+        paidOn: p.paidOn,
+        dueDate: p.dueDate,
+        reason,
+      });
+    }
+  }
+  // A pass-through landlord payment recorded for a month that is not marked paid.
+  const sent = await tx.landlordDisbursement.findMany({
+    where: { kind: 'PASS_THROUGH', status: 'SENT' },
+    select: { sourceId: true },
+  });
+  const paidIds = new Set(paidPeriods.map((p) => p.id));
+  const orphanIds = sent.map((d) => d.sourceId).filter((id) => !paidIds.has(id));
+  if (orphanIds.length > 0) {
+    const orphans = await tx.passThroughPeriod.findMany({
+      where: { id: { in: orphanIds } },
+      include: { rentPlan: { select: { businessId: true } } },
+    });
+    for (const p of orphans) {
+      passThroughUnsettledPayouts.push({
+        periodId: p.id,
+        rentPlanId: p.rentPlanId,
+        businessId: p.rentPlan.businessId,
+        periodMonth: p.periodMonth,
+        status: p.status,
+        collectedOn: p.collectedOn,
+        settlesOn: p.settlesOn,
+        paidOn: p.paidOn,
+        dueDate: p.dueDate,
+        reason: 'DISBURSEMENT_WITHOUT_PAID_MONTH',
+      });
+    }
+  }
+
   return {
+    landlordPayableCents: balanceOf(ACCOUNTS.LANDLORD_PAYABLE),
+    passThroughCashCents: balanceOf(ACCOUNTS.PASS_THROUGH_CASH),
+    passThroughHeldCents: held._sum.amountCents ?? 0,
+    passThroughUnsettledPayouts,
     totalDebitsCents: tb.totalDebitsCents,
     totalCreditsCents: tb.totalCreditsCents,
     cashCents: tb.accounts.find((a) => a.account.code === ACCOUNTS.CASH)?.balanceCents ?? 0,

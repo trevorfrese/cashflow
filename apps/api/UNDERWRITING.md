@@ -28,7 +28,8 @@ argument and defaults to `CURRENT_POLICY`.
 | ------------- | ------- | --------------------------------------------------------------------------------------------------------- |
 | `cashflow-v1` | Retired | The launch policy. Kept as `POLICY_V1` so the portfolio evals can run it beside the current one.          |
 | `cashflow-v2` | Retired | Integrity checks, earlier decline detection, expected loss pricing, exposure rules, and manual referrals. |
-| `cashflow-v3` | Current | Version 2 plus the data veracity checks (`src/veracity/`) and a data depth factor that reads them.        |
+| `cashflow-v3` | Retired | Version 2 plus the data veracity checks (`src/veracity/`) and a data depth factor that reads them.        |
+| `cashflow-v4` | Current | Version 3 plus the payment history factor and graduation from the free pass-through plan.                 |
 
 Every stored decision carries the `policyVersion` that made it and a `snapshot`: a summary of
 the inputs, the thresholds in force, the integrity flags, the fee build up with PD and
@@ -84,7 +85,8 @@ flowchart LR
    unaltered, and how was it obtained. See "Veracity".
 5. **Scorecard** (`scorecard.ts`). Eight factors, weights summing to 100, piecewise linear
    curves. Every factor emits a human readable reason tagged positive, negative, or
-   informational.
+   informational. Version 4 adds a ninth, payment history, outside the weights: it adds or
+   takes points and is absent without history. See "Payment history".
 6. **Policy rules** (`engine.ts`). Hard rules that decline regardless of score.
 7. **Capacity, price, and limit**, solved together (`pricing.ts`, `exposure.ts`).
 8. **Escalation.** Anything a person should look at becomes a `REFER`. Clean applications are
@@ -366,6 +368,136 @@ default run the honest applicants' through the door AUC is 0.873 against 0.873 f
 on the same applicants, and the bad rate by grade is monotonic. Regenerating would change fees
 for every applicant for an effect inside the table's own noise; it is left for the next
 calibration.
+
+## Payment history
+
+Version 4 reads how a business has paid rent through CashFlow, on either kind of plan, and
+scores it. A first time applicant has no history and is scored exactly as under version 3:
+the factor is absent, not zero, the score and every reason are the same, and the evals
+check that origination decisions are identical (`v3_standard` against `v4_standard`).
+
+### The record
+
+`src/services/payment-history.ts` builds it on every read; `src/underwriting/payment-history.ts`
+classifies and summarizes it, purely. One month per rent period:
+
+| Outcome   | Financed plan                                                                                  | Pass-through plan                                      |
+| --------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `ON_TIME` | Every installment collected inside grace (3 days), and no payment on the period ever came back | Collected, settled, and paid to the landlord           |
+| `LATE`    | Everything paid in the end, but after grace or after a returned debit                          | (none)                                                 |
+| `MISSED`  | Written off, or an installment 30 days past due                                                | Nothing collected in time, or the collection came back |
+
+A month still in progress has no outcome. Nor does a month in which nothing was owed: a
+financed payout that was never made, a pass-through month refunded because its landlord
+payout was held too long, or one cancelled before collection.
+
+**Why a derived view and not a table.** Every fact it reads is already stored for another
+reason and written in the same transaction as the ledger posting it records: landlord
+payouts, installments and their repayments (a returned debit is a repayment marked
+`RETURNED`), and the status of each pass-through month, which only the collection,
+settlement, payout and return services set. A table of outcomes would be a second copy of
+those facts that could drift from them, and something would have to keep it in step when a
+return arrives weeks later. The view cannot drift: a returned payment stops counting as on
+time the moment it is reconciled, and nobody can enter a month by hand. The cost is a few
+queries per read over at most a few dozen rows a business. `GET /v1/businesses/:id/payment-history`
+returns it, and so does the ops console's customer page.
+
+### The factor
+
+On `PAYMENT_HISTORY_POLICY_V4` in `src/underwriting/policy.ts`:
+
+| Setting                  | Value | Why                                                                                                             |
+| ------------------------ | ----: | --------------------------------------------------------------------------------------------------------------- |
+| Lookback                 |    12 | A year: an old miss stops weighing on a business that has paid since.                                           |
+| Points per on time month |     2 | Counted on the current run of on time months, not the total, so a recent miss resets it.                        |
+| Most points from the run |     8 | Four months. Less than one grade step: history moves a borderline business, it does not make a weak one strong. |
+| Points per late month    |     4 |                                                                                                                 |
+| Points per missed month  |    10 | A miss on rent we were paying is the strongest signal there is.                                                 |
+| Most points taken        |    20 |                                                                                                                 |
+
+The factor appears in the reasons the owner reads (`PAYMENT_HISTORY`) and is stored on the
+decision snapshot with the summary it read and the score before it (`snapshot.paymentHistory`).
+
+**It never adds a referral.** The score band referral (a score fewer than 5 points above the
+cutoff) reads the score before payment history (`Scorecard.baseScore`). Payment history can
+move a business across the cutoff, but cannot put an application into the reviewer's queue
+that would not have gone there without it, nor take one out. Measured in the evals: the
+refer rate is the same as version 3's to the applicant.
+
+The PD table is not regenerated for version 4. Every first time decision is version 3's, and
+those are what the table is calibrated on. The graduated cohort is too small to calibrate a
+band on (see "Graduation" and `evals/report.md`).
+
+## Pass-through plans
+
+A business declined for credit capacity can still have CashFlow pay its landlord, free, on a
+pass-through plan (`RentPlan.kind = PASS_THROUGH`): CashFlow collects the whole month's rent
+from the business's bank five business days before the due date and pays the landlord on the
+due date, once the collection is past its return window. It never advances its own money on
+one, so it carries no credit risk, and it never touches the capital pool or the exposure caps.
+The money flow and postings are in `ARCHITECTURE.md`, "Pass-through plans".
+
+Who is offered one (`passThroughEligibility` in `src/underwriting/pass-through.ts`): an
+engine decision that is `DECLINED` with at least one capacity reason (too new, revenue too
+low, overdrafts, negative days, rent share, decline in revenue, no free cash flow, score
+below the cutoff, no capacity, fee above the cap, rent below the minimum, exposure limit) and
+no trust reason. Never on a referral, a request for information, a reviewer's decision, or a
+decline with an integrity or veracity knockout, an identity that could not be verified, a
+landlord account that is the applicant's own, or a lease far above the rent the account shows
+(`RENT_NOT_VERIFIED`). A pass-through plan moves the business's money to a payee on its say
+so: anything that questions who the business is or whether the lease is real rules it out.
+
+## Graduation
+
+Policy version 4 sets `graduation: { minOnTimeMonths: 3, offerValidDays: 30 }`. The
+`refresh-eligibility` job (`src/services/graduation.ts`):
+
+1. Re-underwrites a running pass-through plan once it has three on time months in a row, at
+   most once a calendar month (keyed by application and month, with a unique index), on
+   freshly pulled data, through the same data path and engine as an application, with its
+   payment history. Months completed before the review date count, so two runs on one day
+   agree. Time in business moves on from what was stated. The stated revenue checks are
+   skipped, as in a periodic review, and the lease is treated as verified: CashFlow has paid
+   that landlord from the business's own money for months.
+2. Stores the result as an `ELIGIBILITY_REVIEW` decision beside the decline. It is never the
+   current decision.
+3. Offers a financed plan when the result is an approval for at least the lease rent. A
+   referral is not offered and is not sent to the queue: the job looks again next month.
+4. Expires an offer not accepted in 30 days, and withdraws one when a month is missed.
+
+The owner accepts through `POST /v1/graduation-offers/:id/accept`. Nothing switches mid-cycle:
+the financed plan opens only when no pass-through month is being collected, settling, or
+waiting for its due date, and takes over from the next month. In one database transaction the
+offer's terms become the application's current decision (kind `GRADUATION`), the pass-through
+plan closes (`GRADUATED`), its months not yet started are cancelled, and the financed plan
+opens through `createRentPlanTx`, so the exposure caps and funding rules apply as to any plan.
+A refusal that can clear (the pool is full, a landlord change is waiting) leaves the
+pass-through plan running and is tried again the next day; any other withdraws the offer.
+Offer, acceptance, completion, expiry and withdrawal are each an audit event.
+
+What the evals found: graduates go bad more often than first time approvals at the same score.
+The businesses that fail after graduating are ones whose hidden health is poor but whose bank
+data looks good months later, and they paid every pass-through month on time, so a longer run
+of on time months barely separates them (six months instead of three changed the cohort's bad
+rate from about 10% to 8% on three seeds, with fewer graduates). On the default run (five
+seeds) 229 businesses graduate in the base case: 8.3% go bad, net loss 56 bps of volume, and
+the cohort still earns a 37 bps margin; with them the book's net loss is 21 bps against 19.
+The details are in `evals/report.md`, "Pass-through plans and graduation". Pricing graduates on their own PD is
+the next calibration step once there are enough of them.
+
+## Open questions for counsel
+
+Collected into `COMPLIANCE.md` in a later phase.
+
+- **Is the pass-through plan money transmission?** CashFlow receives the business's own money
+  and holds it for a few days before paying it on to a third party, the landlord, on the
+  business's instruction. That is the pattern state money transmitter laws and federal money
+  services business rules are written around, and the free price does not obviously change
+  it. Whether an exemption applies (for example acting as the landlord's agent for payment, or
+  as a payment processor), or whether the funds must instead be held by a licensed partner in
+  a for-benefit-of account, is a question for counsel. The sandbox keeps the money in a
+  separate ledger account (`pass_through_cash`) behind a liability (`landlord_payable`) so the
+  books already show it as the business's money, but that is bookkeeping, not an answer.
 
 ## Policy rules
 

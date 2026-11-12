@@ -1,6 +1,7 @@
 import type { IsoDate } from '@cashflow/shared';
 
 import type { AppContext } from '../context.ts';
+import { processPassThroughPayouts } from '../services/pass-through.ts';
 import { processPayout } from '../services/payouts.ts';
 import { runJob } from './runner.ts';
 
@@ -28,6 +29,8 @@ export function processPayoutsJob(ctx: AppContext, asOf: IsoDate) {
       const outcome = await processPayout(ctx, id, asOf);
       counts[outcome] += 1;
     }
-    return counts;
+    // Pass-through: settle what has cleared, then pay the landlord from settled money only.
+    const passThrough = await processPassThroughPayouts(ctx, asOf);
+    return { ...counts, ...passThrough };
   });
 }

@@ -1,4 +1,4 @@
-import type { Installment, Lease } from '@cashflow/shared';
+import type { GraduationOffer, Installment, Lease, PassThroughPeriod } from '@cashflow/shared';
 import { formatBps, formatCents } from '@cashflow/shared';
 import { router } from 'expo-router';
 import { useState } from 'react';
@@ -21,11 +21,21 @@ import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { formatDate, formatPeriod, ordinal, todayIso } from '@/lib/forms';
 import {
+  currentGraduationOffer,
+  isMissedPeriod,
+  latestFinishedPeriod,
+  onTimeLine,
+  periodStatusLabel,
+} from '@/lib/pass-through';
+import {
+  useAcceptGraduationOffer,
   useApplications,
   useConnections,
   useInstallments,
   useLeases,
+  usePassThroughOffer,
   usePayInstallment,
+  usePaymentHistory,
   useRentPlan,
   useRentPlans,
 } from '@/lib/queries';
@@ -171,27 +181,7 @@ function StageCard({ stage, leases }: { stage: Stage; leases: Lease[] }) {
         </Card>
       );
     case 'DECLINED':
-      return (
-        <Card>
-          <Pill label="Not approved" tone="late" />
-          <Text variant="title">We could not approve this yet</Text>
-          <Text variant="body" tone="muted">
-            The decision lists exactly what would need to change.
-          </Text>
-          <Button
-            title="See the reasons"
-            variant="secondary"
-            onPress={() =>
-              router.push({ pathname: '/application/[id]', params: { id: stage.application.id } })
-            }
-          />
-          <Button
-            title="Start a new application"
-            variant="text"
-            onPress={() => router.push('/application/new')}
-          />
-        </Card>
-      );
+      return <DeclinedCard applicationId={stage.application.id} />;
     case 'APPROVED_NO_LEASE':
       return (
         <Card>
@@ -241,6 +231,15 @@ function StageCard({ stage, leases }: { stage: Stage; leases: Lease[] }) {
         </Card>
       );
     case 'ACTIVE_PLAN':
+      if (stage.plan.kind === 'PASS_THROUGH') {
+        return (
+          <PassThroughSummary
+            planId={stage.plan.id}
+            businessId={stage.plan.businessId}
+            lease={leases.find((l) => l.id === stage.plan.leaseId)}
+          />
+        );
+      }
       return (
         <PlanSummary
           planId={stage.plan.id}
@@ -248,6 +247,188 @@ function StageCard({ stage, leases }: { stage: Stage; leases: Lease[] }) {
         />
       );
   }
+}
+
+/** A declined application, with the free pass-through plan when it is offered. */
+function DeclinedCard({ applicationId }: { applicationId: string }) {
+  const offer = usePassThroughOffer(applicationId);
+  const free = offer.data?.eligible ? offer.data : null;
+  const open = () => router.push({ pathname: '/application/[id]', params: { id: applicationId } });
+  return (
+    <Card>
+      <Pill label="Not approved" tone="late" />
+      <Text variant="title">We could not approve this yet</Text>
+      <Text variant="body" tone="muted">
+        The decision lists exactly what would need to change.
+      </Text>
+      {free ? (
+        <>
+          <Text variant="bodyStrong">{free.headline}</Text>
+          <Text variant="body" tone="muted">
+            We collect your rent a few days early and pay your landlord on time. No fee.
+          </Text>
+          <Button title="See the free plan" variant="azure" icon="arrow-right" onPress={open} />
+        </>
+      ) : (
+        <Button title="See the reasons" variant="secondary" onPress={open} />
+      )}
+      <Button
+        title="Start a new application"
+        variant="text"
+        onPress={() => router.push('/application/new')}
+      />
+    </Card>
+  );
+}
+
+/**
+ * The free pass-through plan: the month in progress (when we collect, when the landlord is
+ * paid), how last month went, and an offer to move to a split rent plan when there is one.
+ */
+function PassThroughSummary({
+  planId,
+  businessId,
+  lease,
+}: {
+  planId: string;
+  businessId: string;
+  lease: Lease | undefined;
+}) {
+  const plan = useRentPlan(planId);
+  const history = usePaymentHistory(businessId);
+  const d = plan.data;
+  if (!d) return <Text tone="muted">Loading plan…</Text>;
+
+  const periods = d.passThrough?.periods ?? [];
+  const next = d.passThrough?.nextPeriod ?? null;
+  const finished = latestFinishedPeriod(periods);
+  const missed = finished && isMissedPeriod(finished) ? finished : null;
+  const offer = currentGraduationOffer(d.graduationOffer, history.data?.graduationOffer);
+  const landlord = lease?.landlordName ?? 'your landlord';
+
+  return (
+    <>
+      {missed ? (
+        <Notice
+          tone="danger"
+          title={`${formatPeriod(missed.periodMonth)} rent was not paid`}
+          message={missed.message}
+        />
+      ) : null}
+      {offer ? (
+        <GraduationCard
+          offer={offer}
+          onDone={() => {
+            void plan.refetch();
+            void history.refetch();
+          }}
+        />
+      ) : null}
+
+      <Card tone="gold" shadow="l">
+        <Text variant="label">
+          {next ? `${formatPeriod(next.periodMonth)} rent` : 'Free pass-through plan'}
+        </Text>
+        <Text variant="money" numberOfLines={1} adjustsFontSizeToFit>
+          {formatCents(next?.amountCents ?? d.monthlyRentCents, { showCents: false })}
+        </Text>
+        {next ? (
+          <>
+            <Text variant="body">{`We collect it from your bank on ${formatDate(next.collectOn)}.`}</Text>
+            <Text variant="body">{`${capitalize(landlord)} is paid on ${formatDate(next.dueDate)}.`}</Text>
+            <PeriodStatus period={next} />
+            <Text variant="body">{next.message}</Text>
+          </>
+        ) : (
+          <Text variant="body">{`Paid to ${landlord} on the ${ordinal(d.dueDayOfMonth)} each month. Your next month shows here before it is collected.`}</Text>
+        )}
+      </Card>
+
+      {finished && !missed ? (
+        <Card>
+          <Text variant="heading">{formatPeriod(finished.periodMonth)}</Text>
+          <PeriodStatus period={finished} />
+          <Text variant="body" tone="muted">
+            {finished.landlordPaid && finished.paidOn
+              ? `Paid to ${landlord} on ${formatDate(finished.paidOn)}. ${finished.message}`
+              : finished.message}
+          </Text>
+        </Card>
+      ) : null}
+
+      <View style={{ gap: spacing.xs }}>
+        <Text variant="caption" tone="muted">
+          Free plan. No fee and no late fees.
+        </Text>
+        {history.data ? (
+          <Text variant="caption" tone="muted">
+            {onTimeLine(history.data)}
+          </Text>
+        ) : null}
+      </View>
+    </>
+  );
+}
+
+/** A month's status as a tag on its own line, never beside long text. */
+function PeriodStatus({ period }: { period: PassThroughPeriod }) {
+  const s = periodStatusLabel(period.status);
+  return (
+    <View style={styles.pillLine}>
+      <Pill label={s.label} tone={s.tone} />
+    </View>
+  );
+}
+
+/** An offer to move from the free plan to a split rent plan. The owner has to accept it. */
+function GraduationCard({ offer, onDone }: { offer: GraduationOffer; onDone: () => void }) {
+  const accept = useAcceptGraduationOffer();
+  const [error, setError] = useState<string | null>(null);
+  const open = offer.status === 'OFFERED';
+
+  const onAccept = async () => {
+    setError(null);
+    try {
+      await accept.mutateAsync(offer.id);
+      onDone();
+    } catch (e) {
+      setError(describeError(e));
+    }
+  };
+
+  return (
+    <Card shadowColor={colors.azure}>
+      <View style={styles.pillLine}>
+        <Pill
+          label={open ? 'New offer' : offer.status === 'ACCEPTED' ? 'Accepted' : 'Done'}
+          tone={open ? 'info' : 'paid'}
+        />
+      </View>
+      <Text variant="heading">Split your rent</Text>
+      <Text variant="body">{offer.message}</Text>
+      {open ? (
+        <>
+          <Text variant="body" tone="muted">
+            {`Fee: ${formatCents(offer.feeCentsPerMonth)} a month (${formatBps(offer.feeBps)} of rent), repaid in ${offer.installmentsPerMonth} ${offer.installmentsPerMonth === 1 ? 'payment' : 'payments'} a month.`}
+          </Text>
+          <Text variant="caption" tone="muted">
+            {`Offer open until ${formatDate(offer.expiresOn)}.`}
+          </Text>
+          {error ? <Notice tone="danger" message={error} /> : null}
+          <Button
+            title="Accept the offer"
+            variant="azure"
+            onPress={() => void onAccept()}
+            loading={accept.isPending}
+          />
+        </>
+      ) : null}
+    </Card>
+  );
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function PlanSummary({ planId, lease }: { planId: string; lease: Lease | undefined }) {
@@ -446,5 +627,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   installment: { paddingVertical: spacing.smd, gap: spacing.sm },
+  pillLine: { flexDirection: 'row' },
   divider: { borderBottomWidth: border.thin, borderBottomColor: colors.ink },
 });

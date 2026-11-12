@@ -22,6 +22,13 @@ export function deriveStage(input: {
   const approved = latest(input.applications.filter((a) => a.status === 'APPROVED'));
   if (activePlan && approved)
     return { kind: 'ACTIVE_PLAN', application: approved, plan: activePlan };
+  // A free pass-through plan runs on a declined application, so it needs no approval.
+  if (activePlan?.kind === 'PASS_THROUGH') {
+    const own =
+      input.applications.find((a) => a.id === activePlan.applicationId) ??
+      latest(input.applications);
+    if (own) return { kind: 'ACTIVE_PLAN', application: own, plan: activePlan };
+  }
 
   const current = latest(input.applications);
   if (!current || current.status === 'DRAFT') return { kind: 'NEEDS_APPLICATION' };

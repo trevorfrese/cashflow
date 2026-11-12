@@ -182,6 +182,29 @@ export interface BooksFact {
   }>;
   /** Append-only triggers that exist and are enabled, by table name. */
   appendOnlyTriggers: string[];
+  /** Natural balance of `landlord_payable`: pass-through rent held for landlords. */
+  landlordPayableCents: number;
+  /** Natural balance of `pass_through_cash`, the cash behind it. */
+  passThroughCashCents: number;
+  /** Pass-through months collected and not yet paid on or sent back (COLLECTING, SETTLED). */
+  passThroughHeldCents: number;
+  /**
+   * Pass-through months paid to a landlord without a settled collection behind them: paid
+   * before the collection's settlement date or before the due date, or a pass-through
+   * disbursement whose month is not marked paid. Should always be empty.
+   */
+  passThroughUnsettledPayouts: Array<{
+    periodId: string;
+    rentPlanId: string;
+    businessId: string;
+    periodMonth: string;
+    status: string;
+    collectedOn: string | null;
+    settlesOn: string | null;
+    paidOn: string | null;
+    dueDate: string;
+    reason: string;
+  }>;
 }
 
 export interface JobFact {

@@ -1,6 +1,7 @@
 import type { IsoDate } from '@cashflow/shared';
 
 import type { AppContext } from '../context.ts';
+import { generatePassThroughPeriods } from '../services/pass-through.ts';
 import { ensureUpcomingPeriods } from '../services/rent-plan.ts';
 import { runJob } from './runner.ts';
 
@@ -8,11 +9,12 @@ import { runJob } from './runner.ts';
  * Creates next month's landlord payout and installments for every active plan, 30 days ahead.
  * A paused, closed, or frozen plan gets no new period. A period whose due date passed while
  * the plan was paused or frozen is never created afterwards: see `ensureUpcomingPeriods`.
+ * Pass-through plans get their months the same way (`ensureUpcomingPassThroughPeriods`).
  */
 export function generatePeriodsJob(ctx: AppContext, asOf: IsoDate) {
   return runJob(ctx, 'generate-periods', asOf, async () => {
     const plans = await ctx.db.rentPlan.findMany({
-      where: { status: 'ACTIVE', advanceFrozenAt: null },
+      where: { kind: 'FINANCED', status: 'ACTIVE', advanceFrozenAt: null },
       include: { lease: true },
     });
     let created = 0;
@@ -21,6 +23,7 @@ export function generatePeriodsJob(ctx: AppContext, asOf: IsoDate) {
         ensureUpcomingPeriods(tx, { ...plan, startsOn: plan.lease.startsOn }, asOf),
       );
     }
-    return { plans: plans.length, periodsCreated: created };
+    const passThrough = await generatePassThroughPeriods(ctx, asOf);
+    return { plans: plans.length, periodsCreated: created, ...passThrough };
   });
 }

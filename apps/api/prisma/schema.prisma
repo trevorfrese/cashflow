@@ -381,6 +381,12 @@ enum DecisionKind {
   REVIEW
   /// The monthly re-underwriting job re-scored a business with an active plan.
   PERIODIC_REVIEW
+  /// The refresh-eligibility job re-scored a business on a pass-through plan, with its
+  /// payment history, to see whether it now qualifies for a financed plan. Never current.
+  ELIGIBILITY_REVIEW
+  /// The owner accepted a graduation offer: the terms of the eligibility review become the
+  /// application's current decision, and a financed plan opens from the next period.
+  GRADUATION
 }
 
 enum ReviewDecision {
@@ -598,8 +604,9 @@ model Lease {
   createdAt                  DateTime    @default(now())
   updatedAt                  DateTime    @updatedAt
 
-  rentPlans RentPlan[]
-  changes   LeaseChange[]
+  rentPlans     RentPlan[]
+  changes       LeaseChange[]
+  disbursements LandlordDisbursement[]
 
   @@index([businessId])
 }
@@ -650,6 +657,60 @@ enum RentPlanStatus {
   CLOSED
 }
 
+/// What a plan does with the landlord's rent. FINANCED: CashFlow pays the landlord from the
+/// capital pool on the due date and the business repays in installments plus a fee.
+/// PASS_THROUGH: free, for a business declined on credit capacity. CashFlow collects the full
+/// rent from the business first and pays the landlord only once that collection has settled.
+/// It never advances its own money, never touches the pool or the exposure caps.
+enum RentPlanKind {
+  FINANCED
+  PASS_THROUGH
+}
+
+/// One month of a pass-through plan. See `src/services/pass-through.ts`.
+enum PassThroughPeriodStatus {
+  /// Generated, nothing debited yet.
+  SCHEDULED
+  /// The debit was accepted and is inside the settlement window: it can still come back.
+  COLLECTING
+  /// Past the settlement window. Waiting for the due date (or held) to pay the landlord.
+  SETTLED
+  /// The landlord was paid from the settled collection.
+  PAID
+  /// Nothing was collected in time, or the collection came back before the landlord was
+  /// paid. CashFlow did not pay the landlord; the owner was told to pay directly.
+  MISSED
+  /// Collected, but the landlord payout could not go out within its window (a hold that did
+  /// not clear). The money went back to the business.
+  REFUNDED
+  /// The collection came back after the landlord had been paid. The business owes CashFlow.
+  RETURNED_AFTER_PAYOUT
+  /// Closed before any money moved: the plan closed or graduated.
+  CANCELLED
+}
+
+/// A standing offer to move a pass-through customer onto a financed plan.
+enum GraduationOfferStatus {
+  /// Made by the refresh-eligibility job. The owner can accept until `expiresOn`.
+  OFFERED
+  /// Accepted. The financed plan starts once the pass-through period in flight is done.
+  ACCEPTED
+  /// The financed plan exists and the pass-through plan is closed.
+  COMPLETED
+  /// Not accepted in time.
+  EXPIRED
+  /// Taken back before it took effect: a missed month, a closed plan, or a financed plan
+  /// that could not open.
+  WITHDRAWN
+}
+
+enum DisbursementStatus {
+  /// Sent to the landlord. At most one per lease and period month (partial unique index).
+  SENT
+  /// The landlord's bank sent it back. A resend is a new row.
+  RETURNED
+}
+
 enum PayoutStatus {
   SCHEDULED
   /// Due, but not paid while something holds it. Released or cancelled by the payout job.
@@ -690,6 +751,9 @@ enum DelinquencyStatus {
 
 model RentPlan {
   id                   String                  @id @default(cuid())
+  /// FINANCED or PASS_THROUGH. Fixed for the life of the plan: a pass-through customer that
+  /// graduates gets a new financed plan, and the pass-through plan is closed.
+  kind                 RentPlanKind            @default(FINANCED)
   businessId           String
   business             Business                @relation(fields: [businessId], references: [id], onDelete: Cascade)
   leaseId              String
@@ -721,12 +785,129 @@ model RentPlan {
   createdAt            DateTime                @default(now())
   updatedAt            DateTime                @updatedAt
 
-  payouts      LandlordPayout[]
-  installments Installment[]
+  payouts            LandlordPayout[]
+  installments       Installment[]
+  passThroughPeriods PassThroughPeriod[]
+  graduationOffers   GraduationOffer[]
 
   @@index([businessId])
   @@index([status])
   @@index([delinquencyStatus])
+  @@index([kind, status])
+}
+
+/// One month of a pass-through plan: the business's rent collected ahead of the due date,
+/// then paid to the landlord once the collection has settled. One row per plan and month.
+model PassThroughPeriod {
+  id                    String                  @id @default(cuid())
+  rentPlanId            String
+  rentPlan              RentPlan                @relation(fields: [rentPlanId], references: [id], onDelete: Cascade)
+  periodMonth           String // YYYY-MM
+  amountCents           Int
+  /// YYYY-MM-DD the landlord is due to be paid.
+  dueDate               String
+  /// YYYY-MM-DD of the first scheduled debit: the policy's lead time before the due date.
+  collectOn             String
+  /// YYYY-MM-DD of the last day a debit can be made and still settle before the due date.
+  lastCollectOn         String
+  status                PassThroughPeriodStatus @default(SCHEDULED)
+  /// Debits presented so far. A debit put off by the balance check is not an attempt.
+  collectionAttempts    Int                     @default(0)
+  /// YYYY-MM-DD of the last debit presented, so a second run on the same day does not debit again.
+  lastAttemptOn         String?
+  /// Why the last scheduled debit was put off (INSUFFICIENT_BALANCE, NO_BANK_LINK), and when.
+  collectionSkipReason  String?
+  collectionSkippedOn   String?
+  collectedOn           String?
+  collectionProviderRef String?
+  collectionBankLinkId  String?
+  /// YYYY-MM-DD the collection is past the return window the policy models.
+  settlesOn             String?
+  settledOn             String?
+  paidOn                String?
+  paidAt                DateTime?
+  payoutProviderRef     String?
+  /// LEASE_CHANGE_PENDING, ADVANCE_FROZEN, PLAN_PAUSED: why a settled payout is waiting.
+  heldReason            String?
+  heldAt                DateTime?
+  /// Why the month was missed: COLLECTION_FAILED, INSUFFICIENT_BALANCE, NO_BANK_LINK,
+  /// COLLECTION_RETURNED.
+  missedReason          String?
+  /// Bank return code on a returned collection, and the date it arrived.
+  returnCode            String?
+  returnedOn            String?
+  refundedOn            String?
+  refundProviderRef     String?
+  /// PLAN_CLOSED, GRADUATED.
+  cancelledReason       String?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+
+  @@unique([rentPlanId, periodMonth])
+  @@index([status, dueDate])
+  @@index([collectionProviderRef])
+}
+
+/// An offer to move a pass-through customer onto a financed plan, made by the
+/// refresh-eligibility job from an ELIGIBILITY_REVIEW decision. A partial unique index (see
+/// the migration) allows one OFFERED or ACCEPTED offer per pass-through plan.
+model GraduationOffer {
+  id                        String                @id @default(cuid())
+  businessId                String
+  passThroughPlanId         String
+  passThroughPlan           RentPlan              @relation(fields: [passThroughPlanId], references: [id], onDelete: Cascade)
+  applicationId             String
+  /// The ELIGIBILITY_REVIEW decision the offer was made on.
+  decisionId                String
+  status                    GraduationOfferStatus @default(OFFERED)
+  approvedMonthlyLimitCents Int
+  feeBps                    Int
+  installmentsPerMonth      Int
+  score                     Int
+  grade                     String
+  /// On time pass-through months in a row when the offer was made.
+  onTimeMonths              Int
+  offeredOn                 String // YYYY-MM-DD
+  expiresOn                 String // YYYY-MM-DD
+  acceptedAt                DateTime?
+  acceptedOn                String?
+  /// YYYY-MM of the first financed period, set when the financed plan opens.
+  effectivePeriod           String?
+  financedPlanId            String?
+  completedAt               DateTime?
+  withdrawnReason           String?
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+
+  @@index([businessId, status])
+  @@index([status, expiresOn])
+}
+
+/// Every payment of rent to a landlord, whichever plan and kind made it. The database
+/// allows one SENT row per lease and period month (partial unique index, see the migration),
+/// and a row is written before the payments provider is called, inside the same database
+/// transaction. So the same month can never be paid to a landlord twice: not by a payout
+/// released twice, not by two job runs at once, and not by two plans on one lease.
+model LandlordDisbursement {
+  id             String             @id @default(cuid())
+  leaseId        String
+  lease          Lease              @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  periodMonth    String // YYYY-MM
+  rentPlanId     String
+  kind           RentPlanKind
+  /// The LandlordPayout id (FINANCED) or PassThroughPeriod id (PASS_THROUGH).
+  sourceId       String
+  /// The ledger posting and provider key of this send.
+  idempotencyKey String             @unique
+  amountCents    Int
+  status         DisbursementStatus @default(SENT)
+  providerRef    String?
+  effectiveDate  String
+  createdAt      DateTime           @default(now())
+  returnedAt     DateTime?
+
+  @@index([leaseId, periodMonth])
+  @@index([sourceId])
 }
 
 model LandlordPayout {

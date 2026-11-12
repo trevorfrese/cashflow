@@ -3,6 +3,7 @@ import type { IsoDate } from '@cashflow/shared';
 import type { AppContext } from '../context.ts';
 import { collectInstallment, sweepCashToPool } from '../services/collections.ts';
 import { UNPAID } from '../services/delinquency.ts';
+import { collectPassThroughPeriods } from '../services/pass-through.ts';
 import { runJob } from './runner.ts';
 
 /**
@@ -39,6 +40,8 @@ export function collectInstallmentsJob(ctx: AppContext, asOf: IsoDate) {
       counts[outcome] += 1;
     }
     counts.sweptCents = await sweepCashToPool(ctx, asOf);
-    return counts;
+    // Pass-through rent is held in its own account and never swept into the pool.
+    const passThrough = await collectPassThroughPeriods(ctx, asOf);
+    return { ...counts, ...passThrough };
   });
 }

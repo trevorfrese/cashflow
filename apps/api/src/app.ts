@@ -28,6 +28,7 @@ import { connectionRoutes } from './routes/connections.ts';
 import { devRoutes, installDevClock } from './routes/dev.ts';
 import { healthRoutes } from './routes/health.ts';
 import { leaseRoutes } from './routes/leases.ts';
+import { passThroughRoutes } from './routes/pass-through.ts';
 import { rentPlanRoutes } from './routes/rent-plans.ts';
 import { underwritingRoutes } from './routes/underwriting.ts';
 
@@ -160,6 +161,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
       await v1.register(underwritingRoutes);
       await v1.register(leaseRoutes);
       await v1.register(rentPlanRoutes);
+      await v1.register(passThroughRoutes);
       if (opts.config.ENABLE_ADMIN) {
         await v1.register(adminRoutes);
         await v1.register(adminConsoleRoutes);

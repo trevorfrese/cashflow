@@ -82,6 +82,25 @@ const EVENT_ALERTS: EventAlert[] = [
       'An account was locked after repeated failed sign ins. Usually a forgotten password. Several at once is credential stuffing.',
     title: () => 'Account locked after repeated failed sign ins',
   },
+  {
+    eventType: 'PASS_THROUGH_RETURNED_AFTER_PAYOUT',
+    type: 'payments.pass_through_returned_after_payout',
+    category: 'PAYMENTS',
+    severity: 'HIGH',
+    description:
+      'A pass-through rent collection came back after the landlord had been paid with it, usually an unauthorized return weeks later. CashFlow covered the rent from its own money, the business owes it on its receivable account, and the plan is closed. Someone has to contact the owner.',
+    title: (e) =>
+      `Pass-through rent for ${text(e.payload.periodMonth)} returned ${text(e.payload.returnCode)} after the landlord was paid`,
+  },
+  {
+    eventType: 'DUPLICATE_PAYOUT_PREVENTED',
+    type: 'payments.duplicate_payout_prevented',
+    category: 'PAYMENTS',
+    severity: 'HIGH',
+    description:
+      'A landlord payment was refused because the landlord was already paid for that lease and month, by the same plan or another one. Nothing was sent twice, but something tried to: find out what.',
+    title: (e) => `Second landlord payment for ${text(e.payload.periodMonth)} refused`,
+  },
 ];
 
 function eventRule(spec: EventAlert): Rule {
@@ -96,8 +115,14 @@ function eventRule(spec: EventAlert): Rule {
       inputs.auditEvents
         .filter((e) => e.eventType === spec.eventType)
         // A plan closed before the payout fell due cancels it as a matter of course.
+        // A payout cancelled because the month was already paid has its own alert, from
+        // DUPLICATE_PAYOUT_PREVENTED.
         .filter(
-          (e) => !(spec.eventType === 'PAYOUT_CANCELLED' && e.payload.reason === 'PLAN_CLOSED'),
+          (e) =>
+            !(
+              spec.eventType === 'PAYOUT_CANCELLED' &&
+              (e.payload.reason === 'PLAN_CLOSED' || e.payload.reason === 'PERIOD_ALREADY_PAID')
+            ),
         )
         .map((e): AlertCandidate => ({
           type: spec.type,

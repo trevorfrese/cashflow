@@ -38,7 +38,9 @@ export default function Settings() {
           }
           subtitle={
             plan && lease
-              ? `${lease.landlordName} · ${plan.installmentsPerMonth} a month · ${plan.status === 'PAUSED' ? 'Paused' : 'Active'}`
+              ? plan.kind === 'PASS_THROUGH'
+                ? `${lease.landlordName} · Free pass-through plan`
+                : `${lease.landlordName} · ${plan.installmentsPerMonth} a month · ${plan.status === 'PAUSED' ? 'Paused' : 'Active'}`
               : 'No rent plan yet'
           }
           right={chevron}

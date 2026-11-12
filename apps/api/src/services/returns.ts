@@ -14,6 +14,8 @@ import {
 } from '../servicing/policy.ts';
 import { recordAudit, type AuditActor } from './audit.ts';
 import { refreshDelinquency, UNPAID } from './delinquency.ts';
+import { markDisbursementReturned } from './disbursements.ts';
+import { reversePassThroughCollection, reversePassThroughPayout } from './pass-through.ts';
 import { payoutKey } from './payouts.ts';
 
 /**
@@ -223,6 +225,7 @@ async function reversePayout(
 
     // The posting of the send that came back: the first, or the latest re-send.
     const key = payoutKey(payout);
+    await markDisbursementReturned(tx, key, at);
     await reverseTransaction(tx, key, {
       description: `Return ${ret.returnCode}: landlord payout ${payout.periodMonth}`,
       effectiveDate: ret.returnedOn,
@@ -300,10 +303,17 @@ export async function reconcileReturns(ctx: AppContext, asOf: IsoDate) {
     unknown: 0,
   };
   for (const ret of returns) {
-    const outcome =
+    let outcome =
       ret.kind === 'charge'
         ? await reverseRepayment(ctx, ret, asOf)
         : await reversePayout(ctx, ret, asOf);
+    // Not an installment or a financed payout: a pass-through collection or landlord payment.
+    if (outcome === 'unknown') {
+      outcome =
+        ret.kind === 'charge'
+          ? await reversePassThroughCollection(ctx, ret, asOf)
+          : await reversePassThroughPayout(ctx, ret, asOf);
+    }
     if (outcome === 'reversed') {
       if (ret.kind === 'charge') counts.repaymentsReversed += 1;
       else counts.payoutsReversed += 1;

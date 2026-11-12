@@ -29,9 +29,23 @@ import {
   type OpenBucket,
   type ServicingPolicy,
 } from '../servicing/policy.ts';
+import {
+  passThroughSchedule,
+  STANDARD_PASS_THROUGH_POLICY,
+  type PassThroughPolicy,
+} from '../servicing/pass-through.ts';
 import { decide, type EngineInput, type EngineResult } from '../underwriting/engine.ts';
 import { checkFunding, type ExposureContext } from '../underwriting/exposure.ts';
-import { CURRENT_POLICY, type ExposurePolicy } from '../underwriting/policy.ts';
+import { passThroughEligibility, snapshotKnockouts } from '../underwriting/pass-through.ts';
+import {
+  summarizePaymentHistory,
+  type PaymentHistoryMonth,
+} from '../underwriting/payment-history.ts';
+import {
+  CURRENT_POLICY,
+  type ExposurePolicy,
+  type GraduationPolicy,
+} from '../underwriting/policy.ts';
 import { ASSUMPTIONS, poolSizeFor, type StressScenario } from './assumptions.ts';
 import type { Applicant, FraudType, Industry } from './population.ts';
 import { hash32 } from './random.ts';
@@ -125,6 +139,96 @@ export interface PortfolioConfig {
    * counterfactual of applicants a veracity finding affected: how would they have done.
    */
   stripVeracity?: boolean;
+  /**
+   * The free pass-through plan and graduation, or null for a run without them (every
+   * comparison configuration, the challengers and sensitivities, and every counterfactual).
+   * See `PassThroughSimConfig`.
+   */
+  passThrough?: PassThroughSimConfig | null;
+}
+
+/**
+ * Pass-through and graduation in the simulation. Every applicant the engine declines for
+ * credit capacity (`passThroughEligibility`) starts a pass-through plan on the next rent date
+ * it can still be collected for: the rent is debited `collectionLeadBusinessDays` before the
+ * due date after the same balance check the services make, retried while it can still settle
+ * in time, and the month is missed (the business pays its landlord itself, a day late) when
+ * nothing could be collected. CashFlow never pays from the pool on these plans.
+ *
+ * The day after each due date, a plan with `graduation.minOnTimeMonths` on time months in a
+ * row is re-underwritten through the same `decide` on the bank history up to that day, with
+ * its payment history, at most once a month, as the refresh-eligibility job does. An approval
+ * for at least the rent is offered, `acceptShareBps` of offers are accepted, and an accepted
+ * offer becomes a financed plan from the next rent date: a graduate, played like any other
+ * plan from the same capital pool and reported as its own cohort.
+ */
+export interface PassThroughSimConfig {
+  policy: PassThroughPolicy;
+  graduation: GraduationPolicy;
+  /** Months of payment history the factor reads. */
+  lookbackMonths: number;
+  /** Share of offers the owner accepts, in basis points. */
+  acceptShareBps: number;
+}
+
+/** Pass-through and graduation counts for one run. */
+export interface PassThroughStats {
+  /** Applicants the engine declined. */
+  declined: number;
+  /** Of those, declined for credit capacity alone: offered a pass-through plan. */
+  eligible: number;
+  /** Pass-through plans that collected or missed at least one month. */
+  plans: number;
+  months: number;
+  onTimeMonths: number;
+  missedMonths: number;
+  /** Rent paid to landlords through pass-through plans. */
+  volumeCents: number;
+  /** Eligibility reviews run, and their outcomes. */
+  reviews: number;
+  reviewApproved: number;
+  reviewDeclined: number;
+  /** Would have gone to a reviewer: not offered, and not sent to the queue. */
+  reviewReferred: number;
+  reviewNeedsInfo: number;
+  offers: number;
+  /** Offers accepted: graduates. */
+  graduated: number;
+  /** Graduates that are fraud archetypes. */
+  graduatedFraud: number;
+}
+
+export function emptyPassThroughStats(): PassThroughStats {
+  return {
+    declined: 0,
+    eligible: 0,
+    plans: 0,
+    months: 0,
+    onTimeMonths: 0,
+    missedMonths: 0,
+    volumeCents: 0,
+    reviews: 0,
+    reviewApproved: 0,
+    reviewDeclined: 0,
+    reviewReferred: 0,
+    reviewNeedsInfo: 0,
+    offers: 0,
+    graduated: 0,
+    graduatedFraud: 0,
+  };
+}
+
+/** The pass-through settings the gated configuration runs with. */
+export function defaultPassThroughSim(
+  graduation: GraduationPolicy,
+  lookbackMonths: number,
+): PassThroughSimConfig {
+  return {
+    policy: STANDARD_PASS_THROUGH_POLICY,
+    graduation,
+    lookbackMonths,
+    acceptShareBps: ASSUMPTIONS.graduationAcceptShareBps,
+  };
 }
 
 export function defaultPortfolioConfig(n: number): PortfolioConfig {
@@ -254,6 +358,15 @@ export interface CustomerResult {
   usableWithoutVeracity: boolean | null;
   /** Honest messiness and connection events from the population (see veracity-sim.ts). */
   veracityTags: string[];
+  /**
+   * A financed plan that began as a pass-through plan: the result of graduation, reported
+   * apart from the origination book. Score, grade and fee are the eligibility review's.
+   */
+  graduated: boolean;
+  /** Pass-through months for this applicant, when it had a pass-through plan. */
+  passThroughMonths: number;
+  passThroughOnTimeMonths: number;
+  passThroughMissedMonths: number;
 }
 
 const VERACITY_NEEDS_INFO_CODES = new Set([
@@ -330,6 +443,14 @@ export interface PortfolioResult {
    * the grace bucket on a provision date, and this is the only measure of that bucket.
    */
   bucketEntryRoll: BucketRoll;
+  /** Pass-through and graduation counts. Null when the run has no pass-through. */
+  passThrough: PassThroughStats | null;
+  /**
+   * Financed plans opened by graduation, one per graduate. They draw on the same pool as the
+   * origination book and are in its pool path, but not in `customers`, so that every
+   * applicant metric and gate reads the origination decisions it always did.
+   */
+  graduates: CustomerResult[];
 }
 
 export type BucketRoll = Record<OpenBucket, { observedCents: number; chargedOffCents: number }>;
@@ -446,7 +567,34 @@ function emptyResult(applicant: Applicant, decision: EngineResult): CustomerResu
           ...(applicant.veracity.fraud ? [applicant.veracity.fraud] : []),
         ]
       : [],
+    graduated: false,
+    passThroughMonths: 0,
+    passThroughOnTimeMonths: 0,
+    passThroughMissedMonths: 0,
   };
+}
+
+/** A pass-through plan in the simulation. */
+interface PassThroughPlan {
+  applicant: Applicant;
+  result: CustomerResult;
+  sim: BusinessSimulation;
+  /** The next rent date to collect for. */
+  nextDueDate: IsoDate;
+  /** Months still to play. */
+  periodsLeft: number;
+  /** The month being collected, if any. */
+  current: {
+    dueDate: IsoDate;
+    collectOn: IsoDate;
+    lastCollectOn: IsoDate;
+    attempts: number;
+    collected: boolean;
+  } | null;
+  months: PaymentHistoryMonth[];
+  /** YYYY-MM of the last eligibility review. */
+  lastReview: string | null;
+  done: boolean;
 }
 
 function monthStart(startDate: IsoDate, months: number): IsoDate {
@@ -483,6 +631,8 @@ export function underwrite(
   applicant: Applicant,
   config: Pick<PortfolioConfig, 'decide' | 'stress' | 'startDate' | 'stripVeracity'>,
   exposureContext: ExposureContext | null = null,
+  /** Keep the transactions: a pass-through plan may re-underwrite on them later. */
+  keepHistory = false,
 ): {
   decision: EngineResult;
   sim: BusinessSimulation | null;
@@ -561,8 +711,10 @@ export function underwrite(
         })
       : null;
   // The history has done its job. Stop keeping transactions for the forward run.
-  sim.record = false;
-  sim.transactions = [];
+  if (!keepHistory) {
+    sim.record = false;
+    sim.transactions = [];
+  }
   return { decision, sim, withoutVeracity };
 }
 
@@ -615,6 +767,11 @@ export function runPortfolio(
 
   const bucketRoll = emptyBucketRoll();
   const bucketEntryRoll = emptyBucketRoll();
+  // Pass-through and graduation. Never in a counterfactual run.
+  const pt = config.throughTheDoor ? null : (config.passThrough ?? null);
+  const ptStats = pt ? emptyPassThroughStats() : null;
+  let passThroughPlans: PassThroughPlan[] = [];
+  const graduates: CustomerResult[] = [];
   /** An installment is settled one way or the other: close out its roll observations. */
   const resolveRoll = (inst: Installment, lost: boolean) => {
     for (const bucket of inst.seen) {
@@ -711,6 +868,179 @@ export function runPortfolio(
     });
   };
 
+  /**
+   * One day of a pass-through plan: open the month when its collection window starts, debit
+   * the rent after the balance check, and on the due date pay the landlord from what was
+   * collected or record the month as missed. Then, if it has enough on time months in a row,
+   * the eligibility review.
+   */
+  const stepPassThrough = (plan: PassThroughPlan, date: IsoDate) => {
+    const settings = pt!;
+    const stats = ptStats!;
+    const rent = plan.result.requestedRentCents;
+    if (!plan.current && plan.periodsLeft > 0) {
+      const schedule = passThroughSchedule(settings.policy, plan.nextDueDate);
+      if (date >= schedule.collectOn) {
+        plan.current = { dueDate: plan.nextDueDate, ...schedule, attempts: 0, collected: false };
+        if (plan.result.passThroughMonths === 0) stats.plans += 1;
+        // From here the business's own rent debit is replaced by the collection.
+        plan.sim.setExternalRent(rent);
+      }
+    }
+    const c = plan.current;
+    const debits: ExternalDebit[] = [];
+    let attempting = false;
+    if (
+      c &&
+      !c.collected &&
+      date >= c.collectOn &&
+      date <= c.lastCollectOn &&
+      c.attempts < settings.policy.maxCollectionAttempts
+    ) {
+      // The balance check reads the account before the day's deposits, as for installments.
+      attempting = plan.sim.balanceCents >= rent || !settings.policy.balancePreCheck;
+      debits.push({
+        amountCents: rent,
+        description: 'CASHFLOW RENT COLLECTION',
+        noticeOnly: !attempting,
+      });
+    }
+    const results = plan.sim.step(debits);
+    if (c && attempting) {
+      c.attempts += 1;
+      if (results[0]) c.collected = true;
+    }
+    if (!c || date !== c.dueDate) return;
+
+    // The due date: the landlord is paid from the settled collection, or the month is missed
+    // and the business pays the landlord itself.
+    plan.result.passThroughMonths += 1;
+    stats.months += 1;
+    if (c.collected) {
+      plan.result.passThroughOnTimeMonths += 1;
+      stats.onTimeMonths += 1;
+      stats.volumeCents += rent;
+    } else {
+      plan.result.passThroughMissedMonths += 1;
+      stats.missedMonths += 1;
+      plan.sim.payRentLate(rent);
+    }
+    plan.months.push({
+      rentPlanId: plan.applicant.id,
+      kind: 'PASS_THROUGH',
+      periodMonth: c.dueDate.slice(0, 7),
+      dueDate: c.dueDate,
+      outcome: c.collected ? 'ON_TIME' : 'MISSED',
+    });
+    plan.current = null;
+    plan.periodsLeft -= 1;
+    plan.nextDueDate = followingDueDate(c.dueDate, 1);
+    if (plan.periodsLeft <= 0) {
+      plan.sim.setExternalRent(0);
+      plan.done = true;
+      return;
+    }
+    reviewEligibility(plan, date);
+  };
+
+  /** The refresh-eligibility review, at most once a month, and graduation on an offer. */
+  const reviewEligibility = (plan: PassThroughPlan, date: IsoDate) => {
+    const settings = pt!;
+    const stats = ptStats!;
+    const month = date.slice(0, 7);
+    if (plan.lastReview === month) return;
+    const summary = summarizePaymentHistory(plan.months, date, settings.lookbackMonths);
+    if (summary.currentOnTimeStreak < settings.graduation.minOnTimeMonths) return;
+    plan.lastReview = month;
+    stats.reviews += 1;
+    const applicant = plan.applicant;
+    // Fresh data: the account up to today, a little over a year of it.
+    const from = addDays(date, -399);
+    plan.sim.transactions = plan.sim.transactions.filter((t) => t.date >= from);
+    const elapsedMonths = Math.max(
+      0,
+      Math.round(daysPastDue(applicant.applicationDate, date) / 30.44),
+    );
+    const decision = config.decide({
+      statedMonthlyRevenueCents: applicant.statedMonthlyRevenueCents,
+      timeInBusinessMonths: applicant.timeInBusinessMonths + elapsedMonths,
+      requestedMonthlyRentCents: applicant.requestedRentCents,
+      bankData: {
+        transactions: plan.sim.transactions,
+        currentBalanceCents: plan.sim.balanceCents,
+        asOf: date,
+      },
+      integrityContext: { leaseVerified: true },
+      exposureContext: exposureFor(applicant.industry),
+      periodicReview: true,
+      paymentHistory: summary,
+    });
+    if (decision.outcome === 'APPROVED') stats.reviewApproved += 1;
+    else if (decision.outcome === 'DECLINED') stats.reviewDeclined += 1;
+    else if (decision.outcome === 'REFER') stats.reviewReferred += 1;
+    else stats.reviewNeedsInfo += 1;
+    const limit = decision.approvedMonthlyLimitCents ?? 0;
+    if (decision.outcome !== 'APPROVED' || limit < applicant.requestedRentCents) return;
+    stats.offers += 1;
+    if (hash32(`graduate/${applicant.seedHex}`) % 10_000 >= settings.acceptShareBps) return;
+
+    // Graduation: the pass-through plan ends with this month, and a financed plan starts on
+    // the next rent date, from the pool, like any other.
+    stats.graduated += 1;
+    if (applicant.fraud !== null) stats.graduatedFraud += 1;
+    plan.done = true;
+    plan.sim.record = false;
+    plan.sim.transactions = [];
+    plan.sim.setExternalRent(0);
+    const result = emptyResult(applicant, decision);
+    result.graduated = true;
+    result.applicationDate = date;
+    result.planRentCents = applicant.requestedRentCents;
+    result.installmentsPerMonth = decision.recommendedInstallmentsPerMonth ?? 2;
+    result.passThroughMonths = plan.result.passThroughMonths;
+    result.passThroughOnTimeMonths = plan.result.passThroughOnTimeMonths;
+    result.passThroughMissedMonths = plan.result.passThroughMissedMonths;
+    graduates.push(result);
+    openPlan(applicant, result, plan.sim, decision.feeBps ?? 0, date);
+  };
+
+  /** Start a pass-through plan for a declined applicant, if it is offered one. */
+  const maybeStartPassThrough = (
+    applicant: Applicant,
+    result: CustomerResult,
+    decision: EngineResult,
+    sim: BusinessSimulation,
+    date: IsoDate,
+  ): boolean => {
+    if (!pt || !ptStats || decision.outcome !== 'DECLINED') return false;
+    ptStats.declined += 1;
+    const eligibility = passThroughEligibility({
+      outcome: decision.outcome,
+      kind: 'ENGINE',
+      reasons: decision.reasons,
+      knockouts: snapshotKnockouts(decision.snapshot),
+    });
+    if (!eligibility.eligible) return false;
+    ptStats.eligible += 1;
+    // The first rent date that can still be collected and settled in time.
+    let due = nextRentDueDate(1, addDays(date, 1));
+    while (passThroughSchedule(pt.policy, due).lastCollectOn <= date) {
+      due = followingDueDate(due, 1);
+    }
+    passThroughPlans.push({
+      applicant,
+      result,
+      sim,
+      nextDueDate: due,
+      periodsLeft: config.horizonMonths,
+      current: null,
+      months: [],
+      lastReview: null,
+      done: false,
+    });
+    return true;
+  };
+
   if (applicants.length === 0) {
     return {
       label: config.label,
@@ -728,11 +1058,15 @@ export function runPortfolio(
       customers,
       bucketRoll,
       bucketEntryRoll,
+      passThrough: ptStats,
+      graduates,
     };
   }
 
   for (let date = applicants[0]!.applicationDate; ; date = addDays(date, 1)) {
-    if (cursor >= applicants.length && active.length === 0) break;
+    if (cursor >= applicants.length && active.length === 0 && passThroughPlans.length === 0) {
+      break;
+    }
 
     const monthKey = date.slice(0, 7);
     if (!month || month.month !== monthKey) {
@@ -1018,6 +1352,13 @@ export function runPortfolio(
     }
     if (anyFinished) active = active.filter((p) => p.periodsLeft !== -1);
 
+    // 2b. Pass-through plans: collections, landlord payments from what was collected, and
+    //     the eligibility review. A graduate joins `active` and is played from tomorrow.
+    if (passThroughPlans.length > 0) {
+      for (const plan of passThroughPlans) stepPassThrough(plan, date);
+      passThroughPlans = passThroughPlans.filter((p) => !p.done);
+    }
+
     // 3. Today's applications. An approved plan starts on the next first of the month.
     while (cursor < applicants.length && applicants[cursor]!.applicationDate === date) {
       const applicant = applicants[cursor++]!;
@@ -1025,8 +1366,15 @@ export function runPortfolio(
         applicant,
         config,
         exposureFor(applicant.industry),
+        pt !== null,
       );
       const result = emptyResult(applicant, decision);
+      // A declined applicant offered a pass-through plan keeps its history for the review.
+      // Everyone else stops recording transactions here.
+      if (sim && !maybeStartPassThrough(applicant, result, decision, sim, date)) {
+        sim.record = false;
+        sim.transactions = [];
+      }
       if (withoutVeracity) {
         result.outcomeWithoutVeracity = withoutVeracity.outcome;
         const limit = withoutVeracity.approvedMonthlyLimitCents ?? 0;
@@ -1095,6 +1443,8 @@ export function runPortfolio(
     customers,
     bucketRoll,
     bucketEntryRoll,
+    passThrough: ptStats,
+    graduates,
   };
 }
 
@@ -1116,6 +1466,7 @@ export function runThroughTheDoor(
   return runPortfolio(population, {
     ...rest,
     throughTheDoor: { fallbackFeeBps },
+    passThrough: null,
     exposure: null,
     poolSizeCents: UNCONSTRAINED_POOL_CENTS,
     partialAdvance: false,

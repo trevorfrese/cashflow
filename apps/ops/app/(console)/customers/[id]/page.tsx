@@ -7,7 +7,10 @@ import {
   OperatorConnections,
   OperatorRentPlan,
   RentPlan,
+  type GraduationOffer,
   type OperatorInstallment,
+  type PassThroughPeriod,
+  type PaymentHistory,
 } from '@cashflow/shared';
 import Link from 'next/link';
 import { Fragment, use } from 'react';
@@ -329,18 +332,156 @@ function Profile({ detail }: { detail: OperatorBusinessDetail }) {
           </Table>
         )}
       </Card>
+
+      <PaymentHistoryCard history={detail.paymentHistory} offers={detail.graduationOffers} />
     </>
+  );
+}
+
+/** Every month of rent through CashFlow, and any offers to move off the pass-through plan. */
+function PaymentHistoryCard({
+  history,
+  offers,
+}: {
+  history: PaymentHistory | null;
+  offers: GraduationOffer[];
+}) {
+  return (
+    <Card
+      title="Payment history"
+      aside={history ? `As of ${date(history.asOf)}, last ${history.lookbackMonths} months` : null}
+    >
+      {!history || history.months.length === 0 ? (
+        <Empty title="No months with an outcome yet" />
+      ) : (
+        <>
+          <Facts
+            rows={[
+              ['On time', history.summary.onTimeMonths],
+              ['Late', history.summary.lateMonths],
+              ['Missed', history.summary.missedMonths],
+              ['Current on-time streak', history.summary.currentOnTimeStreak],
+              history.monthsUntilReview !== null
+                ? ['On-time months until review', history.monthsUntilReview]
+                : null,
+              history.summary.lastMissedPeriod
+                ? ['Last missed', month(history.summary.lastMissedPeriod)]
+                : null,
+            ]}
+          />
+          <Table caption="Months, newest first" head={['Month', 'Due', 'Outcome', 'Plan kind']}>
+            {history.months.map((m) => (
+              <tr key={`${m.rentPlanId}-${m.periodMonth}`}>
+                <td className="cell-main nowrap">{month(m.periodMonth)}</td>
+                <td className="nowrap">{date(m.dueDate)}</td>
+                <td>
+                  <StatusPill code={m.outcome} />
+                </td>
+                <td>{planKind(m.kind)}</td>
+              </tr>
+            ))}
+          </Table>
+        </>
+      )}
+
+      <h3 className="sub">Graduation offers</h3>
+      {offers.length === 0 ? (
+        <p className="muted">No offer to move to a financed plan.</p>
+      ) : (
+        <Table
+          caption="Graduation offers, newest first"
+          head={['Status', 'Offered', 'Expires', { num: 'Fee' }, { num: 'Limit' }, 'Effective']}
+        >
+          {offers.map((o) => (
+            <tr key={o.id}>
+              <td>
+                <StatusPill code={o.status} />
+              </td>
+              <td className="nowrap">{date(o.offeredOn)}</td>
+              <td className="nowrap">{date(o.expiresOn)}</td>
+              <td className="num">
+                {percent(o.feeBps)}
+                <div className="muted small">{money(o.feeCentsPerMonth)} a month</div>
+              </td>
+              <td className="num">{money(o.approvedMonthlyLimitCents)}</td>
+              <td className="nowrap">{o.effectivePeriod ? month(o.effectivePeriod) : '-'}</td>
+            </tr>
+          ))}
+        </Table>
+      )}
+    </Card>
+  );
+}
+
+function planKind(kind: OperatorRentPlan['kind']): string {
+  return kind === 'PASS_THROUGH' ? 'Pass-through' : 'Financed';
+}
+
+/** The months of a pass-through plan: collected from the business, then paid to the landlord. */
+function PassThroughTable({ periods }: { periods: PassThroughPeriod[] }) {
+  return (
+    <div>
+      <h3 className="sub">Pass-through months</h3>
+      {periods.length === 0 ? (
+        <p className="muted">No month generated yet.</p>
+      ) : (
+        <Table
+          caption="Pass-through months"
+          head={[
+            'Month',
+            'Due',
+            { num: 'Amount' },
+            'Status',
+            'Collected',
+            'Paid to landlord',
+            'Missed reason',
+          ]}
+        >
+          {periods.map((p) => (
+            <tr key={p.id}>
+              <td className="cell-main nowrap">{month(p.periodMonth)}</td>
+              <td className="nowrap">
+                {date(p.dueDate)}
+                <div className="muted small">Collect from {date(p.collectOn)}</div>
+              </td>
+              <td className="num">{money(p.amountCents)}</td>
+              <td>
+                <StatusPill code={p.status} />
+              </td>
+              <td className="nowrap">{date(p.collectedOn)}</td>
+              <td className="nowrap">{date(p.paidOn)}</td>
+              <td>
+                {p.missedReason ? words(p.missedReason) : null}
+                {p.returnCode ? (
+                  <div className="muted small">
+                    Return code <span className="mono">{p.returnCode}</span>
+                  </div>
+                ) : null}
+                {p.heldReason ? (
+                  <div className="muted small">Held: {words(p.heldReason).toLowerCase()}</div>
+                ) : null}
+                {!p.missedReason && !p.returnCode && !p.heldReason ? (
+                  <span className="muted">-</span>
+                ) : null}
+              </td>
+            </tr>
+          ))}
+        </Table>
+      )}
+    </div>
   );
 }
 
 function PlanCard({ plan, onChanged }: { plan: OperatorRentPlan; onChanged: () => void }) {
   const frozen = plan.advanceFrozenAt !== null;
   const held = plan.payouts.filter((p) => p.status === 'HELD');
+  const passThrough = plan.kind === 'PASS_THROUGH';
   return (
     <Card
       title={`Rent plan: ${money(plan.monthlyRentCents)} a month to ${plan.landlordName}`}
       aside={
         <>
+          <Pill tone={passThrough ? 'info' : 'neutral'}>{planKind(plan.kind)}</Pill>
           <StatusPill code={plan.status} />
           <StatusPill code={plan.delinquencyStatus} />
           {frozen ? <Pill tone="warn">Frozen</Pill> : null}
@@ -352,8 +493,9 @@ function PlanCard({ plan, onChanged }: { plan: OperatorRentPlan; onChanged: () =
           ['Standing', <StatusPill key="s" code={plan.delinquencyStatus} />],
           ['Days past due', plan.daysPastDue === 0 ? 'None' : days(plan.daysPastDue)],
           ['Past due', money(plan.pastDueCents)],
-          ['Fee', percent(plan.feeBps)],
-          ['Installments a month', plan.installmentsPerMonth],
+          ['Kind', planKind(plan.kind)],
+          ['Fee', passThrough ? 'None' : percent(plan.feeBps)],
+          passThrough ? null : ['Installments a month', plan.installmentsPerMonth],
           ['Rent due', `Day ${plan.dueDayOfMonth}`],
           ['Started', date(plan.createdAt)],
           plan.closedAt
@@ -419,78 +561,92 @@ function PlanCard({ plan, onChanged }: { plan: OperatorRentPlan; onChanged: () =
         </Notice>
       ) : null}
 
-      <div>
-        <h3 className="sub">Payouts to the landlord</h3>
-        <Table
-          caption="Landlord payouts"
-          head={['Period', 'Scheduled', { num: 'Amount' }, 'Status', 'Hold or failure', 'Paid', '']}
-        >
-          {plan.payouts.map((p) => (
-            <tr key={p.id}>
-              <td className="cell-main nowrap">{month(p.periodMonth)}</td>
-              <td className="nowrap">{date(p.scheduledFor)}</td>
-              <td className="num">{money(p.amountCents)}</td>
-              <td>
-                <StatusPill code={p.status} />
-              </td>
-              <td>
-                {p.heldReason ? (
-                  <div>
-                    {holdReason(p.heldReason)}
-                    {p.releaseBy ? (
-                      <span className="muted small"> Release by {date(p.releaseBy)}.</span>
-                    ) : null}
-                  </div>
-                ) : null}
-                {p.returnCode ? (
-                  <div>
-                    Returned by the bank, code <span className="mono">{p.returnCode}</span>
-                  </div>
-                ) : null}
-                {p.failureReason ? <div className="small">{p.failureReason}</div> : null}
-                {p.resendCount > 0 ? (
-                  <div className="muted small">Sent again {p.resendCount} time(s)</div>
-                ) : null}
-                {!p.heldReason && !p.returnCode && !p.failureReason ? (
-                  <span className="muted">-</span>
-                ) : null}
-              </td>
-              <td className="nowrap">{p.paidAt ? date(p.paidAt) : '-'}</td>
-              <td>
-                {p.canResend ? (
-                  <ReasonAction
-                    path={`payouts/${p.id}/resend`}
-                    schema={LandlordPayout}
-                    body={(reason) => ({ reason })}
-                    trigger="Send again"
-                    submit="Send the payout again"
-                    label="What was corrected, and how you confirmed it"
-                    hint="The landlord's details must have been corrected and the correction applied."
-                    onDone={onChanged}
-                  >
-                    <p>
-                      This payout came back from the landlord&apos;s bank. Sending it again pays{' '}
-                      {money(p.amountCents)} to the account now on the lease.
-                    </p>
-                  </ReasonAction>
-                ) : null}
-              </td>
-            </tr>
-          ))}
-        </Table>
-      </div>
+      {passThrough ? <PassThroughTable periods={plan.passThroughPeriods} /> : null}
 
-      <div>
-        <h3 className="sub">Installments and debits</h3>
-        <Table
-          caption="Installments with their debits"
-          head={['Period', 'Due', { num: 'Amount' }, 'Status', 'Attempts', 'Paid', 'Notes']}
-        >
-          {plan.installments.map((i) => (
-            <InstallmentRows key={i.id} installment={i} />
-          ))}
-        </Table>
-      </div>
+      {passThrough && plan.payouts.length === 0 ? null : (
+        <div>
+          <h3 className="sub">Payouts to the landlord</h3>
+          <Table
+            caption="Landlord payouts"
+            head={[
+              'Period',
+              'Scheduled',
+              { num: 'Amount' },
+              'Status',
+              'Hold or failure',
+              'Paid',
+              '',
+            ]}
+          >
+            {plan.payouts.map((p) => (
+              <tr key={p.id}>
+                <td className="cell-main nowrap">{month(p.periodMonth)}</td>
+                <td className="nowrap">{date(p.scheduledFor)}</td>
+                <td className="num">{money(p.amountCents)}</td>
+                <td>
+                  <StatusPill code={p.status} />
+                </td>
+                <td>
+                  {p.heldReason ? (
+                    <div>
+                      {holdReason(p.heldReason)}
+                      {p.releaseBy ? (
+                        <span className="muted small"> Release by {date(p.releaseBy)}.</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {p.returnCode ? (
+                    <div>
+                      Returned by the bank, code <span className="mono">{p.returnCode}</span>
+                    </div>
+                  ) : null}
+                  {p.failureReason ? <div className="small">{p.failureReason}</div> : null}
+                  {p.resendCount > 0 ? (
+                    <div className="muted small">Sent again {p.resendCount} time(s)</div>
+                  ) : null}
+                  {!p.heldReason && !p.returnCode && !p.failureReason ? (
+                    <span className="muted">-</span>
+                  ) : null}
+                </td>
+                <td className="nowrap">{p.paidAt ? date(p.paidAt) : '-'}</td>
+                <td>
+                  {p.canResend ? (
+                    <ReasonAction
+                      path={`payouts/${p.id}/resend`}
+                      schema={LandlordPayout}
+                      body={(reason) => ({ reason })}
+                      trigger="Send again"
+                      submit="Send the payout again"
+                      label="What was corrected, and how you confirmed it"
+                      hint="The landlord's details must have been corrected and the correction applied."
+                      onDone={onChanged}
+                    >
+                      <p>
+                        This payout came back from the landlord&apos;s bank. Sending it again pays{' '}
+                        {money(p.amountCents)} to the account now on the lease.
+                      </p>
+                    </ReasonAction>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </Table>
+        </div>
+      )}
+
+      {passThrough && plan.installments.length === 0 ? null : (
+        <div>
+          <h3 className="sub">Installments and debits</h3>
+          <Table
+            caption="Installments with their debits"
+            head={['Period', 'Due', { num: 'Amount' }, 'Status', 'Attempts', 'Paid', 'Notes']}
+          >
+            {plan.installments.map((i) => (
+              <InstallmentRows key={i.id} installment={i} />
+            ))}
+          </Table>
+        </div>
+      )}
     </Card>
   );
 }

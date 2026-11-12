@@ -53,6 +53,26 @@ export default function RentSettings() {
   };
   const paused = plan.status === 'PAUSED';
 
+  if (plan.kind === 'PASS_THROUGH') {
+    return (
+      <Screen back title="Rent" subtitle={business?.dba ?? business?.legalName}>
+        <Card tone="gold">
+          <Text variant="label">Free pass-through plan</Text>
+          <Text variant="money" numberOfLines={1} adjustsFontSizeToFit>
+            {formatCents(plan.monthlyRentCents, { showCents: false })}
+          </Text>
+          <Text variant="body">
+            {`To ${lease.landlordName} on the ${ordinal(plan.dueDayOfMonth)}. No fee.`}
+          </Text>
+        </Card>
+        <Text variant="body" tone="muted">
+          We collect your rent from your bank a few business days before it is due and pay your
+          landlord on the due date. There is nothing to set here.
+        </Text>
+      </Screen>
+    );
+  }
+
   return (
     <Screen back title="Rent" subtitle={business?.dba ?? business?.legalName}>
       {error ? <Notice tone="danger" message={error} /> : null}

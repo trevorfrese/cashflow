@@ -76,18 +76,32 @@ src/test/                integration test harness
 idempotent for a given date and records a `JobRun`. The reasoning for the order is in
 `src/jobs/index.ts`; the rules are in `ARCHITECTURE.md` under "The life of a rent payment".
 
-| Order | Name                   | What it does                                                                                          |
-| ----: | ---------------------- | ----------------------------------------------------------------------------------------------------- |
-|     1 | `rescreen`             | Screens active businesses, owners and landlords again once their screening is 30 days old             |
-|     2 | `lease-changes`        | Applies landlord and payout changes whose cooling-off period has ended                                |
-|     3 | `reunderwrite`         | Monthly review of each active plan on fresh bank data. Freezes a plan that has deteriorated           |
-|     4 | `reconcile-payments`   | Polls the payments provider for returns and reverses each returned installment or payout              |
-|     5 | `age-receivables`      | Delinquency bucket per plan, `LATE` marks, audit event on each change, charge-off at 90 days past due |
-|     6 | `generate-periods`     | Next month's payout and installments, 30 days ahead, for active plans that are not frozen             |
-|     7 | `process-payouts`      | Pays, holds, releases, or cancels each landlord payout that is due                                    |
-|     8 | `collect-installments` | Scheduled debits (days 0, 3, and 6, after a balance check), then settles operating cash with the pool |
-|     9 | `provision`            | Sets the allowance for credit losses by bucket. Posts on the first run of each calendar month         |
-|    10 | `monitor`              | Runs every monitoring rule, opens and resolves alerts, trips the circuit breaker on a critical breach |
+| Order | Name                   | What it does                                                                                                 |
+| ----: | ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+|     1 | `rescreen`             | Screens active businesses, owners and landlords again once their screening is 30 days old                    |
+|     2 | `lease-changes`        | Applies landlord and payout changes whose cooling-off period has ended                                       |
+|     3 | `refresh-connections`  | Refreshes tokens near expiry and pulls businesses with an active plan again weekly                           |
+|     4 | `reunderwrite`         | Monthly review of each active financed plan on fresh bank data. Freezes a plan that has deteriorated         |
+|     5 | `refresh-eligibility`  | Graduation: expires offers, opens accepted ones, re-underwrites pass-through plans with 3 on time months     |
+|     6 | `reconcile-payments`   | Polls the payments provider for returns and reverses each returned installment, payout or pass-through debit |
+|     7 | `age-receivables`      | Delinquency bucket per plan, `LATE` marks, audit event on each change, charge-off at 90 days past due        |
+|     8 | `generate-periods`     | Next month's payout and installments, and next month's pass-through month, 30 days ahead                     |
+|     9 | `process-payouts`      | Pays, holds, releases, or cancels each landlord payout that is due; settles and pays pass-through months     |
+|    10 | `collect-installments` | Scheduled debits (days 0, 3, and 6, after a balance check), the cash sweep, then pass-through collections    |
+|    11 | `provision`            | Sets the allowance for credit losses by bucket. Posts on the first run of each calendar month                |
+|    12 | `monitor`              | Runs every monitoring rule, opens and resolves alerts, trips the circuit breaker on a critical breach        |
+
+`refresh-eligibility` re-underwrites a pass-through customer at most once a calendar month
+(the `ELIGIBILITY_REVIEW` decision is keyed by application and month with a unique index),
+reads payment history completed before the review date, and on an approval for at least the
+lease rent makes a `GraduationOffer` the owner accepts with
+`POST /v1/graduation-offers/:id/accept`. The financed plan opens only between pass-through
+months, from the next one. Like every job it runs for each day crossed by `./dev advance`.
+
+Pass-through routes: `GET /v1/underwriting/applications/:id/pass-through` (the offer on a
+declined application), `POST /v1/pass-through-plans` (start one on a lease),
+`GET /v1/businesses/:id/payment-history`, and the accept route above. `GET /v1/rent-plans/:id`
+returns `kind`, the pass-through months, and any open graduation offer.
 
 To see the unhappy paths in the sandbox, point a bank account or a landlord at a mock
 payments keyword. `mock_acct_fail` rejects every debit. `mock_acct_return_r01` accepts a
@@ -97,9 +111,6 @@ unauthorized. Adding `_once` returns only the first payment. A lease whose payou
 contains `return_r03` has its landlord payout sent back. The mock remembers pending returns
 for the life of one process, so they show up when the jobs run inside the API server, the
 seed, or a test, and not across separate `job:run` invocations.
-
-The jobs now include `refresh-connections` (third, before `reunderwrite`): tokens near
-expiry are refreshed and businesses with an active plan are pulled again weekly and checked.
 
 The seed has one business in each state: Blue Door Bakery is current, Cedar Street Cycles is
 delinquent with a held payout, and Juniper Print Studio was charged off and has since paid

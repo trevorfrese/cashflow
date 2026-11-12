@@ -108,6 +108,33 @@ export const AUDIT_EVENTS = [
   'VERACITY_ASSESSED',
   /** A pull found the platform paying out somewhere other than it did before. */
   'PAYOUT_DESTINATION_CHANGED',
+  // Pass-through plans and graduation (Phase 6). Written on the rent plan.
+  /** A declined business started a free pass-through plan on a lease. */
+  'PASS_THROUGH_PLAN_CREATED',
+  /** A month's rent was debited from the business. Payload: periodId, amount, settlesOn. */
+  'PASS_THROUGH_COLLECTED',
+  /** Nothing could be collected in time, or the debit came back before the landlord was paid. */
+  'PASS_THROUGH_MISSED',
+  /** A settled collection was paid to the landlord. */
+  'PASS_THROUGH_LANDLORD_PAID',
+  /** A settled collection's landlord payout is held. Payload: reason. */
+  'PASS_THROUGH_HELD',
+  /** A held collection was sent back to the business after the release window. */
+  'PASS_THROUGH_REFUNDED',
+  /** A collection came back after the landlord was paid. High severity. */
+  'PASS_THROUGH_RETURNED_AFTER_PAYOUT',
+  /** The refresh-eligibility job offered a financed plan. */
+  'GRADUATION_OFFERED',
+  /** The owner accepted a graduation offer. */
+  'GRADUATION_ACCEPTED',
+  /** The financed plan opened and the pass-through plan closed. */
+  'GRADUATION_COMPLETED',
+  /** An offer was not accepted in time. */
+  'GRADUATION_EXPIRED',
+  /** An offer was taken back before it took effect. Payload: reason. */
+  'GRADUATION_WITHDRAWN',
+  /** A landlord payment was refused because the month was already paid. High severity. */
+  'DUPLICATE_PAYOUT_PREVENTED',
 ] as const;
 export type AuditEventType = (typeof AUDIT_EVENTS)[number];
 

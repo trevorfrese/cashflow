@@ -1,5 +1,5 @@
-import { CreateLeaseRequest, formatCents } from '@cashflow/shared';
-import { router } from 'expo-router';
+import { CreateLeaseRequest, formatCents, type Lease } from '@cashflow/shared';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -7,16 +7,30 @@ import { Button, Card, Notice, Screen, Segmented, Text, TextField, Toggle } from
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
 import { centsToDollarsInput, dollarsToCents, normalizeMonthInput, todayIso } from '@/lib/forms';
-import { useApplications, useCreateLease } from '@/lib/queries';
+import {
+  useApplications,
+  useCreateLease,
+  usePassThroughOffer,
+  useStartPassThroughPlan,
+} from '@/lib/queries';
 import { colors, fonts, spacing } from '@/theme';
 
 const DUE_DAYS = [1, 5, 10, 15] as const;
 
 export default function NewLease() {
+  // Set when linking a lease to start the free pass-through plan on a declined application.
+  const { passThroughFor } = useLocalSearchParams<{ passThroughFor?: string }>();
+  const passThrough = Boolean(passThroughFor);
   const { business } = useBusiness();
   const applications = useApplications(business?.id);
-  const approved = applications.data?.find((a) => a.status === 'APPROVED');
+  const approved = passThrough
+    ? undefined
+    : applications.data?.find((a) => a.status === 'APPROVED');
+  const offer = usePassThroughOffer(passThroughFor, passThrough);
   const create = useCreateLease();
+  const startPassThrough = useStartPassThroughPlan();
+  // Kept so a failed plan start can be retried without linking the lease twice.
+  const [created, setCreated] = useState<Lease | null>(null);
   const [sameAddress, setSameAddress] = useState(true);
   const [form, setForm] = useState({
     landlordName: '',
@@ -37,13 +51,12 @@ export default function NewLease() {
   const set = (key: keyof typeof form) => (value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
+  const suggestedRentCents =
+    approved?.requestedMonthlyRentCents ?? offer.data?.monthlyRentCents ?? null;
   useEffect(() => {
-    if (approved)
-      setForm((f) => ({
-        ...f,
-        rent: f.rent || centsToDollarsInput(approved.requestedMonthlyRentCents),
-      }));
-  }, [approved]);
+    if (suggestedRentCents !== null)
+      setForm((f) => ({ ...f, rent: f.rent || centsToDollarsInput(suggestedRentCents) }));
+  }, [suggestedRentCents]);
 
   const limit = approved?.decision?.approvedMonthlyLimitCents ?? null;
   const rentCents = dollarsToCents(form.rent);
@@ -97,6 +110,13 @@ export default function NewLease() {
     }
     setErrors({});
     try {
+      if (passThroughFor) {
+        const lease = created ?? (await create.mutateAsync(parsed.data!));
+        setCreated(lease);
+        await startPassThrough.mutateAsync({ applicationId: passThroughFor, leaseId: lease.id });
+        router.replace('/(tabs)');
+        return;
+      }
       const lease = await create.mutateAsync(parsed.data!);
       router.replace({ pathname: '/plan/new', params: { leaseId: lease.id } });
     } catch (e) {
@@ -107,22 +127,33 @@ export default function NewLease() {
   return (
     <Screen
       back
-      step="Step 3 of 4"
+      step={passThrough ? undefined : 'Step 3 of 4'}
       title="Link your lease"
       subtitle="Who gets paid, how much, and when."
       footer={
         <Button
-          title="Continue to rent plan"
+          title={passThrough ? 'Start the free plan' : 'Continue to rent plan'}
           size="lg"
           icon="arrow-right"
           onPress={() => void submit()}
-          loading={create.isPending}
+          loading={create.isPending || startPassThrough.isPending}
           disabled={!business}
         />
       }
     >
       {errors.form ? <Notice tone="danger" message={errors.form} /> : null}
-      {!approved ? (
+      {created ? (
+        <Notice
+          tone="info"
+          message={`Your lease with ${created.landlordName} is linked. Tap the button to try starting the plan again.`}
+        />
+      ) : null}
+      {passThrough ? (
+        <Notice
+          tone="info"
+          message="Free pass-through plan: we collect your rent a few days before it is due and pay your landlord on the due date. No fee."
+        />
+      ) : !approved ? (
         <Notice tone="warning" message="You need an approved application before linking a lease." />
       ) : null}
 

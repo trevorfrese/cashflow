@@ -4,7 +4,13 @@ import {
   type ServicingPolicy,
 } from '../servicing/policy.ts';
 import { decide } from '../underwriting/engine.ts';
-import { CURRENT_POLICY, POLICY_V1, POLICY_V2, type CreditPolicy } from '../underwriting/policy.ts';
+import {
+  CURRENT_POLICY,
+  POLICY_V1,
+  POLICY_V2,
+  POLICY_V3,
+  type CreditPolicy,
+} from '../underwriting/policy.ts';
 import { ASSUMPTIONS, STRESS, poolSizeFor } from './assumptions.ts';
 import { evaluateGates, type GateResult } from './gates.ts';
 import {
@@ -18,6 +24,7 @@ import {
 } from './metrics.ts';
 import { drawPopulation, type Applicant } from './population.ts';
 import {
+  defaultPassThroughSim,
   runPortfolio,
   runThroughTheDoor,
   throughTheDoorCustomers,
@@ -39,7 +46,12 @@ import { counterfactualCell, type CounterfactualCell } from './veracity-metrics.
  *
  *   v1_baseline   the launch policy with today's servicing: where Phase R1 started
  *   v1_standard   the launch policy with standard servicing: what servicing alone buys
- *   v2_baseline   the current policy with today's servicing: what underwriting alone buys
+ *   v2_baseline   version 2 with the baseline servicing: what underwriting alone buys
+ *   v2_standard   version 2 with standard servicing: before the veracity checks
+ *   v3_standard   version 3: before payment history, pass-through plans and graduation
+ *
+ * The gated configuration (version 4) is the only one that runs pass-through plans and
+ * graduates from them. Challengers, sensitivities and counterfactuals run without them.
  *
  * Challengers change one thing about the gated configuration and report a swap set.
  *
@@ -56,14 +68,20 @@ export interface PolicyConfig {
   servicing: ServicingPolicy;
   /** Also run mild stress, which the gates need. */
   withMild: boolean;
+  /**
+   * Run declined applicants through the pass-through plan and graduate them under the
+   * policy's refresh rules. Needs a policy with `graduation` and `paymentHistory`.
+   */
+  passThrough?: boolean;
 }
 
 export const GATED_CONFIG: PolicyConfig = {
-  name: 'v3_standard',
-  description: `${CURRENT_POLICY.version} decisions, standard servicing. The gated configuration.`,
+  name: 'v4_standard',
+  description: `${CURRENT_POLICY.version} decisions, standard servicing, with pass-through plans for credit declines and graduation from them. The gated configuration.`,
   policy: CURRENT_POLICY,
   servicing: STANDARD_SERVICING_POLICY,
   withMild: true,
+  passThrough: true,
 };
 
 export const COMPARISON_CONFIGS: readonly PolicyConfig[] = [
@@ -92,6 +110,13 @@ export const COMPARISON_CONFIGS: readonly PolicyConfig[] = [
     name: 'v2_standard',
     description: `${POLICY_V2.version} decisions, standard servicing: the policy before the data veracity checks, on the same applicants. What the checks buy and cost.`,
     policy: POLICY_V2,
+    servicing: STANDARD_SERVICING_POLICY,
+    withMild: true,
+  },
+  {
+    name: 'v3_standard',
+    description: `${POLICY_V3.version} decisions, standard servicing, no pass-through plans: the policy before payment history and graduation, on the same applicants.`,
+    policy: POLICY_V3,
     servicing: STANDARD_SERVICING_POLICY,
     withMild: true,
   },
@@ -247,12 +272,17 @@ function portfolioConfig(
   policy: CreditPolicy,
   servicing: ServicingPolicy,
   horizonMonths: number,
+  passThrough = false,
 ): Partial<PortfolioConfig> {
   return {
     decide: (input) => decide(input, policy),
     exposure: policy.exposure,
     servicing,
     horizonMonths,
+    passThrough:
+      passThrough && policy.graduation && policy.paymentHistory
+        ? defaultPassThroughSim(policy.graduation, policy.paymentHistory.lookbackMonths)
+        : null,
     // The baseline policy describes the services before they handled returns: a failed
     // debit was booked as failed on the day.
     returnDelayDays:
@@ -273,10 +303,11 @@ export function evaluate(options: EvaluationOptions): Evaluation {
     label: string,
     stress: PortfolioConfig['stress'] = null,
     overrides: Partial<PortfolioConfig> = {},
+    passThrough = false,
   ): PortfolioResult[] =>
     populations.map((population) =>
       runPortfolio(population, {
-        ...portfolioConfig(policy, servicing, options.horizonMonths),
+        ...portfolioConfig(policy, servicing, options.horizonMonths, passThrough),
         ...overrides,
         label,
         stress,
@@ -320,11 +351,16 @@ export function evaluate(options: EvaluationOptions): Evaluation {
     };
   };
 
-  const baseResults = runAll(gated.policy, gated.servicing, 'base');
+  const withPassThrough = gated.passThrough === true;
+  const baseResults = runAll(gated.policy, gated.servicing, 'base', null, {}, withPassThrough);
   const pooledBaseResult = poolResults(baseResults);
   const base = metricsOf(baseResults);
-  const mild = metricsOf(runAll(gated.policy, gated.servicing, 'mild', STRESS.mild));
-  const severe = metricsOf(runAll(gated.policy, gated.servicing, 'severe', STRESS.severe));
+  const mild = metricsOf(
+    runAll(gated.policy, gated.servicing, 'mild', STRESS.mild, {}, withPassThrough),
+  );
+  const severe = metricsOf(
+    runAll(gated.policy, gated.servicing, 'severe', STRESS.severe, {}, withPassThrough),
+  );
   const throughTheDoor = runThroughDoor(
     gated.policy,
     gated.servicing,
@@ -373,10 +409,12 @@ export function evaluate(options: EvaluationOptions): Evaluation {
   });
 
   const comparisonOutcomes = comparisons.map((c): ConfigOutcome => {
-    const results = runAll(c.policy, c.servicing, c.name);
+    const results = runAll(c.policy, c.servicing, c.name, null, {}, c.passThrough === true);
     const cBase = metricsOf(results);
     const cMild = c.withMild
-      ? metricsOf(runAll(c.policy, c.servicing, `${c.name}/mild`, STRESS.mild))
+      ? metricsOf(
+          runAll(c.policy, c.servicing, `${c.name}/mild`, STRESS.mild, {}, c.passThrough === true),
+        )
       : null;
     const cDoor = cMild
       ? runThroughDoor(c.policy, c.servicing, `${c.name}/through_the_door`, results)

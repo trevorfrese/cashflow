@@ -5,8 +5,10 @@ import { OPEN_BUCKETS, type OpenBucket } from '../servicing/policy.ts';
 import { veracityMetrics, type VeracityMetrics } from './veracity-metrics.ts';
 import {
   emptyBucketRoll,
+  emptyPassThroughStats,
   type BucketRoll,
   type CustomerResult,
+  type PassThroughStats,
   type PoolMonth,
   type PortfolioResult,
 } from './portfolio.ts';
@@ -149,6 +151,22 @@ export interface PortfolioMetrics {
   bucketEntryRoll: BucketRollRow[];
   /** What the data veracity checks did. Zeros under a policy without them. */
   veracity: VeracityMetrics;
+  /** Pass-through plans and the graduated cohort. Null when the run had no pass-through. */
+  passThrough: PassThroughMetrics | null;
+}
+
+/**
+ * The pass-through book and the cohort that graduated from it. Graduates are financed plans
+ * from the same pool as the origination book, kept out of `overall` so the gates keep
+ * judging the origination decisions; `bookWithGraduates` shows the two together.
+ */
+export interface PassThroughMetrics {
+  stats: PassThroughStats;
+  /** Financed plans opened by graduation: count, bad rate, loss, margin. */
+  graduated: SegmentMetrics;
+  graduatedByGrade: Record<string, SegmentMetrics>;
+  /** The origination book and the graduates as one book. */
+  bookWithGraduates: SegmentMetrics;
 }
 
 export interface BucketRollRow {
@@ -545,7 +563,22 @@ export function poolResults(results: readonly PortfolioResult[]): PortfolioResul
     customers: results.flatMap((r, i) =>
       r.customers.map((c) => ({ ...c, applicantId: `${i}:${c.applicantId}` })),
     ),
+    graduates: results.flatMap((r, i) =>
+      r.graduates.map((c) => ({ ...c, applicantId: `${i}:${c.applicantId}` })),
+    ),
+    passThrough: results.some((r) => r.passThrough)
+      ? sumPassThrough(results.map((r) => r.passThrough))
+      : null,
   };
+}
+
+function sumPassThrough(all: ReadonlyArray<PassThroughStats | null>): PassThroughStats {
+  const total = emptyPassThroughStats();
+  for (const s of all) {
+    if (!s) continue;
+    for (const key of Object.keys(total) as Array<keyof PassThroughStats>) total[key] += s[key];
+  }
+  return total;
 }
 
 function sumRolls(rolls: readonly BucketRoll[]): BucketRoll {
@@ -624,6 +657,19 @@ export function computeMetrics(
     bucketRoll: bucketRollRows(result.bucketRoll),
     bucketEntryRoll: bucketRollRows(result.bucketEntryRoll),
     veracity: veracityMetrics(customers),
+    passThrough: result.passThrough
+      ? {
+          stats: result.passThrough,
+          graduated: segmentMetrics(result.graduates, costs),
+          graduatedByGrade: cut(
+            result.graduates,
+            costs,
+            (c) => (c.payoutCount > 0 ? c.grade : null),
+            GRADES,
+          ),
+          bookWithGraduates: segmentMetrics([...customers, ...result.graduates], costs),
+        }
+      : null,
   };
 }
 

@@ -5,10 +5,12 @@ import {
   InstallmentStatus,
   PayoutHoldReason,
   PayoutStatus,
+  RentPlanKind,
   RentPlanStatus,
   RepaymentStatus,
 } from '../enums';
 import { Bps, Cents, Id, IsoDateSchema, IsoDateTimeSchema, PeriodMonth } from './common';
+import { GraduationOffer, PassThroughPeriod } from './pass-through';
 
 export const CreateRentPlanRequest = z.object({
   leaseId: Id,
@@ -89,6 +91,8 @@ export type Repayment = z.infer<typeof Repayment>;
 
 export const RentPlan = z.object({
   id: Id,
+  /** FINANCED or PASS_THROUGH. A pass-through plan has no fee, payouts or installments. */
+  kind: RentPlanKind,
   businessId: Id,
   leaseId: Id,
   applicationId: Id,
@@ -129,6 +133,16 @@ export const RentPlanDetail = RentPlan.extend({
   payouts: z.array(LandlordPayout),
   /** The payout that is held right now, if any, with the reason and the release deadline. */
   heldPayout: LandlordPayout.nullable(),
+  /** Pass-through plans only: the month in progress and every month. Null on a financed plan. */
+  passThrough: z
+    .object({
+      /** The next month not yet paid to the landlord, or null. */
+      nextPeriod: PassThroughPeriod.nullable(),
+      periods: z.array(PassThroughPeriod),
+    })
+    .nullable(),
+  /** An open offer to move this pass-through plan onto a financed plan. */
+  graduationOffer: GraduationOffer.nullable(),
 });
 export type RentPlanDetail = z.infer<typeof RentPlanDetail>;
 

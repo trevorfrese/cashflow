@@ -86,6 +86,10 @@ Defined in `apps/api/src/dev/personas.ts`. Each is its own login (password `demo
 | `delinquent`             | Cedar Street Cycles  | Debits failing for a month, plan delinquent, latest landlord payout held                                 |
 | `charged-off`            | Juniper Print Studio | Written off at 90 days past due, plan closed, one payment recovered                                      |
 | `landlord-change`        | Alder & Ash Florist  | Landlord payout change in its cooling-off period, payout held                                            |
+| `pass-through`           | Ridgeline Coffee     | Declined (too new), on the free pass-through plan, two months collected early and paid on time           |
+| `pass-through-missed`    | Foundry Bike Works   | Pass-through: one month paid, the next not collected, so the landlord was not paid and the owner told    |
+| `graduation-offer`       | Willow & Wren Bakery | Three on time pass-through months, re-underwritten with payment history, offered a financed plan         |
+| `pass-through-offer`     | Larkspur Tailoring   | Just declined (four months in business) with a lease linked: start the free plan from the decision       |
 | `declined`               | Northside Barbers    | Declined with reasons (overdrafts, too new, rent too high)                                               |
 | `needs-info`             | Lakeview Yoga        | Applied with no bank linked                                                                              |
 | `manual-review`          | Tidewater Sign Works | Referred 34 days ago on a tax id mismatch, never reviewed: past the deadline                             |
@@ -102,7 +106,7 @@ Defined in `apps/api/src/dev/personas.ts`. Each is its own login (password `demo
 | `fresh-ownership`        | none yet             | Preset: a bank account held by another business: referred                                                |
 | `fresh-toast`            | none yet             | Preset: Toast through a read-only seat: approved with two verified sources                               |
 
-Other logins are `<key>@cashflow.local`. The first four are months of replayed ledger history: they are rebuilt only by a full reset (`./dev reset`). The rest can be rebuilt one at a time (`./dev reset --persona <key>`), as a new account with new ids.
+Other logins are `<key>@cashflow.local`. `active-plan`, `delinquent`, `charged-off`, `landlord-change`, `pass-through`, `pass-through-missed` and `graduation-offer` are months of replayed ledger history: they are rebuilt only by a full reset (`./dev reset`). The rest can be rebuilt one at a time (`./dev reset --persona <key>`), as a new account with new ids.
 
 The clock is one clock for the whole book. Advancing it for one persona moves time for all of them, because the jobs run for every business. `./dev reset` is how you get back.
 

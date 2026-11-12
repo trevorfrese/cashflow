@@ -11,6 +11,7 @@ export * from './schemas/commerce';
 export * from './schemas/connections';
 export * from './schemas/underwriting';
 export * from './schemas/lease';
+export * from './schemas/pass-through';
 export * from './schemas/rent-plan';
 export * from './schemas/ledger';
 export * from './schemas/identity';

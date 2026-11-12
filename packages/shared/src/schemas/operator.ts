@@ -25,6 +25,7 @@ import {
 } from './common';
 import { BusinessIdentityView, LeaseChangeView, ScreeningResult } from './identity';
 import { Alert, AuditEventView } from './monitoring';
+import { GraduationOffer, PassThroughPeriod, PaymentHistory } from './pass-through';
 import { DelinquencySummary, Installment, LandlordPayout, RentPlan, Repayment } from './rent-plan';
 import {
   ApplicationReview,
@@ -168,6 +169,8 @@ export const OperatorRentPlan = RentPlan.extend({
   pendingRentCents: Cents.nullable(),
   payouts: z.array(OperatorPayout),
   installments: z.array(OperatorInstallment),
+  /** Pass-through plans only: every month, with what was collected and paid. Empty otherwise. */
+  passThroughPeriods: z.array(PassThroughPeriod).default([]),
 });
 export type OperatorRentPlan = z.infer<typeof OperatorRentPlan>;
 
@@ -204,6 +207,10 @@ export const OperatorBusinessDetail = z.object({
   screenings: z.array(ScreeningResult),
   /** Alerts about the business or anything it owns, newest first, capped. */
   alerts: z.array(Alert),
+  /** Rent paid through CashFlow, month by month, on either kind of plan. Derived on read. */
+  paymentHistory: PaymentHistory.nullable().default(null),
+  /** Graduation offers from a pass-through plan, newest first. */
+  graduationOffers: z.array(GraduationOffer).default([]),
 });
 export type OperatorBusinessDetail = z.infer<typeof OperatorBusinessDetail>;
 

@@ -242,12 +242,20 @@ export interface RetentionFact {
   exists: boolean;
 }
 
+/**
+ * A notice an application is owed, from the notice schedule (`adverse-action/schedule.ts`),
+ * and the one stored for it, if any.
+ */
 export interface AdverseActionFact {
   decisionId: string;
   applicationId: string;
   businessName: string;
-  outcome: 'DECLINED' | 'COUNTER_OFFER';
-  decidedOn: IsoDate;
+  kind: 'DECLINE' | 'COUNTER_OFFER_NOT_ACCEPTED' | 'INCOMPLETE' | 'INCOMPLETE_DECLINED';
+  /** The day the notice became due to be sent. */
+  actionOn: IsoDate;
+  /** The last day it may be delivered. */
+  deadlineOn: IsoDate;
+  /** The day the stored notice was delivered. Null when none is stored. */
   noticeSentOn: IsoDate | null;
 }
 

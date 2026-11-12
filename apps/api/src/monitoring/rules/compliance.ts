@@ -1,6 +1,6 @@
 import { addDays, daysBetween } from '@cashflow/shared';
 
-import type { AlertCandidate, Rule } from '../types.ts';
+import type { AdverseActionFact, AlertCandidate, Rule } from '../types.ts';
 
 /**
  * Compliance rules. The deadlines and periods here are working assumptions about what the
@@ -49,11 +49,18 @@ export const decisionDeadline: Rule = {
   },
 };
 
+const NOTICE_LABEL: Record<AdverseActionFact['kind'], string> = {
+  DECLINE: 'a decline',
+  COUNTER_OFFER_NOT_ACCEPTED: 'a counter offer not taken up',
+  INCOMPLETE: 'an incomplete application (notice of incompleteness)',
+  INCOMPLETE_DECLINED: 'an application closed as incomplete',
+};
+
 export const adverseActionNoticeMissing: Rule = {
   type: 'compliance.adverse_action_notice_missing',
   category: 'COMPLIANCE',
   description:
-    'A decline or a counter offer has no stored adverse action notice. Inactive until the notice exists: the rule is implemented and tested, and `adverseActionNoticeRuleActive` turns it on.',
+    'A decline, a counter offer not taken up, or an application left incomplete is owed a notice and none is stored. High once it is a day overdue, critical past its Regulation B deadline (12 CFR 1002.9(a)(1)).',
   autoResolves: true,
   once: false,
   tripsCircuitBreaker: false,
@@ -63,17 +70,58 @@ export const adverseActionNoticeMissing: Rule = {
       .filter(
         (d) =>
           d.noticeSentOn === null &&
-          daysBetween(d.decidedOn, inputs.asOf) >= policy.compliance.adverseActionNoticeDays,
+          daysBetween(d.actionOn, inputs.asOf) >= policy.compliance.adverseActionNoticeDays,
       )
+      .map((d): AlertCandidate => {
+        const past = inputs.asOf > d.deadlineOn;
+        return {
+          type: 'compliance.adverse_action_notice_missing',
+          category: 'COMPLIANCE',
+          severity: past ? 'CRITICAL' : 'HIGH',
+          subjectType: 'application',
+          subjectId: d.applicationId,
+          title: past
+            ? `No notice stored for ${NOTICE_LABEL[d.kind]}, past its ${d.deadlineOn} deadline: ${d.businessName}`
+            : `No notice stored for ${NOTICE_LABEL[d.kind]}, due by ${d.deadlineOn}: ${d.businessName}`,
+          detail: {
+            decisionId: d.decisionId,
+            kind: d.kind,
+            actionOn: d.actionOn,
+            deadlineOn: d.deadlineOn,
+          },
+          dedupeKey: `adverse_action:${d.decisionId}:${d.kind}`,
+        };
+      });
+  },
+};
+
+export const adverseActionNoticeLate: Rule = {
+  type: 'compliance.adverse_action_notice_late',
+  category: 'COMPLIANCE',
+  description:
+    'A notice was delivered after its Regulation B deadline. The notice cannot be unsent; the alert records the breach for whoever owns compliance.',
+  // A late notice stays late.
+  autoResolves: false,
+  once: true,
+  tripsCircuitBreaker: false,
+  evaluate: (inputs, policy) => {
+    if (!policy.compliance.adverseActionNoticeRuleActive) return [];
+    return inputs.adverseActions
+      .filter((d) => d.noticeSentOn !== null && d.noticeSentOn > d.deadlineOn)
       .map((d): AlertCandidate => ({
-        type: 'compliance.adverse_action_notice_missing',
+        type: 'compliance.adverse_action_notice_late',
         category: 'COMPLIANCE',
         severity: 'HIGH',
         subjectType: 'application',
         subjectId: d.applicationId,
-        title: `No adverse action notice stored for a ${d.outcome === 'DECLINED' ? 'decline' : 'counter offer'}: ${d.businessName}`,
-        detail: { decisionId: d.decisionId, outcome: d.outcome, decidedOn: d.decidedOn },
-        dedupeKey: `adverse_action:${d.decisionId}`,
+        title: `Notice for ${NOTICE_LABEL[d.kind]} delivered ${daysBetween(d.deadlineOn, d.noticeSentOn!)} days after its deadline: ${d.businessName}`,
+        detail: {
+          decisionId: d.decisionId,
+          kind: d.kind,
+          deadlineOn: d.deadlineOn,
+          deliveredOn: d.noticeSentOn,
+        },
+        dedupeKey: `adverse_action_late:${d.decisionId}:${d.kind}`,
       }));
   },
 };
@@ -167,6 +215,7 @@ export const identityUnverified: Rule = {
 export const COMPLIANCE_RULES: Rule[] = [
   decisionDeadline,
   adverseActionNoticeMissing,
+  adverseActionNoticeLate,
   screeningStale,
   retentionViolation,
   identityUnverified,

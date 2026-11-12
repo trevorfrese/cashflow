@@ -1,4 +1,5 @@
-import type { CashFlowSummary, DecisionReason } from '@cashflow/shared';
+import type { ExplanationCheck, ExplanationFactor, PrincipalReason } from '@cashflow/shared';
+import type { CashFlowSummary } from '@cashflow/shared';
 import { formatBps, formatCents } from '@cashflow/shared';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
@@ -7,12 +8,15 @@ import { StyleSheet, View } from 'react-native';
 import { Button, Card, Notice, Pill, Screen, ScoreGauge, Text } from '@/components';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
+import { FACTOR_STATUS, longDate } from '@/lib/decision';
 import { formatPeriod } from '@/lib/forms';
 import { IN_REVIEW_COPY } from '@/lib/plan-notices';
 import { leaseForPassThrough } from '@/lib/pass-through';
 import {
   useApplication,
   useBankLinks,
+  useDeclineOffer,
+  useExplanation,
   useLeases,
   usePassThroughOffer,
   useResubmitApplication,
@@ -20,22 +24,31 @@ import {
 } from '@/lib/queries';
 import { border, colors, radii, spacing } from '@/theme';
 
+/**
+ * The decision, explained. Everything is stacked for a phone: no long text sits beside a
+ * pill, a gauge or a button. The score is shown only on an approval or a counter offer; a
+ * decline shows its principal reasons and what would change them, then how each factor did,
+ * then the free pass-through plan, then the notice.
+ */
 export default function Decision() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { business } = useBusiness();
   const { data: app, isLoading } = useApplication(id, business?.id);
+  const explanation = useExplanation(id);
   const links = useBankLinks(business?.id);
   const resubmit = useResubmitApplication();
   const [error, setError] = useState<string | null>(null);
 
-  if (isLoading || !app) {
+  const e = explanation.data;
+  if (isLoading || explanation.isLoading || !app || !e) {
     return (
       <Screen back title="Decision">
-        <Text tone="muted">{isLoading ? 'Loading…' : 'Application not found.'}</Text>
+        <Text tone="muted">
+          {isLoading || explanation.isLoading ? 'Loading…' : 'Application not found.'}
+        </Text>
       </Screen>
     );
   }
-  const d = app.decision;
   const linked = links.data?.filter((l) => l.status === 'LINKED') ?? [];
 
   const retry = async () => {
@@ -45,13 +58,14 @@ export default function Decision() {
         applicationId: app.id,
         bankLinkId: linked[linked.length - 1]?.id,
       });
-    } catch (e) {
-      setError(describeError(e));
+      void explanation.refetch();
+    } catch (err) {
+      setError(describeError(err));
     }
   };
 
   const footer = (() => {
-    if (app.status === 'APPROVED') {
+    if (e.outcome === 'APPROVED' || e.outcome === 'COUNTER_OFFER') {
       return (
         <Button
           title="Link your lease"
@@ -61,7 +75,7 @@ export default function Decision() {
         />
       );
     }
-    if (app.status === 'NEEDS_INFO') {
+    if (e.outcome === 'NEEDS_INFO') {
       return linked.length > 0 ? (
         <Button
           title="Run the decision again"
@@ -81,74 +95,262 @@ export default function Decision() {
     );
   })();
 
+  const approved = e.outcome === 'APPROVED' || e.outcome === 'COUNTER_OFFER';
+  const helping = e.factors.filter((f) => f.status === 'HELPING');
+
   return (
-    <Screen back title={headline(app.status)} footer={footer}>
+    <Screen back title={e.headline} footer={footer}>
       {error ? <Notice tone="danger" message={error} /> : null}
-      {app.status === 'IN_REVIEW' ? (
-        <Notice tone="info" title={IN_REVIEW_COPY.title} message={IN_REVIEW_COPY.message} />
-      ) : null}
-      {!d ? (
-        <Text tone="muted">No decision yet.</Text>
-      ) : (
+
+      {e.outcome === 'IN_REVIEW' ? (
         <>
-          {d.score !== null && d.grade ? (
-            <Card>
-              <View style={styles.gaugeRow}>
-                <ScoreGauge score={d.score} grade={d.grade} />
-                <View style={styles.gaugeDetail}>
-                  {app.status === 'APPROVED' ? (
-                    <>
-                      <Stat
-                        label="Monthly rent limit"
-                        value={formatCents(d.approvedMonthlyLimitCents ?? 0, { showCents: false })}
-                      />
-                      <Stat label="Fee per month" value={`${formatBps(d.feeBps ?? 0)} of rent`} />
-                      <Stat
-                        label="Suggested cadence"
-                        value={`${d.recommendedInstallmentsPerMonth ?? 2} installments`}
-                      />
-                    </>
-                  ) : (
-                    <Text variant="body" tone="muted">
-                      {summaryLine(app.status)}
-                    </Text>
-                  )}
-                </View>
-              </View>
-            </Card>
-          ) : app.status === 'IN_REVIEW' ? null : (
-            <Notice
-              tone="info"
-              title="More information needed"
-              message={d.reasons[0]?.message ?? ''}
-            />
-          )}
+          <Notice tone="info" title={IN_REVIEW_COPY.title} message={IN_REVIEW_COPY.message} />
+          <Section title="What happens next">
+            <Text variant="body">{e.nextSteps?.text ?? e.summary}</Text>
+          </Section>
+        </>
+      ) : (
+        <Card tone="paper" shadow="none">
+          <Text variant="body">{e.summary}</Text>
+        </Card>
+      )}
 
-          {app.status === 'DECLINED' && business ? (
-            <PassThroughCard applicationId={app.id} businessId={business.id} />
+      {approved && e.score ? (
+        <Card>
+          <View style={styles.gaugeBlock}>
+            <ScoreGauge score={e.score.value} grade={e.score.grade} />
+          </View>
+          {e.terms ? (
+            <View style={styles.stats}>
+              <Stat
+                label="Monthly rent limit"
+                value={formatCents(e.terms.approvedMonthlyLimitCents, { showCents: false })}
+              />
+              {e.outcome === 'COUNTER_OFFER' ? (
+                <Stat
+                  label="You asked for"
+                  value={formatCents(e.terms.requestedMonthlyRentCents, { showCents: false })}
+                />
+              ) : null}
+              <Stat label="Fee per month" value={`${formatBps(e.terms.feeBps)} of rent`} />
+              <Stat
+                label="Suggested cadence"
+                value={`${e.terms.installmentsPerMonth} installments a month`}
+              />
+              <Text variant="body" tone="muted">
+                {e.terms.why}
+              </Text>
+            </View>
           ) : null}
+        </Card>
+      ) : null}
 
-          <Section
-            title={
-              app.status === 'DECLINED'
-                ? 'Why we could not approve this'
-                : app.status === 'IN_REVIEW'
-                  ? 'What we have looked at so far'
-                  : 'What went into the decision'
-            }
-          >
-            {orderReasons(
-              // The banner above already says it is in review.
-              d.reasons.filter((r) => app.status !== 'IN_REVIEW' || r.code !== 'IN_REVIEW'),
-            ).map((r) => (
-              <ReasonRow key={r.code} reason={r} />
+      {e.outcome === 'COUNTER_OFFER' ? (
+        <>
+          <Section title="Why less than you asked">
+            {e.principalReasons.map((r, i) => (
+              <ReasonBlock key={r.code} reason={r} index={i + 1} />
             ))}
           </Section>
-
-          {d.cashFlow ? <CashFlowCard summary={d.cashFlow} /> : null}
+          {e.canDeclineOffer ? <DeclineOfferCard applicationId={app.id} /> : null}
         </>
-      )}
+      ) : null}
+
+      {e.outcome === 'DECLINED' ? (
+        <Section title="Why we could not approve this">
+          {e.principalReasons.map((r, i) => (
+            <ReasonBlock key={r.code} reason={r} index={i + 1} />
+          ))}
+        </Section>
+      ) : null}
+
+      {e.outcome === 'NEEDS_INFO' ? (
+        <Section title="What we need">
+          {e.requestedInformation.map((r, i) => (
+            <ReasonBlock key={r.code} reason={r} index={i + 1} guidanceLabel="How to provide it" />
+          ))}
+          {e.nextSteps?.expectedBy ? (
+            <View style={styles.dateBlock}>
+              <Text variant="label">Please provide it by</Text>
+              <Text variant="heading">{longDate(e.nextSteps.expectedBy)}</Text>
+            </View>
+          ) : null}
+        </Section>
+      ) : null}
+
+      {approved && helping.length > 0 ? (
+        <Section title="What helped">
+          {helping.map((f) => (
+            <FactorRow key={f.code} factor={f} />
+          ))}
+        </Section>
+      ) : null}
+
+      {e.outcome === 'DECLINED' || e.outcome === 'COUNTER_OFFER' ? (
+        <Section title="How each part of your cash flow did">
+          {e.factors.map((f) => (
+            <FactorRow key={f.code} factor={f} />
+          ))}
+        </Section>
+      ) : null}
+
+      {e.outcome === 'DECLINED' && business ? (
+        <PassThroughCard applicationId={app.id} businessId={business.id} />
+      ) : null}
+
+      {e.notices.length > 0 ? (
+        <Section title={e.notices.length === 1 ? 'Your notice' : 'Your notices'}>
+          {e.notices.map((n) => (
+            <View key={n.id} style={styles.noticeRow}>
+              <Text variant="bodyStrong">{n.title}</Text>
+              <Text variant="caption" tone="muted">
+                {`Sent ${longDate(n.deliveredAt)} in the app`}
+              </Text>
+              <Button
+                title="Read the notice"
+                variant="secondary"
+                size="sm"
+                icon="arrow-right"
+                onPress={() =>
+                  router.push({
+                    pathname: '/notice/[id]',
+                    params: { id: n.id, applicationId: app.id },
+                  })
+                }
+              />
+            </View>
+          ))}
+        </Section>
+      ) : null}
+
+      {e.checks.length > 0 && e.outcome !== 'IN_REVIEW' ? (
+        <Section title="Checks we ran">
+          {e.checks.map((c) => (
+            <CheckRow key={c.code} check={c} />
+          ))}
+        </Section>
+      ) : null}
+
+      {e.dataSources.length > 0 ? (
+        <Section title="What we used">
+          {e.dataSources.map((d) => (
+            <View key={`${d.kind}-${d.name}`} style={styles.source}>
+              <Text variant="bodyStrong">{d.name}</Text>
+              <Text variant="caption" tone="muted">
+                {d.dataAsOf ? `Data as of ${longDate(d.dataAsOf)}` : 'Connected'}
+              </Text>
+            </View>
+          ))}
+        </Section>
+      ) : null}
+
+      {app.decision?.cashFlow && e.outcome !== 'IN_REVIEW' ? (
+        <CashFlowCard summary={app.decision.cashFlow} />
+      ) : null}
     </Screen>
+  );
+}
+
+/** One principal reason: what happened, then what would change it. Always stacked. */
+function ReasonBlock({
+  reason,
+  index,
+  guidanceLabel = 'What would change this',
+}: {
+  reason: PrincipalReason;
+  index: number;
+  guidanceLabel?: string;
+}) {
+  return (
+    <View style={styles.reason}>
+      <Text variant="bodyStrong">{`${index}. ${reason.title}`}</Text>
+      <Text variant="body">{reason.text}</Text>
+      <View style={styles.guidance}>
+        <Text variant="label">{guidanceLabel}</Text>
+        <Text variant="body" tone="muted">
+          {reason.guidance}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/** A factor: its short label and status wrap together; the detail gets the full width below. */
+function FactorRow({ factor }: { factor: ExplanationFactor }) {
+  const s = FACTOR_STATUS[factor.status];
+  return (
+    <View style={styles.factor}>
+      <View style={styles.labelRow}>
+        <Text variant="bodyStrong" style={styles.labelText}>
+          {factor.label}
+        </Text>
+        <Pill label={s.label} tone={s.tone} />
+      </View>
+      <Text variant="body" tone="muted">
+        {factor.detail}
+      </Text>
+    </View>
+  );
+}
+
+function CheckRow({ check }: { check: ExplanationCheck }) {
+  return (
+    <View style={styles.factor}>
+      <View style={styles.labelRow}>
+        <Text variant="bodyStrong" style={styles.labelText}>
+          {check.label}
+        </Text>
+        <Pill label={check.passed ? 'Met' : 'Not met'} tone={check.passed ? 'paid' : 'late'} />
+      </View>
+      {check.passed ? null : (
+        <Text variant="body" tone="muted">
+          {check.detail}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+/** Turn down a counter offer. The notice is stored and shown at once. */
+function DeclineOfferCard({ applicationId }: { applicationId: string }) {
+  const decline = useDeclineOffer();
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const onDecline = async () => {
+    setError(null);
+    try {
+      const notice = await decline.mutateAsync(applicationId);
+      router.push({ pathname: '/notice/[id]', params: { id: notice.id, applicationId } });
+    } catch (err) {
+      setError(describeError(err));
+    }
+  };
+  return (
+    <Card tone="paper" shadow="none">
+      <Text variant="heading">Not what you need?</Text>
+      <Text variant="body" tone="muted">
+        You can decline this offer. We will send you a notice with the reasons we could not approve
+        the full rent. You can apply again at any time.
+      </Text>
+      {error ? <Notice tone="danger" message={error} /> : null}
+      {confirming ? (
+        <View style={styles.buttons}>
+          <Button
+            title="Yes, decline the offer"
+            variant="danger"
+            onPress={() => void onDecline()}
+            loading={decline.isPending}
+          />
+          <Button title="Keep the offer" variant="text" onPress={() => setConfirming(false)} />
+        </View>
+      ) : (
+        <Button
+          title="Decline this offer"
+          variant="secondary"
+          onPress={() => setConfirming(true)}
+        />
+      )}
+    </Card>
   );
 }
 
@@ -227,84 +429,6 @@ function PassThroughCard({
       )}
     </Card>
   );
-}
-
-function headline(status: string): string {
-  switch (status) {
-    case 'APPROVED':
-      return "You're approved";
-    case 'DECLINED':
-      return 'Not approved right now';
-    case 'NEEDS_INFO':
-      return 'A little more information';
-    case 'IN_REVIEW':
-      return 'In review';
-    default:
-      return 'Decision';
-  }
-}
-
-function summaryLine(status: string): string {
-  if (status === 'IN_REVIEW') {
-    return 'Your score is in. Terms are confirmed once the review is done.';
-  }
-  return status === 'DECLINED'
-    ? 'The account did not meet our policy on one or more hard rules. The reasons below are specific so you know what would need to change.'
-    : 'Underwriting ran but needs one more input before it can decide.';
-}
-
-function orderReasons(reasons: DecisionReason[]): DecisionReason[] {
-  const rank: Record<DecisionReason['impact'], number> = { NEGATIVE: 0, INFO: 1, POSITIVE: 2 };
-  return [...reasons].sort((a, b) => rank[a.impact] - rank[b.impact]);
-}
-
-function ReasonRow({ reason }: { reason: DecisionReason }) {
-  const color =
-    reason.impact === 'NEGATIVE'
-      ? colors.jetRed
-      : reason.impact === 'POSITIVE'
-        ? colors.mint
-        : colors.sky;
-  return (
-    <View style={styles.reason}>
-      <View style={[styles.marker, { backgroundColor: color }]} />
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text variant="bodyStrong">{labelFor(reason.code)}</Text>
-        <Text variant="body" tone="muted">
-          {reason.message}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-const LABELS: Record<string, string> = {
-  APPROVED: 'Approved',
-  LIMIT_BELOW_REQUEST: 'Approved at a lower limit',
-  RENT_TO_REVENUE: 'Rent affordability',
-  CASH_FLOW_COVERAGE: 'Cash flow coverage',
-  CASH_BUFFER: 'Cash buffer',
-  ACCOUNT_CONDUCT: 'Account conduct',
-  REVENUE_STABILITY: 'Revenue stability',
-  REVENUE_TREND: 'Revenue trend',
-  DEBT_LOAD: 'Existing debt',
-  DATA_DEPTH: 'Data history',
-  DEPOSIT_MISMATCH: 'Deposits vs sales',
-  BANK_LINK_REQUIRED: 'Bank account needed',
-  INSUFFICIENT_HISTORY: 'Not enough history',
-  REVENUE_MISMATCH: 'Revenue does not match',
-  TIME_IN_BUSINESS: 'Time in business',
-  REVENUE_TOO_LOW: 'Revenue below minimum',
-  EXCESSIVE_OVERDRAFTS: 'Overdrafts',
-  NEGATIVE_BALANCE_DAYS: 'Negative balance days',
-  RENT_EXCEEDS_REVENUE_SHARE: 'Rent too large for revenue',
-  REVENUE_DECLINING: 'Revenue declining',
-  NEGATIVE_FREE_CASH_FLOW: 'No free cash flow',
-  SCORE_BELOW_MINIMUM: 'Overall score',
-  INSUFFICIENT_CAPACITY: 'Not enough capacity',
-};
-function labelFor(code: string): string {
-  return LABELS[code] ?? code.charAt(0) + code.slice(1).toLowerCase().replace(/_/g, ' ');
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -391,18 +515,28 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
-  // Side by side when there is room, stacked on a phone so the text keeps its full width.
-  gaugeRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.lg },
-  gaugeDetail: { flexGrow: 1, flexBasis: 220, minWidth: 220, gap: spacing.sm },
-  reason: { flexDirection: 'row', gap: spacing.smd, alignItems: 'flex-start' },
-  marker: {
-    width: 14,
-    height: 14,
-    borderRadius: 3,
-    marginTop: 4,
-    borderWidth: border.thin,
-    borderColor: colors.ink,
+  gaugeBlock: { alignItems: 'center', paddingVertical: spacing.sm },
+  stats: { gap: spacing.smd, paddingTop: spacing.sm },
+  dateBlock: { gap: 2 },
+  reason: { gap: spacing.xs },
+  guidance: {
+    gap: 2,
+    backgroundColor: colors.paper,
+    borderRadius: radii.chip,
+    padding: spacing.smd,
   },
+  factor: { gap: spacing.xs },
+  // A short label and its pill wrap onto two lines rather than squeeze the label.
+  labelRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  labelText: { flexShrink: 1, minWidth: 140 },
+  noticeRow: { gap: spacing.xs, alignItems: 'flex-start' },
+  source: { gap: 2 },
+  buttons: { gap: spacing.sm },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingTop: spacing.sm },
   metric: {
     width: '47%',

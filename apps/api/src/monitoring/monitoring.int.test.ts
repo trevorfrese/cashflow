@@ -647,6 +647,7 @@ describe('alerts from what servicing already detects', () => {
     await reviewer().post(`/v1/admin/applications/${draft.body.id}/review`, {
       decision: 'DECLINE',
       reasonCodes: ['DOCUMENTS_NOT_PROVIDED'],
+      principalReasonCodes: ['IDENTITY_NOT_VERIFIED'],
     });
     await monitor(addDays(TODAY, 31));
     expect(await alerts('?type=compliance.decision_deadline')).toEqual([]);

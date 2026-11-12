@@ -76,20 +76,21 @@ src/test/                integration test harness
 idempotent for a given date and records a `JobRun`. The reasoning for the order is in
 `src/jobs/index.ts`; the rules are in `ARCHITECTURE.md` under "The life of a rent payment".
 
-| Order | Name                   | What it does                                                                                                 |
-| ----: | ---------------------- | ------------------------------------------------------------------------------------------------------------ |
-|     1 | `rescreen`             | Screens active businesses, owners and landlords again once their screening is 30 days old                    |
-|     2 | `lease-changes`        | Applies landlord and payout changes whose cooling-off period has ended                                       |
-|     3 | `refresh-connections`  | Refreshes tokens near expiry and pulls businesses with an active plan again weekly                           |
-|     4 | `reunderwrite`         | Monthly review of each active financed plan on fresh bank data. Freezes a plan that has deteriorated         |
-|     5 | `refresh-eligibility`  | Graduation: expires offers, opens accepted ones, re-underwrites pass-through plans with 3 on time months     |
-|     6 | `reconcile-payments`   | Polls the payments provider for returns and reverses each returned installment, payout or pass-through debit |
-|     7 | `age-receivables`      | Delinquency bucket per plan, `LATE` marks, audit event on each change, charge-off at 90 days past due        |
-|     8 | `generate-periods`     | Next month's payout and installments, and next month's pass-through month, 30 days ahead                     |
-|     9 | `process-payouts`      | Pays, holds, releases, or cancels each landlord payout that is due; settles and pays pass-through months     |
-|    10 | `collect-installments` | Scheduled debits (days 0, 3, and 6, after a balance check), the cash sweep, then pass-through collections    |
-|    11 | `provision`            | Sets the allowance for credit losses by bucket. Posts on the first run of each calendar month                |
-|    12 | `monitor`              | Runs every monitoring rule, opens and resolves alerts, trips the circuit breaker on a critical breach        |
+| Order | Name                     | What it does                                                                                                 |
+| ----: | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
+|     1 | `rescreen`               | Screens active businesses, owners and landlords again once their screening is 30 days old                    |
+|     2 | `lease-changes`          | Applies landlord and payout changes whose cooling-off period has ended                                       |
+|     3 | `refresh-connections`    | Refreshes tokens near expiry and pulls businesses with an active plan again weekly                           |
+|     4 | `reunderwrite`           | Monthly review of each active financed plan on fresh bank data. Freezes a plan that has deteriorated         |
+|     5 | `refresh-eligibility`    | Graduation: expires offers, opens accepted ones, re-underwrites pass-through plans with 3 on time months     |
+|     6 | `reconcile-payments`     | Polls the payments provider for returns and reverses each returned installment, payout or pass-through debit |
+|     7 | `age-receivables`        | Delinquency bucket per plan, `LATE` marks, audit event on each change, charge-off at 90 days past due        |
+|     8 | `generate-periods`       | Next month's payout and installments, and next month's pass-through month, 30 days ahead                     |
+|     9 | `process-payouts`        | Pays, holds, releases, or cancels each landlord payout that is due; settles and pays pass-through months     |
+|    10 | `collect-installments`   | Scheduled debits (days 0, 3, and 6, after a balance check), the cash sweep, then pass-through collections    |
+|    11 | `provision`              | Sets the allowance for credit losses by bucket. Posts on the first run of each calendar month                |
+|    12 | `adverse-action-notices` | Notices that fall due on a date: expired counter offers, incomplete applications, any decline without one    |
+|    13 | `monitor`                | Runs every monitoring rule, opens and resolves alerts, trips the circuit breaker on a critical breach        |
 
 `refresh-eligibility` re-underwrites a pass-through customer at most once a calendar month
 (the `ELIGIBILITY_REVIEW` decision is keyed by application and month with a unique index),
@@ -97,6 +98,17 @@ reads payment history completed before the review date, and on an approval for a
 lease rent makes a `GraduationOffer` the owner accepts with
 `POST /v1/graduation-offers/:id/accept`. The financed plan opens only between pass-through
 months, from the next one. Like every job it runs for each day crossed by `./dev advance`.
+
+Reasons and notices (see `UNDERWRITING.md`, "Reasons and adverse action notices"):
+`GET /v1/underwriting/applications/:id/explanation` (why the applicant got the decision:
+principal reasons with guidance, factor statuses, checks, data sources, and the score and
+terms only on an approval or counter offer), `GET /v1/underwriting/applications/:id/notices`
+(every notice sent, with its full text), and `POST /v1/underwriting/applications/:id/decline-offer`
+(the owner turns down a counter offer; the adverse action notice is stored at once). A decline's
+notice is written with the decision. `adverse-action-notices` sends a notice of incompleteness
+10 days after an application starts waiting on information, closes it with a notice 30 days
+after that, and sends the notice for a counter offer not taken up within 30 days. A reviewer's
+`DECLINE` and `REQUEST_INFO` need `principalReasonCodes` from the reason catalog.
 
 Pass-through routes: `GET /v1/underwriting/applications/:id/pass-through` (the offer on a
 declined application), `POST /v1/pass-through-plans` (start one on a lease),

@@ -117,6 +117,10 @@ export const toCommerceLink = (l: CommerceLink): CommerceLinkDto => ({
  * integrity flags, referral triggers) is internal and is never included. While an
  * application is referred, the limit and fee on the row are only the engine's
  * recommendation to the reviewer, so they are withheld until a review approves.
+ *
+ * The score and grade are shown only on an approval. A decline can come from a rule while
+ * the score is high, and a referral's score is not an answer: the applicant reads the
+ * explanation (reasons and factor statuses) instead.
  */
 export const toDecision = (d: UnderwritingDecision): DecisionDto => ({
   id: d.id,
@@ -124,8 +128,8 @@ export const toDecision = (d: UnderwritingDecision): DecisionDto => ({
   outcome: d.outcome,
   approvedMonthlyLimitCents: d.outcome === 'APPROVED' ? d.approvedMonthlyLimitCents : null,
   feeBps: d.outcome === 'APPROVED' ? d.feeBps : null,
-  score: d.score,
-  grade: (d.grade as DecisionDto['grade']) ?? null,
+  score: d.outcome === 'APPROVED' ? d.score : null,
+  grade: d.outcome === 'APPROVED' ? ((d.grade as DecisionDto['grade']) ?? null) : null,
   recommendedInstallmentsPerMonth: d.recommendedInstallmentsPerMonth,
   reasons: (d.reasons as DecisionDto['reasons']) ?? [],
   cashFlow: (d.cashFlow as DecisionDto['cashFlow']) ?? null,

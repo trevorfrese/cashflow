@@ -39,7 +39,7 @@ export async function truncateAll(ctx: Pick<AppContext, 'db'>): Promise<void> {
       "BankLink", "CommerceLink", "BeneficialOwner", "ScreeningResult", "LeaseChange",
       "Business", "RefreshToken", "User", "JobRun", "AuditEvent", "Alert", "CircuitBreaker",
       "DataSnapshot", "ConnectionAuthorization", "PassThroughPeriod", "GraduationOffer",
-      "LandlordDisbursement"
+      "LandlordDisbursement", "AdverseActionNotice"
     RESTART IDENTITY CASCADE
   `);
 }

@@ -17,6 +17,7 @@ import { Fragment, use } from 'react';
 import { z } from 'zod';
 
 import { ConnectionsPanel } from '@/components/connections';
+import { NoticesCard } from '@/components/notices';
 import { AlertsTable, AuditTable, ReasonAction } from '@/components/shared';
 import {
   Card,
@@ -71,6 +72,10 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
 
       <Load from={connections} rows={6}>
         {(c) => <ConnectionsPanel data={c} />}
+      </Load>
+
+      <Load from={business} rows={4}>
+        {(b) => <NoticesCard notices={b.notices} />}
       </Load>
 
       <Load from={business} rows={4}>

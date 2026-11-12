@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button, Card, ListRow, Notice, Pill, Screen, Text, TextField } from '@/components';
+import { APPLICATION_DISCLOSURE } from '@/lib/decision';
 import { useDevWalkthrough } from '@/dev/DevTools';
 import { describeError } from '@/lib/api';
 import { useBusiness } from '@/lib/business';
@@ -223,11 +224,23 @@ export default function NewApplication() {
           ))
         )}
       </Card>
+
+      <Card tone="paper" shadow="none">
+        <Text variant="heading">{APPLICATION_DISCLOSURE.title}</Text>
+        <View style={styles.points}>
+          {APPLICATION_DISCLOSURE.points.map((p) => (
+            <Text key={p} variant="body" tone="muted">
+              {p}
+            </Text>
+          ))}
+        </View>
+      </Card>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  points: { gap: spacing.sm, paddingTop: spacing.xs },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',

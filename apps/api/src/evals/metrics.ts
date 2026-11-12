@@ -153,6 +153,56 @@ export interface PortfolioMetrics {
   veracity: VeracityMetrics;
   /** Pass-through plans and the graduated cohort. Null when the run had no pass-through. */
   passThrough: PassThroughMetrics | null;
+  /** Principal reasons given on declines and counter offers. */
+  adverseAction: AdverseActionMetrics;
+}
+
+/**
+ * What applicants were told when the answer was not the one they asked for: declines (by the
+ * engine or the simulated reviewer) and counter offers. Each is an adverse action and gets a
+ * notice with its principal reasons.
+ */
+export interface AdverseActionMetrics {
+  declines: number;
+  counterOffers: number;
+  /** Declines and counter offers together. */
+  adverseActions: number;
+  /** Of those, how many have at least one catalog reason with applicant text. */
+  withReason: number;
+  /** As a share, in bps. 10,000 when there were none, so an empty run does not fail. */
+  withReasonBps: number;
+  /** Mean principal reasons per adverse action, times 100. */
+  meanReasonsX100: number;
+  /** How many declines list each code among their principal reasons. */
+  declineReasons: Record<string, number>;
+  /** How many declines list each code first. */
+  declineFirstReasons: Record<string, number>;
+  /** How many counter offers list each code. */
+  counterOfferReasons: Record<string, number>;
+}
+
+export function adverseActionMetrics(customers: readonly CustomerResult[]): AdverseActionMetrics {
+  const declines = customers.filter((c) => c.outcome === 'DECLINED');
+  const counters = customers.filter((c) => c.outcome === 'APPROVED' && c.counterOffer);
+  const all = [...declines, ...counters];
+  const tally = (rows: readonly CustomerResult[], pick: (c: CustomerResult) => string[]) => {
+    const out: Record<string, number> = {};
+    for (const c of rows) for (const code of pick(c)) out[code] = (out[code] ?? 0) + 1;
+    return out;
+  };
+  const withReason = all.filter((c) => c.principalReasonsWithText > 0).length;
+  const reasons = all.reduce((sum, c) => sum + c.principalReasonCodes.length, 0);
+  return {
+    declines: declines.length,
+    counterOffers: counters.length,
+    adverseActions: all.length,
+    withReason,
+    withReasonBps: all.length === 0 ? 10_000 : bps(withReason, all.length),
+    meanReasonsX100: all.length === 0 ? 0 : Math.round((reasons * 100) / all.length),
+    declineReasons: tally(declines, (c) => c.principalReasonCodes),
+    declineFirstReasons: tally(declines, (c) => c.principalReasonCodes.slice(0, 1)),
+    counterOfferReasons: tally(counters, (c) => c.principalReasonCodes),
+  };
 }
 
 /**
@@ -657,6 +707,7 @@ export function computeMetrics(
     bucketRoll: bucketRollRows(result.bucketRoll),
     bucketEntryRoll: bucketRollRows(result.bucketEntryRoll),
     veracity: veracityMetrics(customers),
+    adverseAction: adverseActionMetrics(customers),
     passThrough: result.passThrough
       ? {
           stats: result.passThrough,

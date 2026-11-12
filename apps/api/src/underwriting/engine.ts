@@ -7,10 +7,11 @@ import type {
   DecisionOutcome,
   DecisionReason,
   IsoDate,
+  PrincipalReason,
   VeracityAssessment,
   VeracityFinding,
 } from '@cashflow/shared';
-import { formatCents } from '@cashflow/shared';
+import { formatCents, selectPrincipalReasons } from '@cashflow/shared';
 
 import {
   approvedLimit,
@@ -141,6 +142,17 @@ export interface DecisionSnapshot {
     factor: PaymentHistoryFactor;
     baseScore: number;
   } | null;
+  /**
+   * The scorecard factors with their points, which order the principal reasons. Internal:
+   * the applicant sees each factor's message and whether it helped, never the points.
+   * Null when the application was not scored.
+   */
+  factors: Array<{
+    code: string;
+    points: number;
+    maxPoints: number;
+    impact: DecisionReason['impact'];
+  }> | null;
   /** What the engine would have done had nothing sent the application to a reviewer. */
   recommendation: {
     outcome: DecisionOutcome;
@@ -161,6 +173,12 @@ export interface EngineResult {
   grade: CreditGrade | null;
   recommendedInstallmentsPerMonth: number | null;
   reasons: DecisionReason[];
+  /**
+   * On a decline, a counter offer, or a request for information: the principal reasons the
+   * applicant is told, at most four, most important first, every one from the reason
+   * catalog. Empty on an approval at the rent requested and on a referral.
+   */
+  principalReasons: PrincipalReason[];
   cashFlow: CashFlowSummary | null;
   policyVersion: string;
   snapshot: DecisionSnapshot;
@@ -299,6 +317,7 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
     referTriggers: [],
     veracity: null,
     paymentHistory: null,
+    factors: null,
     recommendation: { outcome: 'NEEDS_INFO', approvedMonthlyLimitCents: null, feeBps: null },
   };
   const veracity =
@@ -315,6 +334,11 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
     grade: null,
     recommendedInstallmentsPerMonth: null,
     reasons,
+    principalReasons: selectPrincipalReasons({
+      outcome: 'NEEDS_INFO',
+      counterOffer: false,
+      reasons,
+    }),
     cashFlow,
     policyVersion: policy.version,
     snapshot,
@@ -442,6 +466,12 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
       baseScore: card.baseScore,
     };
   }
+  snapshot.factors = card.factors.map((f) => ({
+    code: f.code,
+    points: f.points,
+    maxPoints: f.maxPoints,
+    impact: f.impact,
+  }));
   const reasons: DecisionReason[] = card.factors.map((f) => reason(f.code, f.message, f.impact));
   const knockouts: DecisionReason[] = [];
 
@@ -552,7 +582,9 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
     knockouts.push(
       reason(
         'SCORE_BELOW_MINIMUM',
-        `Overall cash flow score of ${card.score} is below our minimum of ${policy.minScore}.`,
+        // Not a principal reason on its own (Regulation B wants the specific reasons): the
+        // factors that lost the most points stand in for it. See `principal.ts`.
+        'Taken together, the cash flow measures marked as hurting fell short of what we need to approve.',
       ),
     );
   }
@@ -575,6 +607,12 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
       grade: card.grade,
       recommendedInstallmentsPerMonth: installments,
       reasons: allReasons,
+      principalReasons: selectPrincipalReasons({
+        outcome,
+        counterOffer: outcome === 'APPROVED' && limitCents !== null && limitCents < requested,
+        reasons: allReasons,
+        factors: snapshot.factors,
+      }),
       cashFlow,
       policyVersion: policy.version,
       snapshot,

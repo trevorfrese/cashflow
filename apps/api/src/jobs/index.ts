@@ -3,6 +3,7 @@ import cron from 'node-cron';
 
 import type { AppContext } from '../context.ts';
 import { todayIso } from '../dates.ts';
+import { adverseActionNoticesJob } from './adverse-action-notices.ts';
 import { ageReceivablesJob } from './age-receivables.ts';
 import { collectInstallmentsJob } from './collect-installments.ts';
 import { generatePeriodsJob } from './generate-periods.ts';
@@ -29,6 +30,7 @@ export const JOBS = {
   'process-payouts': processPayoutsJob,
   'collect-installments': collectInstallmentsJob,
   provision: provisionJob,
+  'adverse-action-notices': adverseActionNoticesJob,
   monitor: (ctx: AppContext, asOf: IsoDate) => monitorJob(ctx, asOf, JOB_NAMES),
 } as const;
 export type JobName = keyof typeof JOBS;
@@ -45,6 +47,7 @@ export const JOB_NAMES = [
   'process-payouts',
   'collect-installments',
   'provision',
+  'adverse-action-notices',
   'monitor',
 ] as const satisfies readonly JobName[];
 
@@ -86,7 +89,10 @@ export const JOB_NAMES = [
  *                            pass-through collections whose window is open.
  *  11. provision             So the allowance is set on the day's closing balances. Posts
  *                            at most once per calendar month.
- *  12. monitor               Last: the rules read the state every other job left, and can
+ *  12. adverse-action-notices  Counter offers that expired, applications left incomplete,
+ *                            and any decline without its notice get their notices, so the
+ *                            monitor reads them stored.
+ *  13. monitor               Last: the rules read the state every other job left, and can
  *                            tell whether each of them ran.
  */
 export async function runAllJobs(ctx: AppContext, asOf: IsoDate = todayIso()) {
@@ -101,6 +107,7 @@ export async function runAllJobs(ctx: AppContext, asOf: IsoDate = todayIso()) {
   const processPayouts = await processPayoutsJob(ctx, asOf);
   const collectInstallments = await collectInstallmentsJob(ctx, asOf);
   const provision = await provisionJob(ctx, asOf);
+  const adverseActionNotices = await adverseActionNoticesJob(ctx, asOf);
   const monitor = await monitorJob(ctx, asOf, JOB_NAMES);
   return {
     asOf,
@@ -115,6 +122,7 @@ export async function runAllJobs(ctx: AppContext, asOf: IsoDate = todayIso()) {
     processPayouts,
     collectInstallments,
     provision,
+    adverseActionNotices,
     monitor,
   };
 }

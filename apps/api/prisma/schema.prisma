@@ -452,6 +452,11 @@ model UnderwritingDecision {
   recommendedInstallmentsPerMonth Int?
   /// Array of { code, message, impact }.
   reasons                         Json
+  /// The principal reasons the applicant is told on a decline, a counter offer, or a
+  /// request for information: at most four { code, title, text, guidance }, most important
+  /// first, every code from the reason catalog in packages/shared. Null on decisions stored
+  /// before the catalog, and on approvals at the rent requested.
+  principalReasons                Json?
   /// CashFlowSummary features the decision was based on. Null without bank data.
   cashFlow                        Json?
   provider                        String
@@ -483,6 +488,59 @@ model ApplicationReview {
   decisions UnderwritingDecision[]
 
   @@index([applicationId])
+}
+
+// ---------- Adverse action notices ----------
+
+/// Why a notice was sent. See apps/api/UNDERWRITING.md, "Reasons and adverse action notices".
+enum AdverseActionNoticeKind {
+  /// The application was declined, by the engine or a reviewer.
+  DECLINE
+  /// A counter offer was declined by the applicant, or expired without being used.
+  COUNTER_OFFER_NOT_ACCEPTED
+  /// A notice of incompleteness (12 CFR 1002.9(c)(2)): what is missing, and by when.
+  INCOMPLETE
+  /// The application stayed incomplete past the date in that notice and was closed.
+  INCOMPLETE_DECLINED
+}
+
+enum NoticeChannel {
+  IN_APP
+}
+
+/// A notice sent to an applicant, exactly as rendered. Append only: a database trigger
+/// rejects UPDATE and DELETE. Like DataSnapshot it has no foreign keys, so deleting a
+/// business never has to delete a notice it was sent: a notice is a record that has to be
+/// kept (12 CFR 1002.12(b)). One notice per decision and kind.
+model AdverseActionNotice {
+  id               String                  @id @default(cuid())
+  applicationId    String
+  /// The decision the notice is about.
+  decisionId       String
+  businessId       String
+  kind             AdverseActionNoticeKind
+  /// At most four { code, title, text, guidance }, as rendered into the notice.
+  principalReasons Json
+  reasonCodes      String[]
+  /// The full notice text, as delivered.
+  text             String
+  /// Version of the notice template and the statements in it.
+  statementVersion String
+  /// YYYY-MM-DD the action was taken, or the notice became due.
+  actionOn         String
+  /// YYYY-MM-DD the notice had to be delivered by.
+  deadlineOn       String
+  /// YYYY-MM-DD to provide the missing information by, on a notice of incompleteness.
+  respondBy        String?
+  channel          NoticeChannel           @default(IN_APP)
+  deliveredAt      DateTime
+  /// "engine", "reviewer:<name>", "applicant", or "job".
+  generatedBy      String
+  createdAt        DateTime                @default(now())
+
+  @@unique([decisionId, kind])
+  @@index([applicationId])
+  @@index([businessId])
 }
 
 // ---------- Audit ----------

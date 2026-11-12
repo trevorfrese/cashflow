@@ -135,6 +135,11 @@ export const AUDIT_EVENTS = [
   'GRADUATION_WITHDRAWN',
   /** A landlord payment was refused because the month was already paid. High severity. */
   'DUPLICATE_PAYOUT_PREVENTED',
+  // Reasons and adverse action notices (Phase 7). Written on the application.
+  /** A notice was stored and delivered in the app. Payload: noticeId, kind, reason codes, deadline, late. */
+  'ADVERSE_ACTION_NOTICE_SENT',
+  /** The owner declined a counter offer. */
+  'COUNTER_OFFER_DECLINED',
 ] as const;
 export type AuditEventType = (typeof AUDIT_EVENTS)[number];
 

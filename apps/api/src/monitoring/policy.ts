@@ -112,11 +112,15 @@ export interface MonitoringPolicy {
     rescreenIntervalDays: number;
     retentionMonths: number;
     /**
-     * The adverse action notice is built in a later phase. Until then no decision can have
-     * one, so the rule is switched off rather than left to fire on every decline.
+     * The adverse action notice rules. On since notices are stored (Phase 7); the switch is
+     * kept so a deployment without notices can turn the rules off rather than have them fire
+     * on every decline.
      */
     adverseActionNoticeRuleActive: boolean;
-    /** Days after a decline or counter offer by which the notice must be stored. */
+    /**
+     * Days after a notice falls due by which it must be stored before the missing notice
+     * alert fires. Its regulatory deadline is separate and makes the alert critical.
+     */
     adverseActionNoticeDays: number;
   };
 }
@@ -229,8 +233,9 @@ export const MONITORING_POLICY: MonitoringPolicy = {
     screeningGraceDays: 7,
     rescreenIntervalDays: CONTROLS_POLICY.rescreenIntervalDays,
     retentionMonths: CONTROLS_POLICY.retentionMonths,
-    adverseActionNoticeRuleActive: false,
-    // The notice goes out with the decision. A day covers a batch that runs overnight.
+    adverseActionNoticeRuleActive: true,
+    // A decline's notice goes out with the decision, and the notices job stores the others
+    // the day they fall due. A day covers a batch that runs overnight.
     adverseActionNoticeDays: 1,
   },
 };

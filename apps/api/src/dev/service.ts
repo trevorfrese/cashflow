@@ -62,6 +62,8 @@ export interface PersonaFacts {
   graduationOffered?: boolean;
   /** A declined application that is offered a pass-through plan, with no plan yet. */
   passThroughAvailable?: boolean;
+  /** An application waiting on information that was sent a notice of incompleteness. */
+  incompleteNoticeSent?: boolean;
 }
 
 /** A short label and a tone for where an account stands. Pure: see the unit test. */
@@ -109,7 +111,9 @@ export function describePersonaState(facts: PersonaFacts): DevPersonaState {
         ? { ...base, label: 'Declined, free plan available', tone: 'due' }
         : { ...base, label: 'Declined', tone: 'late' };
     case 'NEEDS_INFO':
-      return { ...base, label: 'Needs info', tone: 'gold' };
+      return facts.incompleteNoticeSent
+        ? { ...base, label: 'Needs info, notice of incompleteness sent', tone: 'due' }
+        : { ...base, label: 'Needs info', tone: 'gold' };
     case 'IN_REVIEW':
       return { ...base, label: 'In review', tone: 'due' };
     default:
@@ -165,6 +169,12 @@ async function personaFacts(db: Db, user: User | null): Promise<PersonaFacts> {
     application?.status === 'DECLINED' && plans.length === 0
       ? (await passThroughOffer(db, application.id)).eligible
       : false;
+  const incompleteNotices =
+    application?.status === 'NEEDS_INFO'
+      ? await db.adverseActionNotice.count({
+          where: { applicationId: application.id, kind: 'INCOMPLETE' },
+        })
+      : 0;
   return {
     exists: true,
     businessName: business.dba ?? business.legalName,
@@ -179,6 +189,7 @@ async function personaFacts(db: Db, user: User | null): Promise<PersonaFacts> {
     passThroughMissed: lastMonth !== null && lastMonth.status !== 'PAID',
     graduationOffered: offered > 0,
     passThroughAvailable: available,
+    incompleteNoticeSent: incompleteNotices > 0,
   };
 }
 

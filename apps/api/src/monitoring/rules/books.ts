@@ -11,7 +11,12 @@ const usd = (cents: number) =>
   (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 
 /** Tables whose rows are history. A row trigger on each rejects UPDATE and DELETE. */
-export const APPEND_ONLY_TABLES = ['AuditEvent', 'LedgerEntry', 'LedgerTransaction'] as const;
+export const APPEND_ONLY_TABLES = [
+  'AuditEvent',
+  'LedgerEntry',
+  'LedgerTransaction',
+  'AdverseActionNotice',
+] as const;
 
 export const trialBalanceUnbalanced: Rule = {
   type: 'books.trial_balance_unbalanced',

@@ -342,6 +342,16 @@
           "threshold": 300,
           "unit": "bps of honest applicants",
           "pass": true
+        },
+        {
+          "id": "adverse_action_reasons",
+          "value": 10000,
+          "min": 10000,
+          "max": 10000,
+          "comparator": ">=",
+          "threshold": 10000,
+          "unit": "bps of declines and counter offers",
+          "pass": true
         }
       ]
     },
@@ -733,6 +743,16 @@
           "threshold": 300,
           "unit": "bps of honest applicants",
           "pass": true
+        },
+        {
+          "id": "adverse_action_reasons",
+          "value": 10000,
+          "min": 10000,
+          "max": 10000,
+          "comparator": ">=",
+          "threshold": 10000,
+          "unit": "bps of declines and counter offers",
+          "pass": true
         }
       ]
     },
@@ -1067,6 +1087,16 @@
           "threshold": 300,
           "unit": "bps of honest applicants",
           "pass": true
+        },
+        {
+          "id": "adverse_action_reasons",
+          "value": 10000,
+          "min": 10000,
+          "max": 10000,
+          "comparator": ">=",
+          "threshold": 10000,
+          "unit": "bps of declines and counter offers",
+          "pass": true
         }
       ]
     },
@@ -1400,6 +1430,16 @@
           "comparator": "<=",
           "threshold": 300,
           "unit": "bps of honest applicants",
+          "pass": true
+        },
+        {
+          "id": "adverse_action_reasons",
+          "value": 10000,
+          "min": 10000,
+          "max": 10000,
+          "comparator": ">=",
+          "threshold": 10000,
+          "unit": "bps of declines and counter offers",
           "pass": true
         }
       ]
@@ -1785,6 +1825,16 @@
           "threshold": 300,
           "unit": "bps of honest applicants",
           "pass": true
+        },
+        {
+          "id": "adverse_action_reasons",
+          "value": 10000,
+          "min": 10000,
+          "max": 10000,
+          "comparator": ">=",
+          "threshold": 10000,
+          "unit": "bps of declines and counter offers",
+          "pass": true
         }
       ],
       "veracity": {
@@ -1843,6 +1893,27 @@
           "affected": 1319,
           "unaffected": 1917,
           "unaffectedApprovedUsable": 363
+        }
+      },
+      "adverseAction": {
+        "declines": 3099,
+        "counterOffers": 1812,
+        "withReasonBps": 10000,
+        "declineFirstReasons": {
+          "RENT_NOT_VERIFIED": 83,
+          "EXCESSIVE_OVERDRAFTS": 1828,
+          "REVENUE_DECLINING": 484,
+          "UNVERIFIED_DEPOSITS": 92,
+          "CASH_BUFFER": 305,
+          "EXPOSURE_LIMIT": 55,
+          "ACCOUNT_HISTORY_NOT_VERIFIED": 42,
+          "RENT_BELOW_MINIMUM": 32,
+          "DECLINE_WITH_THIN_BUFFER": 63,
+          "RENT_EXCEEDS_REVENUE_SHARE": 4,
+          "ACCOUNT_OWNERSHIP_NOT_CONFIRMED": 25,
+          "INSUFFICIENT_CAPACITY": 71,
+          "REVENUE_TOO_LOW": 2,
+          "INTEGRITY_CHECK_FAILED": 13
         }
       },
       "passThrough": {

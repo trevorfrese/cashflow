@@ -1,4 +1,10 @@
-import type { AlertSeverity, ReviewReasonCode } from '@cashflow/shared';
+import {
+  catalogEntry,
+  type AdverseActionNoticeKind,
+  type AlertSeverity,
+  type FactorStatus,
+  type ReviewReasonCode,
+} from '@cashflow/shared';
 
 import { words, type Tone } from './format';
 
@@ -343,4 +349,24 @@ export function refusal(error: Refusal): {
     default:
       return { title: 'The API refused this', body: error.message };
   }
+}
+
+/** What each kind of notice an applicant was sent is, in a few words. */
+export const NOTICE_KINDS: Record<AdverseActionNoticeKind, string> = {
+  DECLINE: 'Decline',
+  COUNTER_OFFER_NOT_ACCEPTED: 'Counter offer not taken up',
+  INCOMPLETE: 'Notice of incompleteness',
+  INCOMPLETE_DECLINED: 'Closed as incomplete',
+};
+
+/** How a scorecard factor is shown to the applicant: helping, neutral, or hurting. */
+export const FACTOR_STATUS: Record<FactorStatus, { label: string; tone: Tone }> = {
+  HELPING: { label: 'Helping', tone: 'good' },
+  NEUTRAL: { label: 'Neutral', tone: 'neutral' },
+  HURTING: { label: 'Hurting', tone: 'bad' },
+};
+
+/** The catalog title for a reason code, or the code in words for one the catalog lacks. */
+export function reasonTitle(code: string): string {
+  return catalogEntry(code)?.title ?? words(code);
 }

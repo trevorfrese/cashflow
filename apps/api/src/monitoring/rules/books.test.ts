@@ -183,14 +183,16 @@ describe('books.job_stale', () => {
 
 describe('books.append_only_triggers_missing', () => {
   it('is critical when a guard is missing or disabled', () => {
-    const data = books({ appendOnlyTriggers: ['LedgerEntry', 'LedgerTransaction'] });
+    const data = books({
+      appendOnlyTriggers: ['LedgerEntry', 'LedgerTransaction', 'AdverseActionNotice'],
+    });
     expect(run(appendOnlyTriggersMissing, data)).toMatchObject([
       { severity: 'CRITICAL', detail: { missing: ['AuditEvent'] } },
     ]);
     expectDedupes(appendOnlyTriggersMissing, data);
   });
 
-  it('does not fire when all three are in place', () => {
+  it('does not fire when every guard is in place', () => {
     expect(run(appendOnlyTriggersMissing, inputs())).toEqual([]);
   });
 });

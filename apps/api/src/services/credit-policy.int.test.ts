@@ -318,12 +318,34 @@ describe('manual review', () => {
     // Nothing was written by the refused review.
     expect(await h.db.applicationReview.count()).toBe(0);
 
+    // The applicant's reasons have to come from the catalog, and be ones a reviewer may
+    // decline for.
+    const noReasons = await admin().post<{ error: { code: string } }>(url, {
+      decision: 'DECLINE',
+      reasonCodes: ['FRAUD_SUSPECTED'],
+    });
+    expect(noReasons.body.error.code).toBe('PRINCIPAL_REASONS_REQUIRED');
+    const wrongKind = await admin().post<{ error: { code: string } }>(url, {
+      decision: 'DECLINE',
+      reasonCodes: ['FRAUD_SUSPECTED'],
+      principalReasonCodes: ['BANK_LINK_REQUIRED'],
+    });
+    expect(wrongKind.body.error.code).toBe('PRINCIPAL_REASON_NOT_ALLOWED');
+    const notInCatalog = await admin().post(url, {
+      decision: 'DECLINE',
+      reasonCodes: ['FRAUD_SUSPECTED'],
+      principalReasonCodes: ['FRAUD'],
+    });
+    expect(notInCatalog.status).toBe(400);
+    expect(await h.db.applicationReview.count()).toBe(0);
+
     const res = await admin().post<{
       review: { isOverride: boolean; reasonCodes: string[] };
       application: ApplicationBody;
     }>(url, {
       decision: 'DECLINE',
       reasonCodes: ['FRAUD_SUSPECTED', 'DOCUMENTS_NOT_PROVIDED'],
+      principalReasonCodes: ['REVENUE_NOT_VERIFIED', 'APPLICATION_INCOMPLETE'],
     });
     expect(res.status).toBe(200);
     expect(res.body.review).toMatchObject({
@@ -346,6 +368,20 @@ describe('manual review', () => {
     const events = await auditTypes('application', application.id);
     expect(events).toContain('DECISION_OVERRIDDEN');
     expect(events).not.toContain('LIMIT_FEE_SET');
+    // The reviewer's catalog reasons became the principal reasons, and the notice went out
+    // with the decision.
+    expect(events).toContain('ADVERSE_ACTION_NOTICE_SENT');
+    const notice = await h.db.adverseActionNotice.findFirstOrThrow({
+      where: { applicationId: application.id },
+    });
+    expect(notice).toMatchObject({
+      kind: 'DECLINE',
+      decisionId: current.id,
+      reasonCodes: ['REVENUE_NOT_VERIFIED', 'APPLICATION_INCOMPLETE'],
+    });
+    expect(notice.generatedBy).toMatch(/^reviewer:/);
+    expect(notice.text).toContain('We could not verify the revenue on your application');
+    expect(notice.text).not.toContain('FRAUD');
   });
 
   it('treats different terms as an override, and keeps them inside the request and the fee cap', async () => {
@@ -397,6 +433,7 @@ describe('manual review', () => {
     const res = await admin().post<{ application: ApplicationBody }>(url, {
       decision: 'REQUEST_INFO',
       reasonCodes: ['DOCUMENTS_NOT_PROVIDED'],
+      principalReasonCodes: ['LEASE_DETAILS_NEEDED'],
       notes: 'internal: same account as another applicant',
       applicantMessage: 'Please send a copy of your signed lease.',
     });
@@ -444,6 +481,7 @@ describe('manual review', () => {
     const closed = await admin('lee@cashflow.example').post<{ error: { code: string } }>(url, {
       decision: 'DECLINE',
       reasonCodes: ['OTHER'],
+      principalReasonCodes: ['CASH_BUFFER'],
     });
     expect(closed.status).toBe(422);
     expect(closed.body.error.code).toBe('NOT_REVIEWABLE');

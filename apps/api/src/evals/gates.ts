@@ -60,6 +60,13 @@ export const GATE_THRESHOLDS = {
    * are not counted here; they are reported beside it and the approval floor bounds them.
    */
   maxVeracityAdverseHonestBps: 300,
+  /**
+   * Every decline and counter offer gives the applicant at least one specific principal
+   * reason from the reason catalog, with text they can read: 100%. Regulation B asks for the
+   * specific reasons on every adverse action (12 CFR 1002.9(b)(2)); one without is a defect,
+   * not a rate to manage.
+   */
+  minAdverseActionReasonBps: 10_000,
 } as const;
 
 export interface GateResult {
@@ -253,6 +260,14 @@ export function evaluateGates(runs: {
       '<=',
       t.maxVeracityAdverseHonestBps,
       'bps of honest applicants',
+    ),
+    gate(
+      'adverse_action_reasons',
+      'Every decline and counter offer has at least one catalog reason with applicant text (base)',
+      base.map((m) => m.adverseAction.withReasonBps),
+      '>=',
+      t.minAdverseActionReasonBps,
+      'bps of declines and counter offers',
     ),
   ];
 }

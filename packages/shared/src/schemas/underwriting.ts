@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { CashFlowSummary } from './bank-data';
 
+import { ReasonCode } from '../adverse-action/catalog';
 import { ApplicationStatus, DecisionKind, DecisionOutcome, ReviewDecision } from '../enums';
 import { Bps, Cents, Id, IsoDateSchema, IsoDateTimeSchema } from './common';
 
@@ -94,6 +95,12 @@ export type ReviewReasonCode = z.infer<typeof ReviewReasonCode>;
 export const RecordReviewRequest = z.object({
   decision: ReviewDecision,
   reasonCodes: z.array(ReviewReasonCode).max(10).default([]),
+  /**
+   * What the applicant is told, picked from the reason catalog. A decline needs at least one
+   * reason a reviewer may decline for, and becomes the principal reasons on the adverse
+   * action notice. A request for information needs at least one thing to ask for.
+   */
+  principalReasonCodes: z.array(ReasonCode).max(4).default([]),
   /** Internal notes. Never shown to the applicant. */
   notes: z.string().max(2000).optional(),
   /** What the applicant is asked to provide. Required with REQUEST_INFO, shown to them. */

@@ -403,7 +403,7 @@ payment, the principal is booked to `recovery_income` and the plan stays closed.
 
 ### Jobs
 
-Twelve jobs in `apps/api/src/jobs/` run in this order, on a cron inside the API process
+Thirteen jobs in `apps/api/src/jobs/` run in this order, on a cron inside the API process
 (`JOBS_ENABLED=true`) or by hand with `pnpm --filter @cashflow/api job:run --as-of
 YYYY-MM-DD`. Each is idempotent for a given date:
 
@@ -444,7 +444,11 @@ YYYY-MM-DD`. Each is idempotent for a given date:
     the pool. Then the pass-through debits whose window is open.
 11. **provision** sets the allowance to the policy's reserve on outstanding principal by
     bucket and posts the change. It posts on the first run of each calendar month only.
-12. **monitor** runs every monitoring rule on the state the others left and opens, refreshes,
+12. **adverse-action-notices** stores the notices that fall due on a date rather than with a
+    decision: a counter offer not taken up in 30 days, a notice of incompleteness for an
+    application waiting 10 days on information, the notice that closes it 30 days later, and
+    any decline that has no notice. See "Adverse action notices".
+13. **monitor** runs every monitoring rule on the state the others left and opens, refreshes,
     and resolves alerts. See "Monitoring".
 
 Each run records a `JobRun` row with a summary so a dashboard or an on-call engineer can see
@@ -548,6 +552,26 @@ corrected through a lease change that applied after the return, a reviewer can s
 (`payout:<id>:resend:<n>`), makes the installments the return voided owed again from today,
 and leaves the plan frozen for a reviewer to release separately.
 
+## Adverse action notices
+
+Every decline, counter offer not taken up, and application left incomplete produces a notice
+the applicant reads in the app. `AdverseActionNotice` stores each one exactly as delivered:
+kind, principal reasons, full text, statement version, the action date, the deadline it had
+to meet, delivery time and channel. It is append only (a row trigger, as on `AuditEvent`)
+and has no foreign keys (as `DataSnapshot`), so deleting a business never deletes the
+record of what it was told. One notice per decision and kind, under a unique index.
+
+- A decline's notice is written in the transaction that writes the decision, by the engine
+  (`services/underwriting.ts`) or a reviewer (`services/reviews.ts`).
+- The rest are written by the `adverse-action-notices` job, from the pure schedule in
+  `src/adverse-action/schedule.ts`, which monitoring also reads; or by the owner declining a
+  counter offer.
+- `UnderwritingDecision.principalReasons` holds the at most four catalog reasons the
+  applicant is told, chosen by `selectPrincipalReasons` in `packages/shared`.
+
+The reasoning, the regulation sections and the questions for counsel are in
+`apps/api/UNDERWRITING.md`, "Reasons and adverse action notices".
+
 ## Monitoring
 
 `apps/api/src/monitoring/` turns the state of the system into alerts for a person.
@@ -588,7 +612,7 @@ severity (`INFO`, `WARNING`, `HIGH`, `CRITICAL`), a subject, a status (`OPEN`,
 | Portfolio                                  | First payment default rate by origination month. Share of principal delinquent or in default. Month over month roll. Industry and single name concentration against the credit policy caps. Pool utilization. Realized against expected loss by cohort. Charge-offs (from events)                                                                                                                                                                                                                                                                                                   |
 | Books                                      | Trial balance. Operating cash left after a full run. Each receivable account against unpaid principal on paid payouts (and pass-through rent returned after payout). Allowance and pool never negative. Jobs that failed or stopped. Append-only triggers present (`pg_trigger`). Landlord paid on a pass-through plan without a settled collection. `landlord_payable` and `pass_through_cash` against collected, unpaid pass-through months. A second landlord payment for a month refused (from events)                                                                          |
 | Data (alert categories FRAUD and PAYMENTS) | A bank or platform connection on a business with an active plan that needs reconnecting, fails, or has an expired token (warning, high for a bank; auto-resolves). History rewritten between pulls (high, critical when it flatters; once, closed by a person). A platform's payout destination changed after the plan started (warning; once). Settlement match fell 20 points from the decision to under 85% (warning, high under 50%; auto-resolves). Several businesses under different users on one platform account or payout account (warning, high at three; auto-resolves) |
-| Compliance                                 | Applications undecided at 20 and 30 days. Screening results older than the rescreen interval. An application deleted inside the 12 month retention period. Businesses with a plan that are not verified. Adverse action notice missing (inactive until a later phase stores the notice)                                                                                                                                                                                                                                                                                             |
+| Compliance                                 | Applications undecided at 20 and 30 days. Screening results older than the rescreen interval. An application deleted inside the 12 month retention period. Businesses with a plan that are not verified. Adverse action notice missing (high, critical past its deadline), or delivered late                                                                                                                                                                                                                                                                                        |
 
 Every rule's threshold, severity and reasoning is in `monitoring/policy.ts` and the rule's own
 description, which the summary endpoint returns.

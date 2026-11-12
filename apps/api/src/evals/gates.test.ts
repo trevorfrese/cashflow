@@ -48,6 +48,8 @@ function passingCustomers(): CustomerResult[] {
         score: 30,
         grade: 'F',
         fraud: i < 25 ? 'bust_out' : null,
+        principalReasonCodes: ['CASH_BUFFER'],
+        principalReasonsWithText: 1,
       }),
     );
   }
@@ -109,6 +111,38 @@ function gatesWith(
   };
 }
 
+describe('the adverse action reasons gate', () => {
+  it('fails when a single decline or counter offer gives no catalog reason', () => {
+    const customers = passingCustomers();
+    customers.push(makeCustomer({ applicantId: 'silent', outcome: 'DECLINED', score: 30 }));
+    const base = computeMetrics(resultOf(customers));
+    expect(base.adverseAction).toMatchObject({ declines: 101, withReason: 100 });
+    const gates = evaluateGates({ base, mild: passingMetrics(), throughTheDoor: passingDoor() });
+    const gate = gates.find((g) => g.id === 'adverse_action_reasons')!;
+    expect(gate).toMatchObject({ pass: false, value: 9901, threshold: 10_000 });
+  });
+
+  it('counts counter offers, and passes when every one is explained', () => {
+    const customers = passingCustomers();
+    customers.push(
+      makeCustomer({
+        applicantId: 'co',
+        outcome: 'APPROVED',
+        counterOffer: true,
+        principalReasonCodes: ['LIMIT_BELOW_REQUEST', 'CASH_BUFFER'],
+        principalReasonsWithText: 2,
+      }),
+    );
+    const m = computeMetrics(resultOf(customers));
+    expect(m.adverseAction).toMatchObject({
+      counterOffers: 1,
+      withReasonBps: 10_000,
+      counterOfferReasons: { LIMIT_BELOW_REQUEST: 1, CASH_BUFFER: 1 },
+    });
+    expect(m.adverseAction.declineFirstReasons).toEqual({ CASH_BUFFER: 100 });
+  });
+});
+
 describe('gates', () => {
   it('pass on a book built to pass, and report value and threshold for each', () => {
     const { gates, byId } = gatesWith(() => {});
@@ -123,6 +157,7 @@ describe('gates', () => {
       'approval_floor',
       'refer_rate',
       'veracity_honest_adverse',
+      'adverse_action_reasons',
     ]);
     expect(gates.filter((g) => !g.pass)).toEqual([]);
     expect(allGatesPass(gates)).toBe(true);

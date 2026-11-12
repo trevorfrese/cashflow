@@ -1,4 +1,4 @@
-import { ReviewReasonCode } from '@cashflow/shared';
+import { AdverseActionNoticeKind, FactorStatus, ReviewReasonCode } from '@cashflow/shared';
 import { describe, expect, it } from 'vitest';
 
 import { ApiError, query, toApiError } from './api';
@@ -6,13 +6,26 @@ import {
   dispositionLabel,
   freezeReason,
   holdReason,
+  FACTOR_STATUS,
   integrityLabel,
+  NOTICE_KINDS,
+  reasonTitle,
   refusal,
   REVIEW_REASONS,
   SEVERITY,
   status,
   triggerLabel,
 } from './labels';
+
+describe('reasons and notices', () => {
+  it('names every notice kind and factor status, and titles catalog reasons', () => {
+    for (const kind of AdverseActionNoticeKind.options)
+      expect(NOTICE_KINDS[kind], kind).toBeTruthy();
+    for (const s of FactorStatus.options) expect(FACTOR_STATUS[s].label, s).toBeTruthy();
+    expect(reasonTitle('CASH_BUFFER')).toBe('Cash buffer');
+    expect(reasonTitle('NOT_IN_CATALOG')).toBe('Not in catalog');
+  });
+});
 
 describe('plain words', () => {
   it('explains why an application was referred', () => {

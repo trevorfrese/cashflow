@@ -21,7 +21,7 @@ describe('evaluation and report', () => {
     expect(evaluation.base.servicingPolicy).toBe('standard');
     expect(evaluation.mild.stress).toBe('mild');
     expect(evaluation.severe.stress).toBe('severe');
-    expect(evaluation.gates).toHaveLength(10);
+    expect(evaluation.gates).toHaveLength(11);
     for (const g of evaluation.gates) expect(typeof g.pass).toBe('boolean');
   });
 
@@ -70,11 +70,11 @@ describe('evaluation and report', () => {
     );
     expect(POLICY_VERSION).toBe('cashflow-v4');
     const [v1Baseline, v1Standard, v2Baseline] = evaluation.comparisons;
-    expect(v1Baseline!.gates).toHaveLength(10);
+    expect(v1Baseline!.gates).toHaveLength(11);
     expect(v1Baseline!.throughTheDoor!.bySeed).toHaveLength(2);
     expect(v1Standard!.throughTheDoor).toBeNull();
     expect(v1Standard!.gates).toBeNull();
-    expect(v2Baseline!.gates).toHaveLength(10);
+    expect(v2Baseline!.gates).toHaveLength(11);
     // Servicing does not change who the launch policy approves.
     expect(v1Standard!.base.overall.approved).toBe(v1Baseline!.base.overall.approved);
     // The launch policy never refers.
@@ -118,6 +118,8 @@ describe('evaluation and report', () => {
     expect(md).toContain('At most 5% of applicants referred to a reviewer');
     expect(md).toContain('all scored honest applicants');
     expect(md).toContain('Funded only AUC');
+    expect(md).toContain('## Principal reasons on declines and counter offers (base case)');
+    expect(evaluation.base.adverseAction.withReasonBps).toBe(10_000);
     expect(md).toContain('range restricted');
     expect(md).toContain('reject inference');
     const json = JSON.parse(renderJson(evaluation));
@@ -136,8 +138,8 @@ describe('evaluation and report', () => {
     expect(baseline.configurations.v3_standard.gated).toBe(false);
     expect(baseline.configurations.v4_standard.passThrough.base.stats.declined).toBeGreaterThan(0);
     expect(baseline.configurations.v2_standard.gated).toBe(false);
-    expect(baseline.configurations.v4_standard.gates).toHaveLength(10);
-    expect(baseline.configurations.v1_baseline.gates).toHaveLength(10);
+    expect(baseline.configurations.v4_standard.gates).toHaveLength(11);
+    expect(baseline.configurations.v1_baseline.gates).toHaveLength(11);
     expect(baseline.configurations.v4_standard.veracity.honest.applicants).toBeGreaterThan(0);
     expect(baseline.configurations.v4_standard.throughTheDoor.bySeed).toHaveLength(2);
     expect(baseline.configurations.v4_standard.throughTheDoor.honest.auc).toBe(

@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../config.ts';
 import { devClockAhead, todayIso } from '../dates.ts';
 import { PERSONAS } from '../dev/personas.ts';
+import { JOB_NAMES } from '../jobs/index.ts';
 import {
   adminClient,
   client,
@@ -145,6 +146,7 @@ describe('dev tools on', () => {
       'pass-through-offer': 'Declined, free plan available',
       declined: 'Declined',
       'needs-info': 'Needs info',
+      incomplete: 'Needs info, notice of incompleteness sent',
       'manual-review': 'In review',
       'identity-review': 'In review',
       'counter-offer': 'Approved below the lease rent',
@@ -602,7 +604,7 @@ describe('dev tools on', () => {
       // Every job ran once for each day crossed.
       for (const day of [addDays(wall(), 1), addDays(wall(), 2)]) {
         const runs = await h.db.jobRun.findMany({ where: { asOf: day } });
-        expect(runs.length, day).toBe(12);
+        expect(runs.length, day).toBe(JOB_NAMES.length);
         expect(runs.every((r) => r.ok)).toBe(true);
       }
 

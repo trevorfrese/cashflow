@@ -23,6 +23,7 @@ describe('the persona registry', () => {
       'active-plan',
       'declined',
       'needs-info',
+      'incomplete',
       'manual-review',
       'counter-offer',
       'delinquent',
@@ -148,6 +149,9 @@ describe('describePersonaState', () => {
     const state = (over: Partial<PersonaFacts>) => describePersonaState(facts(over)).label;
     expect(state({ applicationStatus: 'DECLINED' })).toBe('Declined');
     expect(state({ applicationStatus: 'NEEDS_INFO' })).toBe('Needs info');
+    expect(state({ applicationStatus: 'NEEDS_INFO', incompleteNoticeSent: true })).toBe(
+      'Needs info, notice of incompleteness sent',
+    );
     expect(state({ applicationStatus: 'IN_REVIEW' })).toBe('In review');
     expect(state({ applicationStatus: null })).toBe('Business set up, not applied');
     expect(state({ leaseRentCents: null })).toBe('Approved, no lease yet');

@@ -32,7 +32,7 @@ export function inputs(over: Partial<MonitoringInputs> = {}): MonitoringInputs {
       allowanceCents: 0,
       poolCents: 25_000_000,
       receivables: [],
-      appendOnlyTriggers: ['AuditEvent', 'LedgerEntry', 'LedgerTransaction'],
+      appendOnlyTriggers: ['AuditEvent', 'LedgerEntry', 'LedgerTransaction', 'AdverseActionNotice'],
       landlordPayableCents: 0,
       passThroughCashCents: 0,
       passThroughHeldCents: 0,

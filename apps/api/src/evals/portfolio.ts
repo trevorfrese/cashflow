@@ -1,4 +1,5 @@
-import type { CreditGrade, DecisionOutcome, IsoDate } from '@cashflow/shared';
+import type { CreditGrade, DecisionOutcome, IsoDate, PrincipalReason } from '@cashflow/shared';
+import { catalogEntry, principalReasonsFromCodes, selectPrincipalReasons } from '@cashflow/shared';
 import {
   addDays,
   buildInstallmentSchedule,
@@ -363,10 +364,30 @@ export interface CustomerResult {
    * apart from the origination book. Score, grade and fee are the eligibility review's.
    */
   graduated: boolean;
+  /**
+   * The principal reasons the applicant would be told, as catalog codes, most important
+   * first: the engine's on a decline, a counter offer or a request for information, the
+   * simulated reviewer's on a referral it declined. Empty on an approval at the rent.
+   */
+  principalReasonCodes: string[];
+  /** How many of those are in the reason catalog and carry applicant text. */
+  principalReasonsWithText: number;
   /** Pass-through months for this applicant, when it had a pass-through plan. */
   passThroughMonths: number;
   passThroughOnTimeMonths: number;
   passThroughMissedMonths: number;
+}
+
+/** The catalog reason the simulated reviewer gives when it declines a referral. */
+export const SIMULATED_REVIEWER_DECLINE_REASON = 'INTEGRITY_CHECK_FAILED';
+
+function principalReasonFields(reasons: readonly PrincipalReason[]) {
+  return {
+    principalReasonCodes: reasons.map((r) => r.code),
+    principalReasonsWithText: reasons.filter(
+      (r) => catalogEntry(r.code) !== undefined && r.text.trim() !== '',
+    ).length,
+  };
 }
 
 const VERACITY_NEEDS_INFO_CODES = new Set([
@@ -568,6 +589,7 @@ function emptyResult(applicant: Applicant, decision: EngineResult): CustomerResu
         ]
       : [],
     graduated: false,
+    ...principalReasonFields(decision.principalReasons),
     passThroughMonths: 0,
     passThroughOnTimeMonths: 0,
     passThroughMissedMonths: 0,
@@ -1390,6 +1412,22 @@ export function runPortfolio(
           applicant.fraud !== null &&
           hash32(`review/${applicant.seedHex}`) % 10_000 < config.reviewFraudCatchRateBps;
         result.outcome = caught ? 'DECLINED' : 'APPROVED';
+        // What the applicant is then told. A reviewer declining picks from the catalog; the
+        // simulated one picks the reason for information it could not verify. An approval
+        // below the rent is a counter offer, explained as the engine would.
+        Object.assign(
+          result,
+          principalReasonFields(
+            caught
+              ? principalReasonsFromCodes([SIMULATED_REVIEWER_DECLINE_REASON])
+              : selectPrincipalReasons({
+                  outcome: 'APPROVED',
+                  counterOffer: result.counterOffer,
+                  reasons: decision.reasons,
+                  factors: decision.snapshot.factors,
+                }),
+          ),
+        );
       }
       if (config.throughTheDoor) {
         // Counterfactual: the decision above is kept as the record of what the policy said,

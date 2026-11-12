@@ -142,7 +142,9 @@ export function scoreCashFlow(
     ]),
     'cashFlowCoverage',
     cov > 0
-      ? `Free cash flow covers ${policy.scoredCoverageFeeBps > 0 ? 'rent and fee' : 'the rent'} ${(cov / 100).toFixed(2)} times over.`
+      ? cov < 100
+        ? `Free cash flow covers only ${Math.round(cov)}% of the monthly ${policy.scoredCoverageFeeBps > 0 ? 'rent and fee' : 'rent'}.`
+        : `Free cash flow covers the monthly ${policy.scoredCoverageFeeBps > 0 ? 'rent and fee' : 'rent'} ${(cov / 100).toFixed(2)} times.`
       : 'Monthly outflows currently exceed inflows, leaving no free cash flow for rent.',
   );
 
@@ -176,8 +178,12 @@ export function scoreCashFlow(
     'cashBuffer',
     days === null
       ? 'Current balance was not available, so no cash buffer could be verified.'
-      : `${days} days of operating expenses on hand (${formatCents(s.currentBalanceCents ?? 0, { showCents: false })})${
-          v2 && low !== null ? `, and never fewer than ${low} over the last 90 days` : ''
+      : `${days} ${days === 1 ? 'day' : 'days'} of operating expenses on hand (${formatCents(s.currentBalanceCents ?? 0, { showCents: false })})${
+          v2 && low !== null
+            ? low <= 0
+              ? ', and the balance ran out at least once in the last 90 days'
+              : `, and never fewer than ${low} ${low === 1 ? 'day' : 'days'} in the last 90 days`
+            : ''
         }.`,
   );
 
@@ -216,7 +222,7 @@ export function scoreCashFlow(
     'revenueStability',
     s.monthsOfHistory < 3
       ? 'Not enough months to measure revenue stability.'
-      : `Monthly ${s.commerce ? 'sales' : 'revenue'} vary by ${pct(vol)} around the average${s.commerce ? `, measured from ${PLATFORM_LABEL[s.commerce.platform]}` : ''}.`,
+      : `Monthly ${s.commerce ? 'sales' : 'revenue'} ${s.commerce ? 'vary' : 'varies'} by ${pct(vol)} around the average${s.commerce ? `, measured from ${PLATFORM_LABEL[s.commerce.platform]}` : ''}.`,
   );
 
   // 6. Revenue trend. Version 1 reads the last three full months against the prior three.

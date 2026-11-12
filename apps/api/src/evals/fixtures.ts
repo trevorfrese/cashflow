@@ -94,6 +94,8 @@ export function makeCustomer(overrides: Partial<CustomerResult> = {}): CustomerR
     usableWithoutVeracity: null,
     veracityTags: [],
     graduated: false,
+    principalReasonCodes: [],
+    principalReasonsWithText: 0,
     passThroughMonths: 0,
     passThroughOnTimeMonths: 0,
     passThroughMissedMonths: 0,

@@ -734,11 +734,173 @@ on `AuditEvent`, `LedgerEntry`, and `LedgerTransaction`.
 
 ## Explainability
 
-Every decision stores the full `CashFlowSummary` and a reason list with stable codes
-(`RENT_TO_REVENUE`, `EXCESSIVE_OVERDRAFTS`, `LIMIT_BELOW_REQUEST`, `FEE_ABOVE_MAXIMUM`, and so
-on) and plain language messages. The codes are in the spirit of adverse action reason codes: a lender in
-the United States must tell a declined applicant the principal reasons, and a model that
-cannot name them is not usable in production regardless of its accuracy.
+Every decision stores the full `CashFlowSummary`, a reason list with stable codes and plain
+language messages, and its principal reasons. The codes come from one catalog; what an
+applicant is told, and the notices that record it, are in "Reasons and adverse action
+notices" below. A lender in the United States must tell a declined applicant the principal
+reasons, and a model that cannot name them is not usable in production regardless of its
+accuracy.
+
+## Reasons and adverse action notices
+
+This section is not legal advice. It records how the product reads the rules, the choices
+made where a reading was needed, and the questions that need a lawyer. Regulation B (12 CFR
+part 1002, implementing the Equal Credit Opportunity Act) is the model throughout.
+
+### The reason catalog
+
+`packages/shared/src/adverse-action/catalog.ts` lists every reason the engine, the integrity
+and veracity checks, identity verification and a reviewer can give: 49 entries. Each has a
+stable code (stored on decisions and notices, never renamed), a short title, plain applicant
+text, guidance on what would change the outcome, whether it may be a principal reason on an
+adverse action notice, its kind (decline rule, counter offer, scorecard factor, request for
+information, status line), and the rule or factor that produces it (internal, never shown).
+
+- The engine writes the specific text for its own reasons at decision time, with the
+  applicant's numbers in it ("20 overdraft fees in the last 90 days. We allow at most 2.").
+  The catalog text is the fallback: a reviewer's pick, or a decision stored before the
+  catalog.
+- Tests hold it to that: `reason-catalog.test.ts` scans the engine, the scorecard and the
+  review service for every code they can write and drives the engine across a synthetic
+  population with a raised share of fraud (every outcome, 28 distinct codes reached); every
+  reason must be in the catalog, and every applicant text must pass `INTERNAL_JARGON`
+  (no "cutoff", "knockout", "policy", "bps", "threshold", "insufficient score", internal
+  standards, flags, camelCase or SNAKE_CASE identifiers).
+- "Score below the minimum" is in the catalog but is never a principal reason: Regulation B
+  commentary (comment 9(b)(2)-4 and -5) says the reasons must be the factors actually scored,
+  not that a score fell short. The engine's own message for it no longer quotes the score
+  or the cutoff.
+
+### Principal reasons
+
+`selectPrincipalReasons` in `packages/shared/src/adverse-action/principal.ts`, pure and
+deterministic, picks at most four (comment 9(b)(2)-1: more than four is not likely to be
+helpful):
+
+1. On a decline, the rules that declined on their own, in the order the engine applies them
+   (trust checks, then credit rules, then capacity and price). Each alone was enough.
+2. Then the scorecard factors that lost the most points against their full marks, which is
+   what kept the score from the approve threshold. On a decline every factor not helping
+   counts; on a counter offer only those hurting. A factor a rule above already restates
+   (overdraft fees and account conduct) is not listed twice. Ties go to catalog order.
+3. A counter offer leads with `LIMIT_BELOW_REQUEST`, whose text names the cap that bound.
+4. A request for information lists what is missing.
+
+The engine stores the factor points on the decision snapshot (internal) and the principal
+reasons on the decision (`UnderwritingDecision.principalReasons`). A reviewer's decline or
+request for information must pick its reasons from the catalog (`principalReasonCodes`,
+codes a reviewer may give for that action); the review service refuses one without them.
+The reviewer's internal reason codes (`FRAUD_SUSPECTED`, `OTHER`) stay internal.
+
+### What the applicant sees
+
+`GET /v1/underwriting/applications/:id/explanation` (`DecisionExplanation` in
+`packages/shared`): the outcome as the applicant reads it (approved, counter offer,
+declined, in review, needs information), the principal reasons with guidance, each
+scorecard factor as helping, neutral or hurting with what it measures and what we found,
+the rules that ran and whether each was met, the connections read with the date of the data,
+and on an approval the limit, fee and why. On a referral, what happens next and the date
+the answer is due.
+
+**The score is shown only on an approval or a counter offer.** A decline can come from a
+rule while the score is high, and a green "A, Score 97" beside "not approved" told the
+applicant the opposite of the decision. On a decline or a referral the applicant sees the
+reasons and the factor statuses, never the number. The applicant decision payload carries no
+score or grade unless the outcome is an approval. Point values, weights, cutoffs, flags and
+referral triggers are never included.
+
+Before submitting, the application form says what data is used (the connected bank and
+point of sale, identity checks on the business) and that, if we cannot approve the full
+rent, the applicant will be told the specific reasons in writing.
+
+### Notices
+
+`AdverseActionNotice` is append only (a trigger rejects UPDATE and DELETE) and, like
+`DataSnapshot`, has no foreign keys, so deleting a business never deletes a notice it was
+sent (records are kept under 1002.12(b)). Each row stores the kind, the principal reasons as
+rendered, the full text as delivered, the statement version (`cashflow-notice-v1`), the date
+the action was taken, the deadline it had to meet, the delivery time and channel (`IN_APP`;
+there is no email seam yet), and who generated it. One notice per decision and kind.
+
+| Kind                         | When                                                                                        | Deadline                                                       |
+| ---------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `DECLINE`                    | In the transaction that writes a decline, by the engine or a reviewer                       | 30 days after the completed application, 1002.9(a)(1)(i)       |
+| `COUNTER_OFFER_NOT_ACCEPTED` | The owner declines the offer (`POST .../decline-offer`), or 30 days pass with no plan on it | 90 days after the counter offer, 1002.9(a)(1)(iv)              |
+| `INCOMPLETE`                 | 10 days waiting on information: a notice of incompleteness with a date 30 days out          | 30 days after the application, 1002.9(a)(1)(ii) and (c)(1)-(2) |
+| `INCOMPLETE_DECLINED`        | The day after that date, if still incomplete, and only once the first notice was sent       | 30 days after closing it, 1002.9(a)(1)(ii)                     |
+
+A counter offer taken up (a financed plan opened on it) gets no notice: it is not adverse
+action. The counter offer window is for the notice only; a plan can still be opened on an
+expired offer, as before. The `adverse-action-notices` job (after `provision`, before
+`monitor`) stores the date driven notices and any decline that somehow has none, marked late
+if past its deadline. Both the job and monitoring read one pure schedule,
+`src/adverse-action/schedule.ts`.
+
+Every adverse action notice (`src/adverse-action/render.ts`) carries a statement of the
+action, the creditor's name and address (1002.9(a)(2)), the specific principal reasons with
+what would change each (1002.9(b)(2)), and the ECOA statement in the words of 1002.9(b)(1)
+with the federal agency. The creditor details are placeholders in `CREDITOR`
+(`src/adverse-action/policy.ts`), marked `[PLACEHOLDER]` in every notice, because there is
+no company behind this repository.
+
+**Business credit, done conservatively.** 1002.9(a)(3) lets a creditor give business
+applicants with revenue of $1 million or less the reasons on request, and gives larger
+businesses longer and looser rules. CashFlow does not use either option: every adverse
+action, whatever the business's revenue, gets the specific reasons in writing, on the
+consumer timetable.
+
+### Monitoring
+
+`compliance.adverse_action_notice_missing` (now on; `adverseActionNoticeRuleActive`) alerts
+on any notice owed and not stored a day after it fell due, high, and critical past its
+deadline. `compliance.adverse_action_notice_late` records a notice delivered after its
+deadline, once, and does not resolve itself. `compliance.decision_deadline` already warns on
+an application in review at 20 days and goes critical at 30. The append-only trigger on
+notices is checked with the others.
+
+### Evals
+
+`evals/report.md`, "Principal reasons on declines and counter offers", reports the
+distribution of principal reasons and the share of declines and counter offers with at
+least one catalog reason with applicant text. The `adverse_action_reasons` gate requires
+100%. The decisions themselves are unchanged by this phase.
+
+### Questions for counsel
+
+Collected into `COMPLIANCE.md` in a later phase.
+
+1. **Federal agency.** The notice names the Federal Trade Commission, which appendix A to
+   Regulation B gives for creditors not otherwise listed. A bank or capital partner, or a
+   state licence, could change the agency, or require a second one.
+2. **Is a rent advance "credit" under ECOA, and is the pass-through plan?** The financed
+   plan defers a debt (1002.2(j)); the free pass-through plan advances nothing and is treated
+   here as not credit, so its offer and its end send no notice. Confirm both.
+3. **FCRA section 615(a).** The identity provider verifies the business and screens its
+   owners. If any part of that is a consumer report on an owner and it contributed to an
+   adverse action (an `IDENTITY_NOT_VERIFIED` decline), the notice must add the 615(a)
+   disclosures: the agency's name, address and phone, that it did not make the decision, and
+   the right to a free copy and to dispute. The notice does not include them today.
+4. **In-app delivery.** Notices are delivered in the app only. Whether that is delivery
+   under 1002.9 needs E-SIGN consent (15 U.S.C. 7001(c)) or a mailed or emailed copy.
+5. **Counter offers.** The notice is sent when the offer is declined or expires after 30
+   days, inside the 90 days of 1002.9(a)(1)(iv). Is 30 days a reasonable window, and should
+   the counter offer and the adverse action notice instead go out together (also allowed
+   there)?
+6. **Incomplete applications.** 1002.9(c)(2) ends the obligation when a notice of
+   incompleteness goes unanswered; CashFlow sends a closing notice anyway. Confirm that
+   this is harmless, and that 10 days then 30 days are reasonable.
+7. **Periodic reviews and freezes.** A monthly review that freezes advances on a running
+   plan could be "an unfavorable change in the terms of an account" (1002.2(c)(1)(ii)). No
+   notice is sent today. Does the delinquency exception (1002.2(c)(2)(ii)) cover a freeze
+   for deterioration, or is a notice owed?
+8. **Reviewer declines for suspected fraud.** The reviewer must pick a catalog reason, for
+   example "We could not verify the revenue on your application". Is that specific enough
+   (comment 9(b)(2)-2 allows "unable to verify"), and is it ever acceptable to withhold the
+   real reason?
+9. **Screening holds.** An application held in review on a watchlist match never gets a
+   decline from the engine. If it is declined after review, what may the reason say?
+10. **Placeholders.** The creditor name, address and contact must be real before any real
+    applicant sees a notice.
 
 ## Testing with the mock bank
 

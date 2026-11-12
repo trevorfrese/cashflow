@@ -1,5 +1,7 @@
 import {
+  AdverseActionNoticeView,
   BankLink,
+  DecisionExplanation,
   Business,
   Connection,
   ConnectionList,
@@ -49,6 +51,8 @@ export const keys = {
   passThroughOffer: (applicationId: string) =>
     ['applications', applicationId, 'pass-through'] as const,
   paymentHistory: (businessId: string) => ['businesses', businessId, 'payment-history'] as const,
+  explanation: (applicationId: string) => ['applications', applicationId, 'explanation'] as const,
+  notices: (applicationId: string) => ['applications', applicationId, 'notices'] as const,
 };
 
 export function useBusinesses(enabled = true) {
@@ -287,6 +291,49 @@ export function useAcceptGraduationOffer() {
       void qc.invalidateQueries({ queryKey: keys.paymentHistory(offer.businessId) });
       void qc.invalidateQueries({ queryKey: keys.rentPlans(offer.businessId) });
       void qc.invalidateQueries({ queryKey: keys.applications(offer.businessId) });
+    },
+  });
+}
+
+// ---------- Decision explanation and notices ----------
+
+/** Why the application got its decision: reasons, factor statuses, checks, data, terms. */
+export function useExplanation(applicationId: string | undefined) {
+  return useQuery({
+    queryKey: keys.explanation(applicationId ?? ''),
+    queryFn: () =>
+      api(`/underwriting/applications/${applicationId}/explanation`, {
+        schema: DecisionExplanation,
+      }),
+    enabled: Boolean(applicationId),
+  });
+}
+
+/** Every notice sent on the application, exactly as delivered. */
+export function useNotices(applicationId: string | undefined) {
+  return useQuery({
+    queryKey: keys.notices(applicationId ?? ''),
+    queryFn: () =>
+      api(`/underwriting/applications/${applicationId}/notices`, {
+        schema: z.array(AdverseActionNoticeView),
+      }),
+    enabled: Boolean(applicationId),
+  });
+}
+
+/** Decline a counter offer. The adverse action notice is stored and delivered at once. */
+export function useDeclineOffer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (applicationId: string) =>
+      api(`/underwriting/applications/${applicationId}/decline-offer`, {
+        method: 'POST',
+        body: {},
+        schema: AdverseActionNoticeView,
+      }),
+    onSuccess: (notice) => {
+      void qc.invalidateQueries({ queryKey: keys.explanation(notice.applicationId) });
+      void qc.invalidateQueries({ queryKey: keys.notices(notice.applicationId) });
     },
   });
 }

@@ -5,6 +5,7 @@ import type { Prisma } from '../generated/prisma/client.ts';
 import { ACCOUNTS, RECEIVABLE_PREFIX } from '../ledger/accounts.ts';
 import { accountBalance, allowanceBalance, trialBalance } from '../ledger/service.ts';
 import type { Providers } from '../providers/index.ts';
+import { dueNoticesAsOf } from '../services/adverse-action.ts';
 import { UNPAID } from '../services/delinquency.ts';
 import { gatherPoolState } from '../services/portfolio-state.ts';
 import { ACTIVE_SERVICING_POLICY } from '../servicing/policy.ts';
@@ -799,8 +800,14 @@ export async function gatherMonitoringInputs(tx: Tx, args: GatherArgs): Promise<
       hasOpenPlan: b.rentPlans.length > 0,
     })),
     retention: await retentionFacts(tx, asOf, policy),
-    // The adverse action notice does not exist yet (a later phase stores it). Until it does
-    // there is nothing to read, and the rule is off in the policy as well.
-    adverseActions: [],
+    adverseActions: (await dueNoticesAsOf(tx, asOf)).map((d) => ({
+      decisionId: d.decisionId,
+      applicationId: d.applicationId,
+      businessName: d.businessName,
+      kind: d.kind,
+      actionOn: d.actionOn,
+      deadlineOn: d.stored?.deadlineOn ?? d.deadlineOn,
+      noticeSentOn: d.stored?.deliveredOn ?? null,
+    })),
   };
 }

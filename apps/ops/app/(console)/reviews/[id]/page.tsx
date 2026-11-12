@@ -1,11 +1,14 @@
 'use client';
 
 import {
+  catalogEntry,
   OperatorApplicationDetail,
   OperatorConnections,
   RecordReviewResponse,
   ReviewReasonCode,
+  reviewerReasonCodes,
   type OperatorDecision,
+  type ReasonCode,
   type RecordReviewRequest,
 } from '@cashflow/shared';
 import Link from 'next/link';
@@ -48,6 +51,7 @@ import {
   triggerLabel,
 } from '@/lib/labels';
 import { ConnectionsPanel } from '@/components/connections';
+import { ExplanationCard, NoticesCard } from '@/components/notices';
 import { useAction, useApi } from '@/lib/use-api';
 
 type Detail = OperatorApplicationDetail;
@@ -130,6 +134,10 @@ function Review({ detail, reload }: { detail: Detail; reload: () => void }) {
           ) : (
             <Empty title="No decision yet">This application has not been submitted.</Empty>
           )}
+
+          <ExplanationCard explanation={detail.explanation} />
+
+          <NoticesCard notices={detail.notices} />
 
           <IdentityCard detail={detail} />
 
@@ -519,6 +527,7 @@ function ReviewForm({ detail, onRecorded }: { detail: Detail; onRecorded: () => 
   const [limit, setLimit] = useState(dollarsInput(rec?.approvedMonthlyLimitCents));
   const [fee, setFee] = useState(percentInput(rec?.feeBps));
   const [codes, setCodes] = useState<ReviewReasonCode[]>([]);
+  const [picks, setPicks] = useState<ReasonCode[]>([]);
   const [notes, setNotes] = useState('');
   const [message, setMessage] = useState('');
   const [confirmed, setConfirmed] = useState(false);
@@ -573,12 +582,24 @@ function ReviewForm({ detail, onRecorded }: { detail: Detail; onRecorded: () => 
     problems.push(
       `The business is not verified. Tick "${REVIEW_REASONS.IDENTITY_VERIFIED}" if you verified it another way.`,
     );
+  const pickAction =
+    decision === 'DECLINE' ? 'DECLINE' : decision === 'REQUEST_INFO' ? 'REQUEST_INFO' : null;
+  if (pickAction !== null && picks.length === 0)
+    problems.push(
+      pickAction === 'DECLINE'
+        ? 'Pick at least one reason the applicant is told. It goes on the adverse action notice.'
+        : 'Pick at least one thing to ask the applicant for.',
+    );
   if (decision === 'REQUEST_INFO' && message.trim().length === 0)
     problems.push('Write the message the applicant will see.');
   if (isOverride && codes.length === 0)
     problems.push('An override needs at least one reason code.');
   if (isOverride && !confirmed) problems.push('Confirm the override.');
 
+  const togglePick = (code: ReasonCode) =>
+    setPicks((p) =>
+      p.includes(code) ? p.filter((x) => x !== code) : p.length >= 4 ? p : [...p, code],
+    );
   const toggle = (code: ReviewReasonCode) =>
     setCodes((c) => (c.includes(code) ? c.filter((x) => x !== code) : [...c, code]));
 
@@ -587,6 +608,7 @@ function ReviewForm({ detail, onRecorded }: { detail: Detail; onRecorded: () => 
     void review.run({
       decision,
       reasonCodes: codes,
+      principalReasonCodes: pickAction !== null ? picks : [],
       ...(notes.trim() ? { notes: notes.trim() } : {}),
       ...(decision === 'REQUEST_INFO' ? { applicantMessage: message.trim() } : {}),
       // Terms are sent only when they differ from the engine's, which is what makes them an override.
@@ -624,6 +646,7 @@ function ReviewForm({ detail, onRecorded }: { detail: Detail; onRecorded: () => 
                 checked={decision === value}
                 onChange={() => {
                   setDecision(value);
+                  setPicks([]);
                   setConfirmed(false);
                   review.reset();
                 }}
@@ -715,9 +738,44 @@ function ReviewForm({ detail, onRecorded }: { detail: Detail; onRecorded: () => 
           </Field>
         ) : null}
 
+        {pickAction !== null ? (
+          <fieldset>
+            <legend className="legend">
+              {pickAction === 'DECLINE' ? 'Reasons the applicant is told' : 'What to ask for'}{' '}
+              <span className="req">(at least one, at most four, in order of importance)</span>
+            </legend>
+            <p className="muted small">
+              {pickAction === 'DECLINE'
+                ? 'These become the principal reasons on the adverse action notice, in the order you pick them.'
+                : 'These are listed on the request, and on a notice of incompleteness if it goes unanswered.'}
+            </p>
+            {reviewerReasonCodes(pickAction).map((code) => {
+              const entry = catalogEntry(code)!;
+              const at = picks.indexOf(code);
+              return (
+                <label className="choice" key={code}>
+                  <input
+                    type="checkbox"
+                    checked={at >= 0}
+                    disabled={at < 0 && picks.length >= 4}
+                    onChange={() => togglePick(code)}
+                  />
+                  <span>
+                    <strong>
+                      {at >= 0 ? `${at + 1}. ` : ''}
+                      {entry.title}
+                    </strong>
+                    <span className="muted small"> {entry.applicantText}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </fieldset>
+        ) : null}
+
         <fieldset>
           <legend className="legend">
-            Reason codes{' '}
+            Internal reason codes{' '}
             <span className="req">
               {isOverride ? '(at least one, this is an override)' : '(optional)'}
             </span>

@@ -6,22 +6,23 @@ Run: 2,000 synthetic applicants per seed, seeds `1`, `2`, `3`, `4`, `5`, arrivin
 
 Gated configuration: credit policy `cashflow-v4` under the `standard` servicing policy. The gates are judged on the mean of the 5 seeds; tables of counts pool the seeds into one book.
 
-Gates passed: 10 of 10.
+Gates passed: 11 of 11.
 
 ## Gates (Balanced risk appetite)
 
-| Gate                                                                                      |     Mean | Lowest to highest seed | Threshold | Result |
-| ----------------------------------------------------------------------------------------- | -------: | ---------------------: | --------: | ------ |
-| Net loss at or under 75 bps of rent volume (base)                                         |       19 |               13 to 23 |     <= 75 | PASS   |
-| Net margin above zero (base)                                                              | $264,570 |   $248,395 to $300,915 |      > $0 | PASS   |
-| Net margin above zero (mild stress)                                                       | $219,187 |   $190,712 to $268,255 |      > $0 | PASS   |
-| Bad rate does not fall from grade A to D (cells of 30 or more plans, 100 bps tolerance)   |        0 |                      0 |       = 0 | PASS   |
-| AUC of score against the bad flag at or above 0.70, all scored honest applicants (base)   |    0.873 |         0.858 to 0.896 |   >= 0.70 | PASS   |
-| Under 5% of fraud archetype applicants approved, after review (base)                      |     1.6% |           1.0% to 2.6% |      < 5% | PASS   |
-| Pool always able to fund a payout at the planned growth rate (base)                       |        0 |                      0 |       = 0 | PASS   |
-| Usable approval rate at or above 30% of applicants (base)                                 |    39.9% |         38.4% to 41.5% |    >= 30% | PASS   |
-| At most 5% of applicants referred to a reviewer (base)                                    |     3.7% |           3.5% to 3.9% |     <= 5% | PASS   |
-| At most 3% of honest applicants knocked out or referred by a data veracity finding (base) |     1.5% |           1.4% to 1.8% |     <= 3% | PASS   |
+| Gate                                                                                       |     Mean | Lowest to highest seed | Threshold | Result |
+| ------------------------------------------------------------------------------------------ | -------: | ---------------------: | --------: | ------ |
+| Net loss at or under 75 bps of rent volume (base)                                          |       19 |               13 to 23 |     <= 75 | PASS   |
+| Net margin above zero (base)                                                               | $264,570 |   $248,395 to $300,915 |      > $0 | PASS   |
+| Net margin above zero (mild stress)                                                        | $219,187 |   $190,712 to $268,255 |      > $0 | PASS   |
+| Bad rate does not fall from grade A to D (cells of 30 or more plans, 100 bps tolerance)    |        0 |                      0 |       = 0 | PASS   |
+| AUC of score against the bad flag at or above 0.70, all scored honest applicants (base)    |    0.873 |         0.858 to 0.896 |   >= 0.70 | PASS   |
+| Under 5% of fraud archetype applicants approved, after review (base)                       |     1.6% |           1.0% to 2.6% |      < 5% | PASS   |
+| Pool always able to fund a payout at the planned growth rate (base)                        |        0 |                      0 |       = 0 | PASS   |
+| Usable approval rate at or above 30% of applicants (base)                                  |    39.9% |         38.4% to 41.5% |    >= 30% | PASS   |
+| At most 5% of applicants referred to a reviewer (base)                                     |     3.7% |           3.5% to 3.9% |     <= 5% | PASS   |
+| At most 3% of honest applicants knocked out or referred by a data veracity finding (base)  |     1.5% |           1.4% to 1.8% |     <= 3% | PASS   |
+| Every decline and counter offer has at least one catalog reason with applicant text (base) |   100.0% |                 100.0% |   >= 100% | PASS   |
 
 Grade inversions are counted on bad rates pooled across seeds, and unfunded payouts are
 summed across seeds. Every other gate is the mean of the per seed values.
@@ -77,6 +78,7 @@ last column decides whether the policy ships.
 | approval_floor          |    >= 30% |     45.5% PASS |     41.0% PASS |    41.0% PASS |    39.9% PASS |          39.9% PASS |
 | refer_rate              |     <= 5% |      0.0% PASS |      2.2% PASS |     2.2% PASS |     3.7% PASS |           3.7% PASS |
 | veracity_honest_adverse |     <= 3% |      0.0% PASS |      0.0% PASS |     0.0% PASS |     1.5% PASS |           1.5% PASS |
+| adverse_action_reasons  |   >= 100% |    100.0% PASS |    100.0% PASS |   100.0% PASS |   100.0% PASS |         100.0% PASS |
 
 ## Swap sets against the earlier configurations
 
@@ -383,6 +385,68 @@ the through the door run.
 | Net margin, bps of volume |          78 |          79 |
 | Net margin                |  $1,337,552 |  $1,322,851 |
 | Bad rate, funded plans    |        4.1% |        3.7% |
+
+## Principal reasons on declines and counter offers (base case)
+
+Every decline (by the engine, or by the simulated reviewer on a referral) and every counter
+offer is an adverse action, and the applicant is told its principal reasons: at most four,
+from the reason catalog in `packages/shared`, rules that declined first and then the
+scorecard factors that lost the most points. The overall score is never a reason on its own.
+The simulated reviewer declines with `INTEGRITY_CHECK_FAILED`. Explaining
+decisions does not change them: the outcomes here are the same as without the catalog.
+
+| Measure                                              |                                  Value |
+| ---------------------------------------------------- | -------------------------------------: |
+| Declines                                             |                                  3,099 |
+| Counter offers                                       |                                  1,812 |
+| With at least one catalog reason with applicant text |                                 100.0% |
+| By seed                                              | 100.0%, 100.0%, 100.0%, 100.0%, 100.0% |
+| Principal reasons per adverse action, mean           |                                   3.08 |
+
+### Declines: how often each reason is given
+
+A decline usually lists several reasons, so the shares add to more than 100%. "First" counts
+the declines that give it as the most important reason.
+
+| Code                              | Title                                    | Declines | Share of declines | First |
+| --------------------------------- | ---------------------------------------- | -------: | ----------------: | ----: |
+| `CASH_BUFFER`                     | Cash buffer                              |    2,553 |             82.4% |   305 |
+| `CASH_FLOW_COVERAGE`              | Cash flow coverage                       |    2,437 |             78.6% |     0 |
+| `EXCESSIVE_OVERDRAFTS`            | Overdraft fees                           |    1,880 |             60.7% | 1,828 |
+| `NEGATIVE_BALANCE_DAYS`           | Days overdrawn                           |    1,275 |             41.1% |     0 |
+| `REVENUE_DECLINING`               | Falling revenue                          |      628 |             20.3% |   484 |
+| `REVENUE_TREND`                   | Revenue trend                            |      358 |             11.6% |     0 |
+| `RENT_TO_REVENUE`                 | Rent affordability                       |      341 |             11.0% |     0 |
+| `ACCOUNT_CONDUCT`                 | Account conduct                          |      277 |              8.9% |     0 |
+| `DATA_DEPTH`                      | Data history                             |      268 |              8.7% |     0 |
+| `REVENUE_STABILITY`               | Revenue stability                        |      235 |              7.6% |     0 |
+| `DECLINE_WITH_THIN_BUFFER`        | Falling revenue with little cash on hand |      170 |              5.5% |    63 |
+| `DEBT_LOAD`                       | Existing debt                            |      107 |              3.5% |     0 |
+| `UNVERIFIED_DEPOSITS`             | Deposits we could not verify             |       92 |              3.0% |    92 |
+| `RENT_NOT_VERIFIED`               | Rent not shown in your account           |       83 |              2.7% |    83 |
+| `INSUFFICIENT_CAPACITY`           | Room for the rent in your cash flow      |       71 |              2.3% |    71 |
+| `EXPOSURE_LIMIT`                  | Amount for a new customer                |       55 |              1.8% |    55 |
+| `ACCOUNT_HISTORY_NOT_VERIFIED`    | Account history                          |       42 |              1.4% |    42 |
+| `RENT_BELOW_MINIMUM`              | Rent too small to serve                  |       32 |              1.0% |    32 |
+| `RENT_EXCEEDS_REVENUE_SHARE`      | Rent compared with revenue               |       29 |              0.9% |     4 |
+| `ACCOUNT_OWNERSHIP_NOT_CONFIRMED` | Account ownership                        |       25 |              0.8% |    25 |
+| `INTEGRITY_CHECK_FAILED`          | Information we could not verify          |       13 |              0.4% |    13 |
+| `NEGATIVE_FREE_CASH_FLOW`         | No cash left after expenses              |        3 |              0.1% |     0 |
+| `REVENUE_TOO_LOW`                 | Monthly revenue                          |        3 |              0.1% |     2 |
+
+### Counter offers
+
+| Code                  | Title                            | Counter offers | Share of counter offers |
+| --------------------- | -------------------------------- | -------------: | ----------------------: |
+| `LIMIT_BELOW_REQUEST` | Approved for less than requested |          1,812 |                  100.0% |
+| `CASH_FLOW_COVERAGE`  | Cash flow coverage               |          1,386 |                   76.5% |
+| `CASH_BUFFER`         | Cash buffer                      |            404 |                   22.3% |
+| `REVENUE_TREND`       | Revenue trend                    |            167 |                    9.2% |
+| `DEBT_LOAD`           | Existing debt                    |            137 |                    7.6% |
+| `REVENUE_STABILITY`   | Revenue stability                |            108 |                    6.0% |
+| `DATA_DEPTH`          | Data history                     |             73 |                    4.0% |
+| `RENT_TO_REVENUE`     | Rent affordability               |             56 |                    3.1% |
+| `ACCOUNT_CONDUCT`     | Account conduct                  |              4 |                    0.2% |
 
 ## Calibration: expected against realized (base case)
 

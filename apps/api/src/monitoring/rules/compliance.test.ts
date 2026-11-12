@@ -5,6 +5,7 @@ import { MONITORING_POLICY } from '../policy.ts';
 import { AS_OF, expectDedupes, inputs, run } from '../test-support.ts';
 import type { AdverseActionFact, ApplicationFact, ScreeningFact } from '../types.ts';
 import {
+  adverseActionNoticeLate,
   adverseActionNoticeMissing,
   decisionDeadline,
   identityUnverified,
@@ -63,40 +64,85 @@ describe('compliance.adverse_action_notice_missing', () => {
     decisionId: 'dec1',
     applicationId: 'app1',
     businessName: 'Northside Barbers',
-    outcome: 'DECLINED',
-    decidedOn: addDays(AS_OF, -3),
+    kind: 'DECLINE',
+    actionOn: addDays(AS_OF, -3),
+    deadlineOn: addDays(AS_OF, 27),
     noticeSentOn: null,
     ...over,
   });
-  const active = {
+  const off = {
     ...MONITORING_POLICY,
-    compliance: { ...MONITORING_POLICY.compliance, adverseActionNoticeRuleActive: true },
+    compliance: { ...MONITORING_POLICY.compliance, adverseActionNoticeRuleActive: false },
   };
 
-  it('is switched off until the notice exists, and returns nothing even for a decline', () => {
-    expect(MONITORING_POLICY.compliance.adverseActionNoticeRuleActive).toBe(false);
-    expect(run(adverseActionNoticeMissing, inputs({ adverseActions: [decision()] }))).toEqual([]);
+  it('is on now that notices are stored, and the switch still turns it off', () => {
+    expect(MONITORING_POLICY.compliance.adverseActionNoticeRuleActive).toBe(true);
+    expect(run(adverseActionNoticeMissing, inputs({ adverseActions: [decision()] }), off)).toEqual(
+      [],
+    );
   });
 
-  it('once switched on, fires for a decline or counter offer with no stored notice', () => {
+  it('fires for every kind of notice owed and not stored, critical past the deadline', () => {
     const data = inputs({
-      adverseActions: [decision(), decision({ decisionId: 'dec2', outcome: 'COUNTER_OFFER' })],
+      adverseActions: [
+        decision(),
+        decision({ decisionId: 'dec2', kind: 'COUNTER_OFFER_NOT_ACCEPTED' }),
+        decision({ decisionId: 'dec3', kind: 'INCOMPLETE', deadlineOn: addDays(AS_OF, -1) }),
+        decision({ decisionId: 'dec4', kind: 'INCOMPLETE_DECLINED' }),
+      ],
     });
-    expect(run(adverseActionNoticeMissing, data, active)).toMatchObject([
-      { severity: 'HIGH', dedupeKey: 'adverse_action:dec1' },
-      { severity: 'HIGH', dedupeKey: 'adverse_action:dec2' },
+    expect(run(adverseActionNoticeMissing, data)).toMatchObject([
+      { severity: 'HIGH', dedupeKey: 'adverse_action:dec1:DECLINE' },
+      { severity: 'HIGH', dedupeKey: 'adverse_action:dec2:COUNTER_OFFER_NOT_ACCEPTED' },
+      { severity: 'CRITICAL', dedupeKey: 'adverse_action:dec3:INCOMPLETE' },
+      { severity: 'HIGH', dedupeKey: 'adverse_action:dec4:INCOMPLETE_DECLINED' },
     ]);
-    expectDedupes(adverseActionNoticeMissing, data, active);
+    expectDedupes(adverseActionNoticeMissing, data);
   });
 
-  it('once switched on, does not fire when the notice is stored or the decision is from today', () => {
+  it('does not fire when the notice is stored or it only fell due today', () => {
     expect(
       run(
         adverseActionNoticeMissing,
         inputs({
-          adverseActions: [decision({ noticeSentOn: AS_OF }), decision({ decidedOn: AS_OF })],
+          adverseActions: [decision({ noticeSentOn: AS_OF }), decision({ actionOn: AS_OF })],
         }),
-        active,
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('compliance.adverse_action_notice_late', () => {
+  const notice = (over: Partial<AdverseActionFact> = {}): AdverseActionFact => ({
+    decisionId: 'dec1',
+    applicationId: 'app1',
+    businessName: 'Tidewater Sign Works',
+    kind: 'DECLINE',
+    actionOn: addDays(AS_OF, -1),
+    deadlineOn: addDays(AS_OF, -5),
+    noticeSentOn: addDays(AS_OF, -1),
+    ...over,
+  });
+
+  it('fires once for a notice delivered after its deadline, and never auto resolves', () => {
+    const data = inputs({ adverseActions: [notice()] });
+    expect(run(adverseActionNoticeLate, data)).toMatchObject([
+      { severity: 'HIGH', dedupeKey: 'adverse_action_late:dec1:DECLINE' },
+    ]);
+    expect(adverseActionNoticeLate.autoResolves).toBe(false);
+    expect(adverseActionNoticeLate.once).toBe(true);
+  });
+
+  it('is quiet for a notice on time, or one not yet sent (the missing rule has that)', () => {
+    expect(
+      run(
+        adverseActionNoticeLate,
+        inputs({
+          adverseActions: [
+            notice({ noticeSentOn: addDays(AS_OF, -5) }),
+            notice({ noticeSentOn: null }),
+          ],
+        }),
       ),
     ).toEqual([]);
   });

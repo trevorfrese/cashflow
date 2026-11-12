@@ -1,11 +1,23 @@
-import { CreateApplicationRequest, Id, UnderwritingApplication } from '@cashflow/shared';
+import {
+  AdverseActionNoticeView,
+  CreateApplicationRequest,
+  DecisionExplanation,
+  Id,
+  UnderwritingApplication,
+} from '@cashflow/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
 import { forbidden, notFound, unprocessable } from '../errors.ts';
 import { toApplication } from '../serializers.ts';
+import {
+  declineCounterOffer,
+  noticesForApplication,
+  toNoticeView,
+} from '../services/adverse-action.ts';
 import { INCLUDE_CURRENT_DECISION, withCurrentDecision } from '../services/decisions.ts';
+import { buildExplanation } from '../services/explanation.ts';
 import { underwriteApplication } from '../services/underwriting.ts';
 import { currentUserId, getOwnedBusiness } from './helpers.ts';
 
@@ -158,6 +170,63 @@ export async function underwritingRoutes(app: FastifyInstance) {
       },
     },
     async (request) => toApplication(await loadOwned(request.params.id, currentUserId(request))),
+  );
+
+  /**
+   * Why the applicant got this decision: principal reasons with what would change them,
+   * factor statuses, the rules that ran, the data read, and the terms. The score only on an
+   * approval or a counter offer. See `services/explanation.ts`.
+   */
+  r.get(
+    '/underwriting/applications/:id/explanation',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        tags: ['underwriting'],
+        params: Params,
+        response: { 200: DecisionExplanation },
+      },
+    },
+    async (request) => {
+      const application = await loadOwned(request.params.id, currentUserId(request));
+      const notices = await noticesForApplication(db, application.id);
+      return buildExplanation(application, application.decision, notices);
+    },
+  );
+
+  /** Every notice sent on the application, oldest first, exactly as delivered. */
+  r.get(
+    '/underwriting/applications/:id/notices',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        tags: ['underwriting'],
+        params: Params,
+        response: { 200: z.array(AdverseActionNoticeView) },
+      },
+    },
+    async (request) => {
+      const application = await loadOwned(request.params.id, currentUserId(request));
+      return (await noticesForApplication(db, application.id)).map(toNoticeView);
+    },
+  );
+
+  /**
+   * The owner declines a counter offer. An adverse action notice is stored and delivered at
+   * once. Calling it again returns the same notice.
+   */
+  r.post(
+    '/underwriting/applications/:id/decline-offer',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        tags: ['underwriting'],
+        params: Params,
+        response: { 200: AdverseActionNoticeView },
+      },
+    },
+    async (request) =>
+      toNoticeView(await declineCounterOffer(db, request.params.id, currentUserId(request))),
   );
 
   r.get(

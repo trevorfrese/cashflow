@@ -1,4 +1,4 @@
-import { formatCents } from '@cashflow/shared';
+import { catalogEntry, formatCents } from '@cashflow/shared';
 
 import { ASSUMPTIONS, STRESS } from './assumptions.ts';
 import { GATE_THRESHOLDS, type GateResult } from './gates.ts';
@@ -12,6 +12,7 @@ import {
   type ThroughTheDoorCell,
   type ThroughTheDoorMetrics,
 } from './metrics.ts';
+import { SIMULATED_REVIEWER_DECLINE_REASON } from './portfolio.ts';
 import type { Evaluation, ThroughTheDoorOutcome } from './run.ts';
 
 /**
@@ -1065,6 +1066,72 @@ function passThroughSection(e: Evaluation): string[] {
   ];
 }
 
+function reasonRows(
+  tally: Record<string, number>,
+  first: Record<string, number> | null,
+  of: number,
+): string[][] {
+  return Object.entries(tally)
+    .sort(([a, x], [b, y]) => y - x || (a < b ? -1 : 1))
+    .map(([code, n]) => [
+      `\`${code}\``,
+      catalogEntry(code)?.title ?? 'Not in the catalog',
+      count(n),
+      share(n, of),
+      ...(first ? [count(first[code] ?? 0)] : []),
+    ]);
+}
+
+function adverseActionSection(e: Evaluation): string[] {
+  const a = e.base.adverseAction;
+  const bySeed = e.baseBySeed.map((m) => pct(m.adverseAction.withReasonBps)).join(', ');
+  return [
+    '## Principal reasons on declines and counter offers (base case)',
+    '',
+    'Every decline (by the engine, or by the simulated reviewer on a referral) and every counter',
+    'offer is an adverse action, and the applicant is told its principal reasons: at most four,',
+    'from the reason catalog in `packages/shared`, rules that declined first and then the',
+    'scorecard factors that lost the most points. The overall score is never a reason on its own.',
+    `The simulated reviewer declines with \`${SIMULATED_REVIEWER_DECLINE_REASON}\`. Explaining`,
+    'decisions does not change them: the outcomes here are the same as without the catalog.',
+    '',
+    markdownTable(
+      ['Measure', 'Value'],
+      [
+        ['Declines', count(a.declines)],
+        ['Counter offers', count(a.counterOffers)],
+        [
+          'With at least one catalog reason with applicant text',
+          share(a.withReason, a.adverseActions),
+        ],
+        ['By seed', bySeed],
+        ['Principal reasons per adverse action, mean', (a.meanReasonsX100 / 100).toFixed(2)],
+      ],
+      ['left', 'right'],
+    ),
+    '',
+    '### Declines: how often each reason is given',
+    '',
+    'A decline usually lists several reasons, so the shares add to more than 100%. "First" counts',
+    'the declines that give it as the most important reason.',
+    '',
+    markdownTable(
+      ['Code', 'Title', 'Declines', 'Share of declines', 'First'],
+      reasonRows(a.declineReasons, a.declineFirstReasons, a.declines),
+      ['left', 'left', 'right', 'right', 'right'],
+    ),
+    '',
+    '### Counter offers',
+    '',
+    markdownTable(
+      ['Code', 'Title', 'Counter offers', 'Share of counter offers'],
+      reasonRows(a.counterOfferReasons, null, a.counterOffers),
+      ['left', 'left', 'right', 'right'],
+    ),
+    '',
+  ];
+}
+
 export function renderMarkdown(e: Evaluation): string {
   const passed = e.gates.filter((g) => g.pass).length;
   const v1 = e.comparisons.find((c) => c.name === 'v1_baseline');
@@ -1132,6 +1199,7 @@ export function renderMarkdown(e: Evaluation): string {
     ...throughTheDoorSection(e),
     ...passThroughSection(e),
     ...veracitySection(e),
+    ...adverseActionSection(e),
     '## Calibration: expected against realized (base case)',
     '',
     'Expected bad rate is the PD the fee was priced on, from the table calibrated on separate',
@@ -1505,6 +1573,12 @@ export function renderBaseline(e: Evaluation): string {
     throughTheDoor: throughTheDoorSummary(e.throughTheDoor, e.run.seeds),
     gates: gateSummary(e.gates),
     veracity: veracitySummary(e),
+    adverseAction: {
+      declines: e.base.adverseAction.declines,
+      counterOffers: e.base.adverseAction.counterOffers,
+      withReasonBps: e.base.adverseAction.withReasonBps,
+      declineFirstReasons: e.base.adverseAction.declineFirstReasons,
+    },
     ...(e.base.passThrough
       ? {
           passThrough: {

@@ -66,6 +66,8 @@ import { coverageRatio, freeCashCents } from '../underwriting/features.ts';
 import { INTEGRITY_RULES } from '../underwriting/integrity.ts';
 import { CURRENT_POLICY, POLICIES } from '../underwriting/policy.ts';
 import { scoreCashFlow } from '../underwriting/scorecard.ts';
+import { decisionPrincipalReasons, noticesForApplication, toNoticeView } from './adverse-action.ts';
+import { buildExplanation } from './explanation.ts';
 import { AUDIT_EVENTS, AUDIT_SUBJECT_TYPES } from './audit.ts';
 import { CURRENT_DECISION } from './decisions.ts';
 import { planStandings } from './delinquency.ts';
@@ -275,6 +277,10 @@ export async function businessDetail(db: Db, businessId: string): Promise<Operat
     openGraduationOffer(db, b.id),
   ]);
   const paymentHistory = await paymentHistoryView(db, b.id, todayIso(), openOffer);
+  const notices = await db.adverseActionNotice.findMany({
+    where: { businessId: b.id },
+    orderBy: [{ deliveredAt: 'desc' }, { createdAt: 'desc' }],
+  });
   return {
     business: {
       id: b.id,
@@ -331,6 +337,7 @@ export async function businessDetail(db: Db, businessId: string): Promise<Operat
     alerts: alerts.map(toAlert),
     paymentHistory,
     graduationOffers: offers,
+    notices: notices.map(toNoticeView),
   };
 }
 
@@ -422,6 +429,7 @@ function operatorDecision(d: DecisionWithReview, requestedCents: number): Operat
   return {
     ...decisionSummary(d),
     reasons: (d.reasons as unknown as DecisionReason[]) ?? [],
+    principalReasons: decisionPrincipalReasons(d, requestedCents),
     cashFlow: (d.cashFlow as unknown as CashFlowSummary | null) ?? null,
     recommendedInstallmentsPerMonth: d.recommendedInstallmentsPerMonth,
     recommendation: engineRecommendation(d),
@@ -462,6 +470,8 @@ export async function applicationDetail(
     where: { id: applicationId },
     include: {
       business: { include: { owners: { orderBy: { createdAt: 'asc' } } } },
+      bankLink: true,
+      commerceLink: true,
       decisions: {
         orderBy: [{ decidedAt: 'desc' }, { id: 'desc' }],
         include: { review: true },
@@ -471,6 +481,7 @@ export async function applicationDetail(
   });
   if (!a) throw notFound('Application');
   const current = a.decisions.find(isCurrent) ?? null;
+  const notices = await noticesForApplication(db, a.id);
   const [hits, events] = await Promise.all([
     openHitsForBusiness(db, a.businessId),
     db.auditEvent.findMany({
@@ -502,6 +513,8 @@ export async function applicationDetail(
     identity: identityView(a.business),
     openScreeningHits,
     auditEvents: events.map(toAuditEventView),
+    explanation: buildExplanation(a, current, notices),
+    notices: notices.map(toNoticeView),
   };
 }
 
@@ -1120,6 +1133,8 @@ const GATE_DESCRIPTIONS: Readonly<Record<string, string>> = {
   refer_rate: 'At most 5% of applicants referred to a reviewer (base)',
   veracity_honest_adverse:
     'At most 3% of honest applicants knocked out or referred by a data veracity finding (base)',
+  adverse_action_reasons:
+    'Every decline and counter offer has at least one catalog reason with applicant text (base)',
 };
 
 interface BaselineFile {

@@ -51,6 +51,7 @@ export default function RootLayout() {
                   <Stack.Screen name="bank/connect" options={{ presentation: 'modal' }} />
                   <Stack.Screen name="application/new" />
                   <Stack.Screen name="application/[id]" />
+                  <Stack.Screen name="notice/[id]" />
                   <Stack.Screen name="lease/new" />
                   <Stack.Screen name="plan/new" />
                   <Stack.Screen name="settings/rent" />

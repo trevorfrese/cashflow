@@ -90,8 +90,9 @@ Defined in `apps/api/src/dev/personas.ts`. Each is its own login (password `demo
 | `pass-through-missed`    | Foundry Bike Works   | Pass-through: one month paid, the next not collected, so the landlord was not paid and the owner told    |
 | `graduation-offer`       | Willow & Wren Bakery | Three on time pass-through months, re-underwritten with payment history, offered a financed plan         |
 | `pass-through-offer`     | Larkspur Tailoring   | Just declined (four months in business) with a lease linked: start the free plan from the decision       |
-| `declined`               | Northside Barbers    | Declined with reasons (overdrafts, too new, rent too high)                                               |
+| `declined`               | Northside Barbers    | Declined with principal reasons (overdrafts, too new, rent too high) and its adverse action notice       |
 | `needs-info`             | Lakeview Yoga        | Applied with no bank linked                                                                              |
+| `incomplete`             | Harbor Light Pilates | Applied 14 days ago with no bank linked; sent a notice of incompleteness with a date to respond by       |
 | `manual-review`          | Tidewater Sign Works | Referred 34 days ago on a tax id mismatch, never reviewed: past the deadline                             |
 | `identity-review`        | Meridian Supply      | Owner is a possible watchlist match: in review, nothing can be advanced                                  |
 | `counter-offer`          | Sellwood Books       | Approved for less than the lease rent, so the plan cannot start                                          |

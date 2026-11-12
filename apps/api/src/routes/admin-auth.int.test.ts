@@ -70,7 +70,7 @@ const ROUTES: Array<{
   {
     method: 'post',
     url: '/v1/admin/applications/x/review',
-    body: { decision: 'DECLINE', reasonCodes: ['OTHER'] },
+    body: { decision: 'DECLINE', reasonCodes: ['OTHER'], principalReasonCodes: ['CASH_BUFFER'] },
     role: 'reviewer',
   },
   {

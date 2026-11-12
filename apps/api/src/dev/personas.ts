@@ -21,6 +21,8 @@ import { addDays, dueDateInMonth, parseIsoDate, type IsoDate } from '@cashflow/s
 
 import type { AppContext } from '../context.ts';
 import { effectiveAt } from '../dates.ts';
+import { NOTICE_POLICY } from '../adverse-action/policy.ts';
+import { sweepAdverseActionNotices } from '../services/adverse-action.ts';
 import { collectInstallment } from '../services/collections.ts';
 import { updateLease } from '../services/lease-changes.ts';
 import { ACTIVE_SERVICING_POLICY } from '../servicing/policy.ts';
@@ -649,8 +651,8 @@ export const PERSONAS: readonly PersonaDefinition[] = [
     group: 'CUSTOMER',
     section: 'Decisions',
     demonstrates:
-      'Declined, with reasons: seven months old, repeated overdrafts, rent too high for its revenue.',
-    screens: ['Home', 'Application (reasons, cash flow summary)'],
+      'Declined, with the principal reasons and what would change them: seven months old, repeated overdrafts, rent too high for its revenue. The adverse action notice went out with the decision.',
+    screens: ['Home', 'Application (reasons, factors, free plan)', 'Your notice'],
     email: 'declined@cashflow.local',
     fullName: 'Dana Rivera',
     landing: 'APPLICATION',
@@ -731,13 +733,77 @@ export const PERSONAS: readonly PersonaDefinition[] = [
     },
   },
   {
+    key: 'incomplete',
+    title: 'Harbor Light Pilates',
+    group: 'CUSTOMER',
+    section: 'Decisions',
+    demonstrates:
+      'Applied 14 days ago without connecting a bank and never came back. After 10 days it was sent a notice of incompleteness naming what is missing and the date to provide it by.',
+    screens: ['Application (what is needed, by when)', 'Your notice', 'Ops console, Customer'],
+    email: 'incomplete@cashflow.local',
+    fullName: 'Dana Rivera',
+    landing: 'APPLICATION',
+    build: {
+      kind: 'instant',
+      builtOn: (today) => addDays(today, -14),
+      run: async ({ ctx, userId, today }) => {
+        const appliedOn = addDays(today, -14);
+        const createdAt = effectiveAt(appliedOn);
+        const business = await createBusiness(
+          ctx,
+          userId,
+          {
+            legalName: 'Harbor Light Pilates LLC',
+            dba: 'Harbor Light Pilates',
+            industry: 'FITNESS',
+            addressLine1: '1530 NE Alberta St',
+            postalCode: '97211',
+            foundedOn: '2021-03-01',
+            monthlyRevenueCents: 2_400_000,
+            taxIdLast4: '4410',
+            owner: dana,
+          },
+          { createdAt },
+        );
+        const application = await apply(ctx, {
+          businessId: business.id,
+          bankLink: null,
+          monthlyRevenueCents: 2_400_000,
+          timeInBusinessMonths: 60,
+          rentCents: 410_000,
+          asOf: appliedOn,
+          createdAt,
+        });
+        if (application.status !== 'NEEDS_INFO') {
+          throw new Error(`Expected Harbor Light Pilates to need info, got ${application.status}`);
+        }
+        // The notices job, on the day the notice of incompleteness fell due.
+        await sweepAdverseActionNotices(
+          ctx.db,
+          addDays(appliedOn, NOTICE_POLICY.incompleteNoticeAfterDays),
+          { businessId: business.id },
+        );
+        const sent = await ctx.db.adverseActionNotice.count({
+          where: { applicationId: application.id, kind: 'INCOMPLETE' },
+        });
+        if (sent !== 1) {
+          throw new Error(`Expected Harbor Light Pilates to have a notice of incompleteness`);
+        }
+      },
+    },
+  },
+  {
     key: 'manual-review',
     title: 'Tidewater Sign Works',
     group: 'CUSTOMER',
     section: 'Decisions',
     demonstrates:
       'Referred to a person 34 days ago (the tax id did not match) and never reviewed: past the 30 day decision deadline. Decide it in the ops console.',
-    screens: ['Home (In review)', 'Application', 'Ops console, Reviews'],
+    screens: [
+      'Home (In review)',
+      'Application (what happens next, no score)',
+      'Ops console, Reviews (decline with catalog reasons sends a late notice)',
+    ],
     email: 'manual-review@cashflow.local',
     fullName: 'Priya Natarajan',
     landing: 'HOME',
@@ -804,7 +870,11 @@ export const PERSONAS: readonly PersonaDefinition[] = [
     section: 'Decisions',
     demonstrates:
       'Approved for less than the lease rent: asked for $6,000, approved for less. The lease is linked but the plan cannot start, because CashFlow funds a whole lease or nothing.',
-    screens: ['Home (Start your rent plan)', 'Plan (refused: rent over limit)', 'Application'],
+    screens: [
+      'Home (Start your rent plan)',
+      'Plan (refused: rent over limit)',
+      'Application (score, why less than asked, decline the offer for a notice)',
+    ],
     email: 'counter-offer@cashflow.local',
     fullName: 'Robin Castellanos',
     landing: 'HOME',

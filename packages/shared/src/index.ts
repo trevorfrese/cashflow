@@ -18,3 +18,6 @@ export * from './schemas/identity';
 export * from './schemas/monitoring';
 export * from './schemas/operator';
 export * from './schemas/dev';
+export * from './adverse-action/catalog';
+export * from './adverse-action/principal';
+export * from './schemas/adverse-action';

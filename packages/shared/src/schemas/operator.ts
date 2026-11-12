@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { PrincipalReason } from '../adverse-action/principal';
+import { AdverseActionNoticeView, DecisionExplanation } from './adverse-action';
 
 import {
   AlertCategory,
@@ -211,6 +213,8 @@ export const OperatorBusinessDetail = z.object({
   paymentHistory: PaymentHistory.nullable().default(null),
   /** Graduation offers from a pass-through plan, newest first. */
   graduationOffers: z.array(GraduationOffer).default([]),
+  /** Every adverse action notice and notice of incompleteness sent, newest first. */
+  notices: z.array(AdverseActionNoticeView).default([]),
 });
 export type OperatorBusinessDetail = z.infer<typeof OperatorBusinessDetail>;
 
@@ -258,6 +262,8 @@ export type OperatorIntegrityFlag = z.infer<typeof OperatorIntegrityFlag>;
 /** The decision with what the engine stored beside it. */
 export const OperatorDecision = OperatorDecisionSummary.extend({
   reasons: z.array(DecisionReason),
+  /** What the applicant is told: the principal reasons, from the reason catalog. */
+  principalReasons: z.array(PrincipalReason).default([]),
   cashFlow: CashFlowSummary.nullable(),
   recommendedInstallmentsPerMonth: z.number().int().nullable(),
   /** What the engine would have done on its own. */
@@ -323,6 +329,10 @@ export const OperatorApplicationDetail = z.object({
   openScreeningHits: z.array(ScreeningResult),
   /** Audit trail of the application, newest first, capped. */
   auditEvents: z.array(AuditEventView),
+  /** The explanation exactly as the applicant sees it. */
+  explanation: DecisionExplanation.nullable().default(null),
+  /** Notices sent on the application, oldest first, with their full text. */
+  notices: z.array(AdverseActionNoticeView).default([]),
 });
 export type OperatorApplicationDetail = z.infer<typeof OperatorApplicationDetail>;
 

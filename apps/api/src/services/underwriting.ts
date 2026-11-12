@@ -6,6 +6,7 @@ import type { BankLink, CommerceLink, Prisma } from '../generated/prisma/client.
 import type { Providers } from '../providers/index.ts';
 import type { EngineResult } from '../underwriting/engine.ts';
 import type { Tx } from '../db.ts';
+import { createDeclineNoticeTx } from './adverse-action.ts';
 import { recordAudit, type AuditActor } from './audit.ts';
 import { gatherDecisionData, UNDERWRITING_LOOKBACK_DAYS } from './connections.ts';
 import { approvalsPaused } from './circuit-breaker.ts';
@@ -136,6 +137,9 @@ export async function underwriteApplication({
         grade: result.grade,
         recommendedInstallmentsPerMonth: result.recommendedInstallmentsPerMonth,
         reasons: result.reasons as unknown as Prisma.InputJsonValue,
+        ...(result.principalReasons.length > 0
+          ? { principalReasons: result.principalReasons as unknown as Prisma.InputJsonValue }
+          : {}),
         cashFlow: (result.cashFlow ?? null) as unknown as Prisma.InputJsonValue,
         policyVersion: result.policyVersion,
         snapshot: result.snapshot as unknown as Prisma.InputJsonValue,
@@ -192,6 +196,16 @@ export async function underwriteApplication({
         subjectId: applicationId,
         payload: { decisionId: decision.id, triggers: result.snapshot.referTriggers },
         at: now,
+      });
+    }
+    if (result.outcome === 'DECLINED') {
+      // The adverse action notice goes out with the decline, in the same transaction.
+      await createDeclineNoticeTx(tx, {
+        application: row,
+        decision,
+        principalReasons: result.principalReasons,
+        generatedBy: 'engine',
+        actor: { type: 'system', id: providers.underwriting.name },
       });
     }
     if (result.outcome === 'APPROVED') {

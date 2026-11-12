@@ -1,6 +1,10 @@
 import {
   addDays,
+  catalogEntry,
   daysBetween,
+  principalReasonsFromCodes,
+  selectPrincipalReasons,
+  type PrincipalReason,
   type AdminIdentity,
   type DecisionOutcome,
   type DecisionReason,
@@ -17,6 +21,7 @@ import { notFound, unprocessable } from '../errors.ts';
 import type { Prisma, UnderwritingDecision } from '../generated/prisma/client.ts';
 import type { DecisionSnapshot } from '../underwriting/engine.ts';
 import { CURRENT_POLICY } from '../underwriting/policy.ts';
+import { createDeclineNoticeTx } from './adverse-action.ts';
 import { recordAudit } from './audit.ts';
 import { openHitsForBusiness } from './identity.ts';
 import { applyApprovedRentIncreases } from './lease-changes.ts';
@@ -205,6 +210,47 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
       );
     }
 
+    // What the applicant is told comes from the reason catalog, never free text alone: a
+    // decline needs at least one reason a reviewer may decline for (these become the
+    // principal reasons on the adverse action notice), and a request for information at
+    // least one thing to ask for.
+    const pickAction =
+      args.decision === 'DECLINE'
+        ? ('DECLINE' as const)
+        : args.decision === 'REQUEST_INFO'
+          ? ('REQUEST_INFO' as const)
+          : null;
+    const picks = args.principalReasonCodes ?? [];
+    if (pickAction === null && picks.length > 0) {
+      throw unprocessable(
+        'PRINCIPAL_REASONS_NOT_ALLOWED',
+        'Applicant reasons are picked on a decline or a request for information',
+      );
+    }
+    if (pickAction !== null) {
+      if (picks.length === 0) {
+        throw unprocessable(
+          'PRINCIPAL_REASONS_REQUIRED',
+          args.decision === 'DECLINE'
+            ? 'A decline needs at least one reason from the catalog: it is what the adverse action notice tells the applicant'
+            : 'A request for information needs at least one item from the catalog to ask for',
+        );
+      }
+      const wrong = picks.filter(
+        (c) =>
+          !(catalogEntry(c)?.reviewerActions as readonly string[] | undefined)?.includes(
+            pickAction,
+          ),
+      );
+      if (wrong.length > 0) {
+        throw unprocessable(
+          'PRINCIPAL_REASON_NOT_ALLOWED',
+          `These reasons cannot be given for this review: ${wrong.join(', ')}`,
+          { codes: wrong },
+        );
+      }
+    }
+
     const review = await tx.applicationReview.create({
       data: {
         applicationId: application.id,
@@ -242,6 +288,16 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
     const carried = ((reviewed.reasons as unknown as DecisionReason[]) ?? []).filter(
       (r) => !HEADLINE_CODES.has(r.code),
     );
+    const reviewedSnapshot = snapshotOf(reviewed);
+    const principalReasons: PrincipalReason[] =
+      pickAction !== null
+        ? principalReasonsFromCodes(picks, carried)
+        : selectPrincipalReasons({
+            outcome,
+            counterOffer: limitCents !== null && limitCents < application.requestedMonthlyRentCents,
+            reasons: carried,
+            factors: reviewedSnapshot?.factors ?? null,
+          });
 
     const now = clockNow();
     await supersedeCurrentDecision(tx, application.id, now);
@@ -256,6 +312,9 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
         grade: reviewed.grade,
         recommendedInstallmentsPerMonth: reviewed.recommendedInstallmentsPerMonth,
         reasons: [headline, ...carried] as unknown as Prisma.InputJsonValue,
+        ...(principalReasons.length > 0
+          ? { principalReasons: principalReasons as unknown as Prisma.InputJsonValue }
+          : {}),
         cashFlow: (reviewed.cashFlow ?? null) as Prisma.InputJsonValue,
         policyVersion: reviewed.policyVersion,
         snapshot: {
@@ -267,6 +326,7 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
             identityVerifiedByReviewer,
             decision: args.decision,
             reasonCodes: args.reasonCodes,
+            principalReasonCodes: picks,
             isOverride,
             reviewedDecisionId: reviewed.id,
           },
@@ -297,6 +357,7 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
         reviewId: review.id,
         decision: args.decision,
         reasonCodes: args.reasonCodes,
+        principalReasonCodes: picks,
         isOverride,
         reviewedDecisionId: reviewed.id,
       },
@@ -327,6 +388,16 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
           recorded: { outcome, approvedMonthlyLimitCents: limitCents, feeBps },
           reasonCodes: args.reasonCodes,
         },
+      });
+    }
+    if (outcome === 'DECLINED') {
+      // The notice states the reviewer's reasons, and goes out with the decision.
+      await createDeclineNoticeTx(tx, {
+        application: updated,
+        decision,
+        principalReasons,
+        generatedBy: `reviewer:${reviewer}`,
+        actor,
       });
     }
     if (outcome === 'APPROVED') {

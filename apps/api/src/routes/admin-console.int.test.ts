@@ -382,7 +382,12 @@ describe('GET /admin/applications/:id', () => {
     const { applicationId } = await referredApplication();
     const reviewed = await reviewer('lee@cashflow.example').post(
       `/v1/admin/applications/${applicationId}/review`,
-      { decision: 'DECLINE', reasonCodes: ['INTEGRITY_FLAG_CONFIRMED'], notes: 'Same account.' },
+      {
+        decision: 'DECLINE',
+        reasonCodes: ['INTEGRITY_FLAG_CONFIRMED'],
+        principalReasonCodes: ['ACCOUNT_OWNERSHIP_NOT_CONFIRMED'],
+        notes: 'Same account.',
+      },
     );
     expect(reviewed.status).toBe(200);
     const detail = OperatorApplicationDetail.parse(
@@ -608,6 +613,7 @@ describe('policy and evaluation', () => {
       'approval_floor',
       'refer_rate',
       'veracity_honest_adverse',
+      'adverse_action_reasons',
     ]);
     for (const gate of evaluation.gates) {
       expect(gate.description).not.toBe(gate.id);

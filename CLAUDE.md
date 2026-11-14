@@ -15,7 +15,7 @@ packages/shared   Zod schemas, enums, types, brand tokens, pure installment math
 docker/           Postgres init SQL for docker compose
 dev               The one command entry point (sh wrapper around scripts/dev/cli.mjs)
 scripts/          Repo-level scripts: the dev CLI and supervisor (scripts/dev), em dash check
-.github/          CI workflow
+.github/          CI workflows: checks and smoke on every push (ci.yml), the strict portfolio eval (eval.yml)
 ```
 
 Package names are scoped: `@cashflow/shared`, `@cashflow/api`, `@cashflow/web`, `@cashflow/ops`, `@cashflow/mobile`. Use them with `pnpm --filter`.
@@ -82,7 +82,7 @@ Docs to read before changing behavior: `ARCHITECTURE.md` (providers, data model,
   - `PaymentsProvider` (`PAYMENTS_PROVIDER`)
   - `CapitalProvider` (`CAPITAL_PROVIDER`)
 - Data for underwriting is pulled by CashFlow through a connection the owner authorized, stored as an append-only snapshot, and checked for veracity (`apps/api/src/veracity/`). No uploaded statements. Platform tokens are sealed by `src/crypto/token-vault.ts` and never returned, logged, or audited. See `apps/api/DATA_CONNECTIONS.md`.
-- A credit policy, pricing, PD table, or servicing change is a new policy version, and ships only when `pnpm --filter @cashflow/api eval:portfolio --strict` passes every gate, committed with the regenerated `evals/report.md` and `evals/baseline.json`. No gate threshold is loosened to make a change pass. See `apps/api/CREDIT_POLICY.md`, "Change control".
+- A credit policy, pricing, PD table, or servicing change is a new policy version, and ships only when `pnpm --filter @cashflow/api eval:portfolio --strict` passes every gate, committed with the regenerated `evals/report.md` and `evals/baseline.json`. No gate threshold is loosened to make a change pass. `pnpm test` runs the gates on a fixed seed sample (`src/evals/ci-gates.test.ts`), and `.github/workflows/eval.yml` runs the strict evaluation nightly and on policy pull requests. See `apps/api/CREDIT_POLICY.md`, "Change control".
 - All money movements (landlord payouts, installment collections, fees, pool replenishment) post a `LedgerTransaction` with balanced `LedgerEntry` rows. The ledger service rejects unbalanced transactions. Balances are derived from entries, never stored.
 - Status changes and their ledger postings happen in the same database transaction.
 - Scheduled jobs are idempotent and record a `JobRun`.

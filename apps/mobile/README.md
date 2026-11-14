@@ -25,6 +25,9 @@ Sign in with the demo account (`demo@cashflow.local` / `demo-password-123`) or t
 "Use the demo account": Blue Door Bakery, with an active plan and three months of history.
 Every other state has its own login, reached through the dev menu.
 
+The app has been exercised on Expo web and in the phone frame below. It has not been run as a
+native build on an iOS or Android simulator or device, so treat native as untested.
+
 ## Previewing on a phone size
 
 The owner reviews the app at phone width. With `./dev` running, open

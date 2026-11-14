@@ -5,9 +5,19 @@ own and has not been altered, and what it does when it cannot tell. The checks t
 and what each one does to a decision, are in [`UNDERWRITING.md`](UNDERWRITING.md),
 "Veracity". This note covers the connections.
 
-Everything here runs on sandbox providers by default. The real adapters are compile-only
-skeletons that refuse to start without explicit configuration, and nothing in this
-repository has been exercised against a real platform, aggregator, or bank.
+**In short**
+
+- CashFlow uses only data it pulled itself, through a connection the owner authorized. No
+  uploaded statements, no credentialed bank login, no merchant passwords.
+- Three access methods: direct read-only OAuth (Square, Shopify, Stripe, Clover), CashFlow's own
+  read-only seat (Toast), and a bank data aggregator. The method sets the trust tier.
+- Tokens are sealed with AES-256-GCM, bound to the business, and never returned, logged or
+  audited.
+- Every pull is an append-only snapshot with a sha256, and every decision records the
+  snapshots it read. Stale data is pulled again before a decision.
+- Everything runs on sandbox providers by default. The real adapters are compile-only
+  skeletons that refuse to start without explicit configuration, and none has been exercised
+  against a real platform, aggregator, or bank.
 
 ## The rule: we pull it ourselves, or we do not use it
 
@@ -84,9 +94,9 @@ present them as one list of connections.
   job, and on demand before a pull. A refused refresh marks the connection `REAUTH_REQUIRED`.
 - Disconnecting revokes at the platform (or the aggregator) and deletes the tokens. The row
   and its snapshots stay, as evidence.
-- `providerAccountToken` on a bank link is the payments processor's debit token, which
-  existed before this phase. It is still stored as an opaque string and never returned; it is
-  not sealed by the vault, because the payments provider owns it. See "For a production
+- `providerAccountToken` on a bank link is the payments processor's debit token. It is stored
+  as an opaque string and never returned; it is not sealed by the vault, because the payments
+  provider owns it. See "For a production
   deployment" below.
 
 ## OAuth, as built
@@ -138,7 +148,8 @@ The design a real puller must follow:
   counts and the failure reason), and the snapshot is kept.
 - **Terms.** Automated access through a seat must be permitted by the platform's terms of
   service and any partner agreement. That is a question for counsel before a single real pull
-  (see below, and question 22 in [`COMPLIANCE.md`](../../COMPLIANCE.md)). A platform partnership with API access replaces the seat as soon as one exists.
+  (see below, and question 22 in [`COMPLIANCE.md`](../../COMPLIANCE.md)). A platform
+  partnership with API access replaces the seat as soon as one exists.
 
 ## Banks
 

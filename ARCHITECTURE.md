@@ -1,16 +1,45 @@
 # Architecture
 
-CashFlow is a pnpm and Turborepo monorepo with four apps and one shared package. This
-document covers how the pieces fit, the provider seams where real money would plug in, the
+How CashFlow fits together: the apps, the provider seams where real money would plug in, the
 data model, the ledger and its postings, the life of a rent payment, the jobs, monitoring,
-dev tools, and security. The underwriting mechanics are in
+security, and dev tools. The underwriting mechanics are in
 [`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md), the credit policy in
 [`apps/api/CREDIT_POLICY.md`](apps/api/CREDIT_POLICY.md), and the open legal questions in
 [`COMPLIANCE.md`](COMPLIANCE.md).
 
-Nothing in this repository moves real money. Every provider that could is a sandbox by
-default, and the real adapters are skeletons that refuse to run without explicit
-configuration.
+**In short**
+
+- A pnpm and Turborepo monorepo: a Fastify API that owns every business rule, an Expo app for
+  owners, a local Next.js operations console for staff, a static marketing site, and one
+  shared package of Zod schemas and money math.
+- Everything that touches money or risk is a provider interface with a sandbox default. Real
+  adapters are skeletons that refuse to run without explicit configuration.
+- Every money movement is a balanced, append-only ledger transaction written in the same
+  database transaction as the status change. Balances are derived, never stored.
+- Thirteen idempotent jobs service the book in a fixed daily order; the last one runs the
+  monitoring rules, which can trip a circuit breaker that sends every approval to a person.
+- Operator routes are off by default and need a role token plus a named actor. Dev tools are
+  off by default and refused in production.
+
+## Contents
+
+- [Packages](#packages)
+- [Conventions that keep money honest](#conventions-that-keep-money-honest)
+- [Terms](#terms)
+- [Provider seams](#provider-seams)
+- [Data model](#data-model)
+- [How a real capital source plugs in](#how-a-real-capital-source-plugs-in)
+- [Ledger](#ledger)
+- [Plan kinds](#plan-kinds) and [pass-through plans](#pass-through-plans)
+- [The life of a rent payment](#the-life-of-a-rent-payment): states, servicing policy, holds,
+  collections and returns, charge-off, [jobs](#jobs)
+- [Identity and screening](#identity-and-screening)
+- [Lease change control](#lease-change-control)
+- [Adverse action notices](#adverse-action-notices)
+- [Monitoring](#monitoring) and [the circuit breaker](#the-circuit-breaker)
+- [Security and access control](#security-and-access-control)
+- [Installment math](#installment-math), [Auth](#auth), [Dev mode](#dev-mode),
+  [Testing](#testing), [Deploying](#deploying)
 
 ```mermaid
 flowchart LR
@@ -79,7 +108,7 @@ The docs use one word for each of these:
 | Refer, referral   | The engine sends an application to a reviewer instead of deciding (`REFER`, status `IN_REVIEW`)                  |
 | Charge-off        | Writing off a plan's unpaid principal at 90 days past due; the balance is then "charged off"                     |
 | Counter offer     | An approval for less than the rent requested. It cannot open a plan                                              |
-| Freeze            | `advanceFrozenAt` on a plan: no new period and no landlord payout until a reviewer lifts it                      |
+| Freeze            | `advanceFrozenAt` on a plan: no new period and no landlord payout until it is lifted (see "Holds")               |
 
 ## Provider seams
 
@@ -149,15 +178,15 @@ sequenceDiagram
 
 `apps/api/prisma/schema.prisma`, Postgres through Prisma. The tables by area:
 
-| Area                  | Tables                                                                                        | Notes                                                                                        |
-| --------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| People and businesses | `User`, `RefreshToken`, `Business`, `BeneficialOwner`, `ScreeningResult`                      | Tax id last four only; owners have no date of birth or government id. Screening is a history |
-| Data connections      | `BankLink`, `CommerceLink`, `ConnectionAuthorization`, `DataSnapshot`                         | Tokens sealed. Every pull is a snapshot with a sha256                                        |
-| Underwriting          | `UnderwritingApplication`, `UnderwritingDecision`, `ApplicationReview`, `AdverseActionNotice` | Decisions are superseded, never rewritten. One current decision per application              |
-| Leases and plans      | `Lease`, `LeaseChange`, `RentPlan`, `PassThroughPeriod`, `GraduationOffer`                    | One pending landlord change per lease. A plan's `kind` is fixed for its life                 |
-| Money movements       | `LandlordDisbursement`, `LandlordPayout`, `Installment`, `Repayment`                          | One `SENT` disbursement per lease and month                                                  |
-| Ledger                | `LedgerAccount`, `LedgerTransaction`, `LedgerEntry`                                           | Balances are derived from entries, never stored                                              |
-| Operations            | `AuditEvent`, `Alert`, `CircuitBreaker`, `JobRun`                                             | The latest `JobRun.asOf` is the simulated clock in dev                                       |
+| Area                  | Tables                                                                                        | Notes                                                                                                                               |
+| --------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| People and businesses | `User`, `RefreshToken`, `Business`, `BeneficialOwner`, `ScreeningResult`                      | Tax id last four only; owners have no date of birth or government id. Screening is a history. An admin's limit cap is on `Business` |
+| Data connections      | `BankLink`, `CommerceLink`, `ConnectionAuthorization`, `DataSnapshot`                         | Tokens sealed. Every pull is a snapshot with a sha256                                                                               |
+| Underwriting          | `UnderwritingApplication`, `UnderwritingDecision`, `ApplicationReview`, `AdverseActionNotice` | Decisions are superseded, never rewritten. One current decision per application                                                     |
+| Leases and plans      | `Lease`, `LeaseChange`, `RentPlan`, `PassThroughPeriod`, `GraduationOffer`                    | One pending landlord change per lease. A plan's `kind` is fixed for its life                                                        |
+| Money movements       | `LandlordDisbursement`, `LandlordPayout`, `Installment`, `Repayment`                          | One `SENT` disbursement per lease and month                                                                                         |
+| Ledger                | `LedgerAccount`, `LedgerTransaction`, `LedgerEntry`                                           | Balances are derived from entries, never stored                                                                                     |
+| Operations            | `AuditEvent`, `Alert`, `CircuitBreaker`, `JobRun`                                             | The latest `JobRun.asOf` is the simulated clock in dev                                                                              |
 
 **Append only, enforced by a trigger** that rejects UPDATE and DELETE: `LedgerEntry`,
 `LedgerTransaction`, `AuditEvent`, `DataSnapshot`, and `AdverseActionNotice`. The last three keep
@@ -440,17 +469,11 @@ plan is in, how much to reserve, and when to charge off. The portfolio simulator
 `apps/api/src/evals/` calls the same functions, so the policy that is evaluated is the policy
 that runs.
 
-| Rule                | Standard policy                                                                                                     |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Grace               | 3 days. An installment is `LATE` from day 4                                                                         |
-| Delinquency buckets | `CURRENT` (nothing past due), `GRACE` (1 to 3 days), `DELINQUENT` (4 to 29), `DEFAULT` (30 and over), `CHARGED_OFF` |
-| Collection attempts | At most 3 per installment per bank account, on days 0, 3, and 6                                                     |
-| Balance check       | Before each scheduled debit. A debit the balance cannot cover is put off a day and is not an attempt                |
-| Stop-advance        | The next landlord payout is held while anything is more than 3 days past due                                        |
-| Release window      | A payout not paid within 5 days of its scheduled date is cancelled, never paid late                                 |
-| Charge-off          | At 90 days past due. The whole unpaid balance is charged off and the plan is closed                                 |
-| Reserve rates       | 0.40% of current principal, 85% of grace, 95% of delinquent, 100% of default. Measured in the evals                 |
-| Return codes        | Retryable (R01, R09), hard (R02, R03, R04, R08, R13, R16, R20), unauthorized (R05, R07, R10, R29)                   |
+The rules themselves (grace, buckets, the debit schedule, the balance check, stop-advance,
+the release window, charge-off, reserve rates and return code classes) are policy, stated
+with their numbers in [`apps/api/CREDIT_POLICY.md`](apps/api/CREDIT_POLICY.md), section 11.
+In brief: 3 days of grace, debits on days 0, 3 and 6, the next payout held while anything is
+more than 3 days past due, a held payout cancelled after 5 days, charge-off at 90 days.
 
 Days past due is the age of a plan's oldest unpaid installment. It is derived from the
 installments on every read and never stored, because it changes at midnight without any
@@ -465,7 +488,7 @@ A payout that falls due is paid, held, or cancelled by `processPayout`:
 - It is **held** (`HELD`, with a reason the owner sees through `GET /v1/rent-plans/:id`)
   while the business is more than 3 days past due on rent already fronted, on any of its
   plans (`PAST_DUE`); while the plan is frozen by a periodic review, an unauthorized return,
-  a returned payout, or a screening hit (`ADVANCE_FROZEN`); while a change to the landlord's
+  a returned payout, a screening hit, or an admin's hold (`ADVANCE_FROZEN`); while a change to the landlord's
   details is inside its cooling-off period (`LEASE_CHANGE_PENDING`); while a rent increase
   waits for a new decision (`RENT_INCREASE_PENDING`); or while the owner has paused the plan
   (`PLAN_PAUSED`). The payout carries a `heldMessage` in plain words for the owner.
@@ -479,9 +502,9 @@ A payout that falls due is paid, held, or cancelled by `processPayout`:
 
 Pausing a plan stops new rent periods. It does not stop collection: installments on rent
 already paid to the landlord are debited on schedule whether the plan is active, paused, or
-closed. A freeze is lifted only by a reviewer, with
-`POST /v1/admin/rent-plans/:id/release-freeze`, or, for a screening freeze, by clearing the
-hit.
+closed. A freeze is lifted only by a person, with
+`POST /v1/admin/rent-plans/:id/release-freeze`: a reviewer for most freezes, an admin for one
+an admin placed (`OPERATOR_HOLD`), and for a screening freeze only by clearing the hit.
 
 ### Collections and returns
 
@@ -760,7 +783,9 @@ rules `createRentPlan` applies on the day.
 
 The breaker trips when a breaker alert opens or rises to critical, not on every run while it
 stays open, so an admin's reset (`POST /v1/admin/circuit-breaker/reset`, with a reason) is not
-undone by the next run. Trip and reset are both audited.
+undone by the next run. An admin can also trip it by hand from the operations console
+(`POST /v1/admin/circuit-breaker/trip`, rule `manual`, with a reason) to pause automatic
+approvals. Trip and reset are both audited.
 
 One thing monitoring cannot see is itself. If the scheduler stops, the `monitor` job stops
 with it and nothing alerts. A production deployment needs a heartbeat checked from outside.
@@ -791,14 +816,15 @@ to start in that mode without `ADMIN_API_TOKEN`. Every request needs:
   characters each and different from one another, compared in constant time.
 - `X-Admin-Actor: <name or email>`: the person acting.
 
-| Role       | Can                                                                                                                                                                                               |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reviewer` | Work the review queue, alerts, lease changes, and screening hits. Release a freeze. Re-send a returned payout. Read the ledger, capital, delinquency, audit trail, breaker and monitoring summary |
-| `admin`    | Everything a reviewer can, plus fund the pool, run jobs, reset the circuit breaker, and clear a screening match                                                                                   |
+| Role       | Can                                                                                                                                                                                                                                               |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reviewer` | Work the review queue (approving a monthly limit up to $10,000), alerts, lease changes, and screening hits. Release a freeze. Re-send a returned payout. Read the ledger, capital, delinquency, jobs, audit trail, breaker and monitoring summary |
+| `admin`    | Everything a reviewer can, plus approve above $10,000, clear a screening match, use the tighten-only controls (trip and reset the circuit breaker, freeze a plan, lower a limit and remove that cap), fund the pool, and run jobs                 |
 
 The identity written to the audit log is the token's role and the name in the header. No
-request body can set it; the review and freeze endpoints that used to take a `reviewer` field
-no longer do. Every state change through these routes writes an audit event.
+request body can set it. Every state change through these routes writes an audit event. The
+full authority matrix, the $10,000 reviewer ceiling, and the tighten-only controls are policy:
+[`apps/api/CREDIT_POLICY.md`](apps/api/CREDIT_POLICY.md), section 9.
 
 This is deliberately small. A token proves a role and is shared by a team; the header is
 asserted by the caller, not proven. That is enough to keep the routes closed and the audit
@@ -813,36 +839,28 @@ comes from many addresses. Both are configurable, and rate limiting is off under
 ### The operations console
 
 `apps/ops` is the staff interface over the operator routes: review queue, alerts, lease
-changes, screening, portfolio, customers, audit log, and the policy in force. It has no
-database and no business rules of its own. It is a Next.js app that runs on a staff machine.
+changes, screening, late plans, portfolio, ledger, jobs, customers, audit log, the policy in
+force, and the admin's tighten-only controls. It has no database and no business rules of its
+own, runs on a staff machine, and is never deployed. How it signs in, seals the session and
+proxies requests is in [`apps/ops/README.md`](apps/ops/README.md). The parts that matter here:
 
-The operator token never reaches browser JavaScript:
-
-1. The sign-in page posts the token and the operator's name to the console's own server
-   (`POST /api/session`). The server checks them against `GET /v1/admin/whoami`, which also
-   says which role the token carries.
-2. On success the server seals `{ token, actor, role, expiresAt }` with AES-256-GCM under a
-   key derived from `OPS_SESSION_SECRET` and sets it as a cookie that is `HttpOnly`,
-   `SameSite=Strict`, and `Secure` unless the host is localhost. The response body carries
-   the name and role only. There is no server-side session store.
-3. Every API call from a page goes to the console's `/api/admin/...`. The handler opens the
-   cookie, attaches `Authorization` and `X-Admin-Actor`, and forwards the request, but only
-   to the routes on its allowlist (`apps/ops/lib/server/routes.ts`). Funding the pool and
-   running jobs are not on it. Browser cookies and headers are not forwarded upstream and
-   upstream headers are not passed back.
-4. A state-changing request must carry an `Origin` that names the console's own host (or
-   `Sec-Fetch-Site: same-origin`), on top of the cookie being `SameSite=Strict`.
-
-The role shown in the console only decides which actions it offers. The API enforces the
-role on every request regardless. Responses are parsed in the browser with the same shared
-Zod schemas the API serializes with.
+- **The operator token never reaches browser JavaScript.** The console's own server checks the
+  token against `GET /v1/admin/whoami`, seals it in an encrypted `HttpOnly`,
+  `SameSite=Strict` cookie, and forwards page requests to the API with the token attached.
+- **An allowlist.** The proxy forwards only the routes in `apps/ops/lib/server/routes.ts`.
+  Funding the pool and running jobs are not on it: the console reads jobs and the ledger but
+  cannot run a job or post an entry.
+- **The API enforces the role.** The role shown in the console only decides which actions it
+  offers. Responses are parsed with the same shared Zod schemas the API serializes with.
 
 The read routes the console needs beyond the queues live in `routes/admin-console.ts` and
-return operator views from `services/operator.ts`. Those views have their own serializers:
-the customer serializers in `serializers.ts` are unchanged, so nothing internal leaks into a
-customer response. The portfolio view reuses the monitoring data layer (`planFacts`,
-`exposureFacts`, the first payment default cohorts) and `gatherPoolState`, so a number on the
-portfolio page is the number an alert was raised on.
+return operator views from `services/operator.ts` and `services/operations.ts`. Those views
+have their own serializers: the customer serializers in `serializers.ts` are unchanged, so
+nothing internal leaks into a customer response. The portfolio view reuses the monitoring data
+layer (`planFacts`, `exposureFacts`, the first payment default cohorts) and `gatherPoolState`,
+so a number on the portfolio page is the number an alert was raised on. The controls live in
+`src/controls/`: each needs a reason, writes an audit event in the same transaction, and only
+makes things stricter.
 
 ## Installment math
 
@@ -905,7 +923,8 @@ without a password, moving the clock, wiping the database. They are kept apart a
   integration tests for screening outcomes, a hit freezing and a clearance releasing a plan,
   a landlord change held through its cooling-off, rent changes, re-sending a returned payout,
   the circuit breaker, monitor idempotency, and the books rules against a ledger made
-  inconsistent on purpose.
+  inconsistent on purpose. `src/controls/controls.int.test.ts` covers the tighten-only
+  controls, their roles and their undo, and the reviewer's dollar ceiling.
 - `apps/mobile`: unit tests for input parsing, the onboarding stage machine, and the dev
   menu's tap detector, persona grouping, flag, and session switch.
 - Dev tools: `apps/api/src/routes/dev.int.test.ts` covers the routes being absent with the
@@ -913,9 +932,13 @@ without a password, moving the clock, wiping the database. They are kept apart a
   reaching their outcomes, per-persona reset isolation, and the clock. `scripts/dev/test`
   covers the CLI's argument, config and board logic.
 
-CI runs lint, typecheck, and all tests on every push with a Postgres service container, then
-brings the API up with `./dev` against a second database and runs `./dev smoke`: the happy
-path over HTTP from a fresh applicant to a balanced trial balance.
+CI (`.github/workflows/ci.yml`) runs lint, typecheck, all tests and the build on every push
+with a Postgres service container, then brings the API up with `./dev` against a second
+database and runs `./dev smoke`: the happy path over HTTP from a fresh applicant to a balanced
+trial balance. The tests include the portfolio gates on a small fixed seed sample
+(`apps/api/src/evals/ci-gates.test.ts`). The full strict evaluation runs in
+`.github/workflows/eval.yml`: nightly, on demand, and on pull requests that touch policy (see
+[`apps/api/evals/README.md`](apps/api/evals/README.md)).
 
 ## Deploying
 

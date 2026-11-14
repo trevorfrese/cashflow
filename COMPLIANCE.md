@@ -3,6 +3,38 @@
 What CashFlow's code does that bears on lending, payments and data law, what it does not do,
 and the questions a lawyer would have to answer before any of it touched a real customer.
 
+**In short**
+
+- Not legal advice, and no real lending ever happened here. Every reading of a law is a
+  working assumption, and there are 27 open questions for counsel (section 14).
+- Built: Regulation B style adverse action (a reason catalog, at most four principal reasons,
+  stored notices with deadlines and monitoring), minimal identity data, KYB and sanctions
+  screening with a 30 day rescreen, read-only data connections with sealed tokens, and ACH
+  return rate monitoring.
+- Not built: email or mail delivery of notices, fair lending testing, an AML program, state
+  commercial financing disclosures, licensing, and real vendors.
+- The biggest open questions: whether the pass-through plan is money transmission (question 1),
+  which state disclosure, licensing and usury rules apply (16 to 18), and how notices must be
+  delivered (4).
+
+## Contents
+
+1. [Scope and disclaimer](#1-scope-and-disclaimer)
+2. [ECOA and Regulation B](#2-ecoa-and-regulation-b)
+3. [FCRA](#3-fcra)
+4. [Fair lending monitoring](#4-fair-lending-monitoring)
+5. [BSA/AML, KYB and sanctions](#5-bsaaml-kyb-and-sanctions)
+6. [Money transmission and the pass-through plan](#6-money-transmission-and-the-pass-through-plan)
+7. [State lending, licensing and disclosure](#7-state-lending-licensing-and-disclosure)
+8. [UDAAP, UDAP and marketing](#8-udaap-udap-and-marketing)
+9. [Data protection](#9-data-protection)
+10. [Payments and Nacha](#10-payments-and-nacha)
+11. [Third party and vendor risk](#11-third-party-and-vendor-risk)
+12. [Operating controls that read a rule](#12-operating-controls-that-read-a-rule)
+13. [Where each per-document list lives](#13-where-each-per-document-list-lives)
+14. [Questions for counsel](#14-questions-for-counsel)
+15. [Sources](#15-sources)
+
 ## 1. Scope and disclaimer
 
 **This is not legal advice.** It is an engineer's map of the rules the product would meet, written
@@ -54,7 +86,7 @@ the pass-through plan is credit is question 2.
 **What is built.** Described in full in [`apps/api/UNDERWRITING.md`](apps/api/UNDERWRITING.md),
 "Reasons and adverse action notices". In short:
 
-- **Reasons.** One catalog of 49 reasons in `packages/shared/src/adverse-action/catalog.ts`, each
+- **Reasons.** One catalog of 51 reasons in `packages/shared/src/adverse-action/catalog.ts`, each
   with plain applicant text and what would change it. Every applicant text is tested against a
   list of internal jargon. The engine chooses at most four principal reasons
   (`selectPrincipalReasons`), following the commentary to 1002.9(b)(2) that more than four is
@@ -465,7 +497,7 @@ comes from in the code or the docs.
     or use a proxy method to test for disparate impact? Arises in: section 4 here.
 14. **AML program.** Does a nonbank commercial lender of this shape need a BSA/AML program, by
     rule, by state license, or by a partner's contract, and would the answer change if the
-    pass-through plan is money transmission? Arises in: section 5 here; the plan's "Known limits".
+    pass-through plan is money transmission? Arises in: section 5 here.
 15. **Sanctions program.** Is a 30 day rescreen with a vendor batch adequate, what is the review
     standard for a possible match, and what are the blocking and reporting steps for a true
     match? Arises in: `CONTROLS_POLICY.rescreenIntervalDays`; section 5 here.

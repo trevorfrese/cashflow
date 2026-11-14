@@ -4,6 +4,10 @@ The API is a single Node process plus Postgres. It runs TypeScript directly with
 Prisma migrations on boot, and runs its scheduled jobs in process. Everything below keeps the
 mock providers, so no real money can move.
 
+The other apps: the marketing site deploys to Vercel ([`../web/README.md`](../web/README.md)),
+the operations console is local only and has no deploy target, and the mobile app builds with
+EAS or `expo run` pointed at the API with `EXPO_PUBLIC_API_URL`.
+
 ## Environment
 
 Copy `.env.example` and set at least:

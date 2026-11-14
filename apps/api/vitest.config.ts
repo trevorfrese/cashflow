@@ -8,6 +8,9 @@ export default defineConfig({
           name: 'unit',
           include: ['src/**/*.test.ts'],
           exclude: ['src/**/*.int.test.ts'],
+          // The eval suites play whole synthetic portfolios forward. They take a second or two
+          // locally and several times that on a shared CI runner, so 5 seconds is too tight.
+          testTimeout: 30_000,
         },
       },
       {

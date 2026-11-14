@@ -12,6 +12,38 @@ provisioning, and change control) is stated on its own in [`CREDIT_POLICY.md`](C
 How the data is obtained is in [`DATA_CONNECTIONS.md`](DATA_CONNECTIONS.md), and the open legal
 questions are in [`COMPLIANCE.md`](../../COMPLIANCE.md). Nothing here is legal advice.
 
+**In short**
+
+- The engine is pure: snapshots of bank and point of sale data in, a decision out (approve,
+  decline, refer, or needs information) with a score, grade, limit, fee, and readable reasons.
+- Integrity checks ask whether the numbers are plausible; veracity checks ask whether the data
+  is the business's own, complete and unaltered. Both decline only where there is no innocent
+  reading and refer anything a person could verify.
+- Pricing is expected loss plus cost of funds, servicing and margin, held between a grade floor
+  and a 4% cap. The limit is the smallest of the request, capacity, observed rent, the ladder,
+  and the business aggregate.
+- Every decline gets at most four principal reasons from one catalog and a stored adverse
+  action notice. Running plans are re-underwritten monthly and frozen on deterioration.
+- Every weight, cutoff and PD was set on a simulation, not on real repayment.
+
+## Contents
+
+- [Why cash flow and not credit](#why-cash-flow-and-not-credit)
+- [Policy versions](#policy-versions) and the [pipeline](#pipeline)
+- [Features](#features), [Scorecard](#scorecard), [Integrity checks](#integrity-checks)
+- [Veracity](#veracity): trust tiers, findings, thresholds
+- [Payment history](#payment-history)
+- [Policy rules](#policy-rules): the cutoff, earlier decline detection
+- [Capacity, pricing, and the limit](#capacity-pricing-and-the-limit)
+- [Escalation and review](#escalation-and-review)
+- [Reasons and adverse action notices](#reasons-and-adverse-action-notices), with the
+  [questions for counsel](#questions-for-counsel)
+- [Pass-through plans](#pass-through-plans), [Graduation](#graduation),
+  [Periodic re-underwriting](#periodic-re-underwriting)
+- [Audit log](#audit-log), [Explainability](#explainability)
+- [Testing with the mock bank](#testing-with-the-mock-bank),
+  [Swapping in real data](#swapping-in-real-data), [What this is not](#what-this-is-not)
+
 ## Why cash flow and not credit
 
 Small businesses are thin files. Many have no business credit history, the owner's
@@ -94,9 +126,9 @@ flowchart LR
 3. **Features** (`features.ts`). Transactions are bucketed into full calendar months and
    daily balances are reconstructed backward from the current balance. Credits the integrity
    checks matched to a same sized transfer out are left out of revenue.
-4. **Integrity checks** (`integrity.ts`). Can the numbers be trusted. See below.
-   4a. **Veracity checks** (`src/veracity/`). Is the data the business's own, complete, and
-   unaltered, and how was it obtained. See "Veracity".
+4. **Integrity and veracity checks.** `integrity.ts` asks whether the numbers can be trusted
+   (see "Integrity checks"); `src/veracity/` asks whether the data is the business's own,
+   complete, and unaltered, and how it was obtained (see "Veracity").
 5. **Scorecard** (`scorecard.ts`). Eight factors, weights summing to 100, piecewise linear
    curves. Every factor emits a human readable reason tagged positive, negative, or
    informational. Version 4 adds a ninth, payment history, outside the weights: it adds or
@@ -134,7 +166,7 @@ and reproducible.
 
 ## Scorecard
 
-| Factor             | v1 weight | v2 to v4 weight | Full marks                                         | Zero                                    |
+| Factor             | v1 weight | v2 to v5 weight | Full marks                                         | Zero                                    |
 | ------------------ | --------: | --------------: | -------------------------------------------------- | --------------------------------------- |
 | Rent affordability |        20 |              10 | Rent at or under 10% of verified revenue           | 35% or more                             |
 | Cash flow coverage |        20 |              15 | Free cash covers the rent 2.0x                     | Under 1.0x                              |
@@ -655,7 +687,8 @@ Each review is an `ApplicationReview` row and produces a new current decision of
 `REVIEW`; the engine's decision stays in the history. A review whose outcome or terms differ
 from the engine's recommendation is an **override**: it needs at least one reason code, is
 marked on the review and the decision, and writes its own audit event. A reviewer's limit may
-not exceed the rent requested, and the fee must be inside the cap. The reviewer is the person
+not exceed the rent requested, the fee must be inside the cap, and a monthly limit above
+$10,000 needs an admin (`reviewerApprovalCeilingCents`, `CREDIT_POLICY.md` section 9). The reviewer is the person
 named in the `X-Admin-Actor` header of the authenticated request, never a field in the body.
 
 An approval is refused while the business has an open screening hit (clear it in the screening
@@ -672,7 +705,8 @@ part 1002, implementing the Equal Credit Opportunity Act) is the model throughou
 ### The reason catalog
 
 `packages/shared/src/adverse-action/catalog.ts` lists every reason the engine, the integrity
-and veracity checks, identity verification and a reviewer can give: 49 entries. Each has a
+and veracity checks, identity verification, a periodic review and a reviewer can give: 51
+entries. Each has a
 stable code (stored on decisions and notices, never renamed), a short title, plain applicant
 text, guidance on what would change the outcome, whether it may be a principal reason on an
 adverse action notice, its kind (decline rule, counter offer, scorecard factor, request for
@@ -845,13 +879,8 @@ Who is offered one (`passThroughEligibility` in `src/underwriting/pass-through.t
 engine decision that is `DECLINED` with at least one capacity reason (too new, revenue too
 low, overdrafts, negative days, rent share, decline in revenue, no free cash flow, score
 below the cutoff, no capacity, fee above the cap, rent below the minimum, exposure limit) and
-no trust reason. Never on a referral, a request for information, a reviewer's decision, or a
-decline with an integrity or veracity knockout, an identity that could not be verified, a
-landlord account that is the applicant's own, or a lease far above the rent the account shows
-(`RENT_NOT_VERIFIED`). A pass-through plan moves the business's money to a payee on its say
-so: anything that questions who the business is or whether the lease is real rules it out.
-
-The plan's terms as policy are in [`CREDIT_POLICY.md`](CREDIT_POLICY.md), section 10.
+no trust reason. What rules it out, and why, and the plan's terms are policy:
+[`CREDIT_POLICY.md`](CREDIT_POLICY.md), section 10.
 
 **For counsel: is the pass-through plan money transmission?** CashFlow receives the business's
 own money and holds it for a few days before paying it on to a third party, the landlord, on the

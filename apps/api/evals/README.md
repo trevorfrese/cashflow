@@ -9,24 +9,41 @@ It draws a synthetic population, runs every applicant through the real `decide()
 by day against simulated bank accounts and a finite capital pool. Nothing touches the
 database, the network, or a clock. The same seeds always give the same report.
 
-**Current state: 11 of 11 gates pass** under `cashflow-v5` (version 4 with graduates of the
-pass-through plan priced on their own PD; version 4 was version 3 plus the payment history
-factor, with credit declines put on the free pass-through plan and graduated from it; see
-"Pass-through and graduation" below). Its origination decisions are version 3's for every
-applicant, so every gated number equals `v3_standard`'s and `v4_standard`'s. Version 3 was version 2 plus the data
-veracity checks on a population extended with connection data, honest messiness, and five more
-fraud archetypes. See "Data veracity" below for what changed and what it cost. The eleventh
-gate, `adverse_action_reasons`, checks that every decline and counter offer gives the applicant
-a catalog reason. The AUC gate is judged on every scored honest applicant, through a
-counterfactual run that funds the declined ones too (0.873 against 0.70). Measured the old way,
-on funded plans only, it is 0.677 today, and that figure is still in the report, ungated. Read
-"Where the gates stood after Phase R3" and "The AUC gate: through the door" below before relying
-on any number here. The current numbers are always the ones in [`report.md`](report.md); figures
-quoted in this file from earlier phases are labeled with the phase.
+**In short**
 
-How the gates are used to control policy changes is in
-[`../CREDIT_POLICY.md`](../CREDIT_POLICY.md), "Change control". The population is synthetic, and
-nothing here is a forecast of real performance.
+- **Current state: 11 of 11 gates pass** under `cashflow-v5`, the gated configuration
+  (`v5_standard`). Its origination decisions are version 3's for every applicant, so every
+  gated number equals `v3_standard`'s and `v4_standard`'s; what changed since is the free
+  pass-through plan, graduation from it (version 4), and graduates priced on their own PD
+  (version 5). See "Pass-through and graduation".
+- Version 3 added the data veracity checks, measured on a population extended with
+  connection data, honest messiness, and five more fraud archetypes. See "Data veracity".
+- The AUC gate is judged on every scored honest applicant, through a counterfactual run that
+  funds the declined ones too (0.873 against a 0.70 floor). Measured the old way, on funded
+  plans only, it is 0.677, still reported and ungated. Read "Where the gates stood after Phase
+  R3" and "The AUC gate: through the door" before relying on it.
+- The eleventh gate, `adverse_action_reasons`, checks that every decline and counter offer
+  gives the applicant a catalog reason.
+- The current numbers are always the ones in [`report.md`](report.md). Figures quoted here from
+  earlier phases are labeled with the phase. The population is synthetic, and nothing here is
+  a forecast of real performance.
+
+How the gates control policy changes is in [`../CREDIT_POLICY.md`](../CREDIT_POLICY.md),
+"Change control".
+
+## Contents
+
+- [Run it](#run-it), including CI
+- [What is gated, and what it is compared with](#what-is-gated-and-what-it-is-compared-with)
+- [Where the gates stood after Phase R3](#where-the-gates-stood-after-phase-r3-cashflow-v2)
+- [How it works](#how-it-works)
+- [Gates](#gates-balanced-risk-appetite) and [the AUC gate](#the-auc-gate-through-the-door)
+- [Pass-through and graduation](#pass-through-and-graduation)
+- [Data veracity](#data-veracity)
+- [Assumptions](#assumptions) and [the population](#the-population)
+- [Calibrating the PD table](#calibrating-the-pd-table)
+- [Roll rates and the loss reserve](#roll-rates-and-the-loss-reserve)
+- [Sensitivities](#sensitivities) and [Limits](#limits)
 
 ## Run it
 
@@ -94,16 +111,19 @@ in the order the jobs run, and models the product as built:
 - **Charge-off.** At 90 days past due the whole unpaid balance of the plan is charged off
   and the plan is closed.
 
-The same applicants are also run under five comparison configurations:
+The same applicants are also run under six comparison configurations:
 
-| Configuration | Decisions     | Servicing | Why it is there                                                                                                |
-| ------------- | ------------- | --------- | -------------------------------------------------------------------------------------------------------------- |
-| `v1_baseline` | `cashflow-v1` | baseline  | The launch policy as first measured                                                                            |
-| `v1_standard` | `cashflow-v1` | standard  | What the servicing change buys on its own                                                                      |
-| `v2_baseline` | `cashflow-v2` | baseline  | What the credit policy buys on its own                                                                         |
-| `v2_standard` | `cashflow-v2` | standard  | Both, before the veracity checks                                                                               |
-| `v3_standard` | `cashflow-v3` | standard  | Plus the veracity checks, without pass-through plans                                                           |
-| `v4_standard` | `cashflow-v4` | standard  | The gated configuration: plus payment history, pass-through plans and graduation. The gates decide on this one |
+| Configuration | Decisions     | Servicing | Why it is there                                                                                                           |
+| ------------- | ------------- | --------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `v1_baseline` | `cashflow-v1` | baseline  | The launch policy as first measured                                                                                       |
+| `v1_standard` | `cashflow-v1` | standard  | What the servicing change buys on its own                                                                                 |
+| `v2_baseline` | `cashflow-v2` | baseline  | What the credit policy buys on its own                                                                                    |
+| `v2_standard` | `cashflow-v2` | standard  | Both, before the veracity checks                                                                                          |
+| `v3_standard` | `cashflow-v3` | standard  | Plus the veracity checks, without pass-through plans                                                                      |
+| `v4_standard` | `cashflow-v4` | standard  | Plus payment history, pass-through plans and graduation, with graduates priced like first time applicants. Base case only |
+
+The gated configuration, `v5_standard`, is `cashflow-v5` under standard servicing, with
+pass-through plans and graduation, and graduates priced on their own PD. The gates decide on it.
 
 A single run of 2,000 applicants funds about 30 bad plans, and rank ordering among funded
 plans in particular moves several points from seed to seed. So the default run uses five seeds, each a separate population with
@@ -136,8 +156,8 @@ thing takes a few minutes.
 | `refer_rate`             |                               1.7% |                                    1.7% | PASS   |
 
 The `auc` row compares two different measurements. Until the gate was moved it was judged on
-funded plans only, and on that measure it is 0.669 (0.569 to 0.714) today, under the same
-0.70 floor: a fail. The rest of this section is the history of that figure, which the report
+funded plans only, and on that measure it was 0.669 (0.569 to 0.714) after Phase R3, under
+the same 0.70 floor: a fail. The rest of this section is the history of that figure, which the report
 still carries as "funded only".
 
 Nothing about the credit policy or the population changed between the two columns. What
@@ -340,8 +360,8 @@ Definitions used by the gates and the report:
 
 ## Pass-through and graduation
 
-Phase 6 added the free pass-through plan to the gated configuration only (`v4_standard`).
-Every applicant the engine declines for credit capacity alone gets one: the rent is debited
+Phase 6 added the free pass-through plan to the configurations from version 4 on
+(`v4_standard` and the gated `v5_standard`). Every applicant the engine declines for credit capacity alone gets one: the rent is debited
 five business days before the due date after the balance check, retried while it can still
 settle, and the landlord is paid on the due date only from what was collected. A month with
 nothing collected in time is missed, and the business pays the landlord itself. The day a

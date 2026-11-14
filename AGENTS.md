@@ -44,6 +44,34 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:4000/v1/businesses
 
 Operator routes need `ADMIN_API_TOKEN` from `apps/api/.env` and an `X-Admin-Actor` header. Read the token from the file into a variable; do not echo it.
 
+## Dev commands
+
+Every `./dev` command. `./dev help` prints the same list with every flag.
+
+| Command                          | What it does                                                                |
+| -------------------------------- | --------------------------------------------------------------------------- |
+| `./dev`                          | Set up and start everything. Ctrl+C stops it                                |
+| `./dev help`                     | Every command and flag                                                      |
+| `./dev --only api,mobile`        | Start a subset: `api`, `mobile`, `ops`, `web`. Or leave one out: `--no-web` |
+| `./dev --detach`                 | Start in the background and return when healthy (automatic without a TTY)   |
+| `./dev --reseed`                 | Wipe the database and rebuild the demo data on the way up                   |
+| `./dev --no-dev-tools`           | Run with the dev menu, personas and simulated clock off                     |
+| `./dev --open`                   | Open the dev home page when everything is up                                |
+| `./dev --timeout 300`            | Seconds to wait for services to be healthy (default 240)                    |
+| `./dev status [--json]`          | The status board again, or the same as JSON                                 |
+| `./dev wait`                     | Block until every started service is healthy                                |
+| `./dev logs api --tail 50`       | A service log. `--follow` to keep reading. Files are in `.dev/logs/`        |
+| `./dev stop`                     | Stop what `./dev` started, and nothing else                                 |
+| `./dev personas [--json]`        | Every persona and its state right now                                       |
+| `./dev session <persona>`        | Sign in as a persona. `--token` prints an access token for curl             |
+| `./dev clock`                    | The simulated date                                                          |
+| `./dev advance --days 7`         | Move the clock, running every job for each day. Or `--to DATE`, `--next P`  |
+| `./dev reset [--persona <key>]`  | Rebuild the demo data, or one persona                                       |
+| `./dev smoke [--reset] [--json]` | The happy path scripted over HTTP, register to trial balance. Fails loudly  |
+| `./dev doctor`                   | The preflight checks only                                                   |
+
+Ports and the database name come from the environment when you need a second copy or a port is taken: `API_PORT`, `MOBILE_PORT`, `OPS_PORT`, `WEB_PORT`, `DEV_HOME_PORT`, `POSTGRES_PORT`, `POSTGRES_DB`, or `DATABASE_URL` for a Postgres you already run.
+
 ## Logs
 
 `.dev/logs/<service>.log` for `api`, `mobile`, `ops`, `web`, plus `setup.log` (install, migrate, seed output) and `supervisor.log`. `./dev logs api --tail 100` prints one without ANSI codes. State is in `.dev/state.json`. All of `.dev/` is gitignored.
@@ -59,6 +87,8 @@ After a change to credit policy, pricing, the PD table or servicing rules (a few
 ```sh
 pnpm --filter @cashflow/api eval:portfolio --strict
 ```
+
+`pnpm test` already runs the gates on a small fixed seed sample (`apps/api/src/evals/ci-gates.test.ts`). The full strict run is `.github/workflows/eval.yml`, which also fails if the committed report or baseline is stale.
 
 One test file:
 

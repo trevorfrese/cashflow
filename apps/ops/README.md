@@ -43,7 +43,7 @@ The browser never holds the operator token in anything JavaScript can read.
 
 **What the browser can see:** your name, your role, when the session ends, and the API's JSON responses. **What it cannot:** the token, in any response body, header, or readable storage. The console uses no localStorage or sessionStorage.
 
-What this does not do: the token is shared by a team and the name is typed, not proven. Per person credentials (SSO) are what a real deployment needs, as `ARCHITECTURE.md` says of the API. There is no rate limit on the console's own sign in beyond the API's. A Content Security Policy beyond `frame-ancestors 'none'` is not set.
+What this does not do: the token is shared by a team and the name is typed, not proven. Per person credentials (SSO) are what a real deployment needs, as `ARCHITECTURE.md` says of the API. There is no rate limit on the console's own sign in beyond the API's. A Content Security Policy beyond `frame-ancestors 'none'` is not set. Alerts are worked in the console only: nobody is assigned one, and nothing is pushed to email, chat or a pager.
 
 ## Pages
 

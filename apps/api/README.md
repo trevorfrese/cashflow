@@ -12,6 +12,16 @@ The other API documents: [`CREDIT_POLICY.md`](CREDIT_POLICY.md) (the policy),
 (how data is obtained), [`evals/README.md`](evals/README.md) (the portfolio evaluation), and
 [`DEPLOY.md`](DEPLOY.md).
 
+## Contents
+
+- [Run it](#run-it), [Commands](#commands), [Environment](#environment), [Layout](#layout)
+- [Jobs](#jobs), with the reasons, notices, pass-through and sandbox payment notes
+- [Sandbox identity keywords](#sandbox-identity-keywords) and
+  [sandbox data connections](#sandbox-data-connections)
+- [Owner routes](#owner-routes) and [operator routes](#operator-routes)
+- [Dev tools](#dev-tools)
+- [Rate limiting and lockout](#rate-limiting-and-lockout)
+
 ## Run it
 
 From the repo root, with Docker running:
@@ -108,21 +118,21 @@ src/test/                integration test harness
 idempotent for a given date and records a `JobRun`. The reasoning for the order is in
 `src/jobs/index.ts`; the rules are in `ARCHITECTURE.md` under "The life of a rent payment".
 
-| Order | Name                     | What it does                                                                                                 |
-| ----: | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
-|     1 | `rescreen`               | Screens active businesses, owners and landlords again once their screening is 30 days old                    |
-|     2 | `lease-changes`          | Applies landlord and payout changes whose cooling-off period has ended                                       |
-|     3 | `refresh-connections`    | Refreshes tokens near expiry and pulls businesses with an active plan again weekly                           |
-|     4 | `reunderwrite`           | Monthly review of each active financed plan on fresh bank data. Freezes a plan that has deteriorated         |
-|     5 | `refresh-eligibility`    | Graduation: expires offers, opens accepted ones, re-underwrites pass-through plans with 3 on time months     |
-|     6 | `reconcile-payments`     | Polls the payments provider for returns and reverses each returned installment, payout or pass-through debit |
-|     7 | `age-receivables`        | Delinquency bucket per plan, `LATE` marks, audit event on each change, charge-off at 90 days past due        |
-|     8 | `generate-periods`       | Next month's payout and installments, and next month's pass-through month, 30 days ahead                     |
-|     9 | `process-payouts`        | Pays, holds, releases, or cancels each landlord payout that is due; settles and pays pass-through months     |
-|    10 | `collect-installments`   | Scheduled debits (days 0, 3, and 6, after a balance check), the cash sweep, then pass-through collections    |
-|    11 | `provision`              | Sets the allowance for credit losses by bucket. Posts on the first run of each calendar month                |
-|    12 | `adverse-action-notices` | Notices that fall due on a date: expired counter offers, incomplete applications, any decline without one    |
-|    13 | `monitor`                | Runs every monitoring rule, opens and resolves alerts, trips the circuit breaker on a critical breach        |
+| Order | Name                     | What it does                                                                                                                     |
+| ----: | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+|     1 | `rescreen`               | Screens active businesses, owners and landlords again once their screening is 30 days old                                        |
+|     2 | `lease-changes`          | Applies landlord and payout changes whose cooling-off period has ended                                                           |
+|     3 | `refresh-connections`    | Refreshes tokens near expiry and pulls businesses with an active plan again weekly                                               |
+|     4 | `reunderwrite`           | Monthly review of each active financed plan on fresh data. Freezes a deteriorated or untrusted plan, with a `PLAN_FROZEN` notice |
+|     5 | `refresh-eligibility`    | Graduation: expires offers, opens accepted ones, re-underwrites pass-through plans with 3 on time months                         |
+|     6 | `reconcile-payments`     | Polls the payments provider for returns and reverses each returned installment, payout or pass-through debit                     |
+|     7 | `age-receivables`        | Delinquency bucket per plan, `LATE` marks, audit event on each change, charge-off at 90 days past due                            |
+|     8 | `generate-periods`       | Next month's payout and installments, and next month's pass-through month, 30 days ahead                                         |
+|     9 | `process-payouts`        | Pays, holds, releases, or cancels each landlord payout that is due; settles and pays pass-through months                         |
+|    10 | `collect-installments`   | Scheduled debits (days 0, 3, and 6, after a balance check), the cash sweep, then pass-through collections                        |
+|    11 | `provision`              | Sets the allowance for credit losses by bucket. Posts on the first run of each calendar month                                    |
+|    12 | `adverse-action-notices` | Notices that fall due on a date: expired counter offers, incomplete applications, any decline without one                        |
+|    13 | `monitor`                | Runs every monitoring rule, opens and resolves alerts, trips the circuit breaker on a critical breach                            |
 
 `refresh-eligibility` re-underwrites a pass-through customer at most once a calendar month
 (the `ELIGIBILITY_REVIEW` decision is keyed by application and month with a unique index),
@@ -156,14 +166,9 @@ contains `return_r03` has its landlord payout sent back. The mock remembers pend
 for the life of one process, so they show up when the jobs run inside the API server, the
 seed, or a test, and not across separate `job:run` invocations.
 
-The seed builds every persona, one business in each state (the list is in
-[`AGENTS.md`](../../AGENTS.md), "Personas"). For example: Blue Door Bakery is current, Cedar
-Street Cycles is delinquent with a held payout, Juniper Print Studio was charged off and has
-since paid one of its two charged off installments, Alder & Ash Florist has a landlord payout
-change inside its cooling-off period with the payout held, Meridian Supply is in review on a
-possible screening match, and Tidewater Sign Works has been in review for 34 days. The seed
-replays the `monitor` job with the others, so the open alerts (at least one of each severity)
-were raised by the rules, not inserted.
+The seed builds every persona, one business in each state (the table is in
+[`AGENTS.md`](../../AGENTS.md), "Personas"). It replays the `monitor` job with the others, so
+the open alerts (at least one of each severity) were raised by the rules, not inserted.
 
 ## Sandbox identity keywords
 
@@ -258,7 +263,7 @@ the full contract is at `/docs`.
 | Bank           | `POST /bank-links/link-token`, `POST /bank-links`, `GET /businesses/:id/bank-links`                                                                                                                                                                                                                                                                                                                   |
 | Point of sale  | `POST /connections/oauth/start`, `POST /connections/oauth/mock-authorize` (sandbox), `POST /connections/oauth/callback`, `POST /connections/seats`, `POST /connections/:id/verify-seat`, `POST /connections/:id/disconnect`, `GET /connections/:id`, `GET /businesses/:id/connections`, and the older `POST /commerce-links/link-token`, `POST /commerce-links`, `GET /businesses/:id/commerce-links` |
 | Applications   | `POST /underwriting/applications`, `POST /underwriting/applications/:id/submit`, `GET /underwriting/applications/:id`, `GET /underwriting/applications/:id/explanation`, `GET /underwriting/applications/:id/notices`, `POST /underwriting/applications/:id/decline-offer`, `GET /businesses/:id/applications`                                                                                        |
-| Leases         | `POST /leases`, `GET /businesses/:id/leases`, `GET /leases/:id`, `PATCH /leases/:id`, `POST /leases/:id/pending-change/cancel`                                                                                                                                                                                                                                                                        |
+| Leases         | `POST /leases`, `GET /businesses/:id/leases`, `GET /leases/:id`, `PATCH /leases/:id` (returns `pendingChange` and `pendingRentIncrease`), `POST /leases/:id/pending-change/cancel`                                                                                                                                                                                                                    |
 | Financed plans | `POST /rent-plans`, `GET /businesses/:id/rent-plans`, `GET /rent-plans/:id`, `PATCH /rent-plans/:id` (pause, resume, close, cadence), `GET /rent-plans/:id/installments`, `GET /rent-plans/:id/payouts`, `GET /rent-plans/:id/repayments`, `POST /repayments` (a manual payment)                                                                                                                      |
 | Pass-through   | `GET /underwriting/applications/:id/pass-through`, `POST /pass-through-plans`, `GET /businesses/:id/payment-history`, `POST /graduation-offers/:id/accept`                                                                                                                                                                                                                                            |
 | Health         | `GET /health`, at the root rather than under `/v1`, with no token                                                                                                                                                                                                                                                                                                                                     |
@@ -281,35 +286,40 @@ are compared in constant time. The `.env.example` values are placeholders that o
 local copy start. The role and the header name are what the audit log records; no request
 body can say who is acting.
 
-| Route                                          | Role     | What it does                                                                                     |
-| ---------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------ |
-| `GET /v1/admin/whoami`                         | reviewer | The role and actor the API resolved                                                              |
-| `POST /v1/admin/jobs/run`                      | admin    | Run all jobs as of `{ asOf }`, or one with `{ only }`                                            |
-| `POST /v1/admin/capital/fund`                  | admin    | Add capital to the mock pool                                                                     |
-| `POST /v1/admin/circuit-breaker/reset`         | admin    | Reset the circuit breaker, with a reason                                                         |
-| `GET /v1/admin/circuit-breaker`                | reviewer | Whether it is tripped, by which rule, and when                                                   |
-| `GET /v1/admin/monitoring/summary`             | reviewer | Open alerts by severity, category and type, the breaker, the last run of every job and rule      |
-| `GET /v1/admin/alerts`                         | reviewer | List, filtered by `status`, `severity`, `category`, `type`, `subjectType`, `subjectId`; paged    |
-| `GET /v1/admin/alerts/:id`                     | reviewer | One alert with its subject, its rule, related alerts, and the audit trail                        |
-| `POST /v1/admin/alerts/:id/acknowledge`        | reviewer | Acknowledge, with optional notes                                                                 |
-| `POST /v1/admin/alerts/:id/resolve`            | reviewer | Resolve with a disposition and notes                                                             |
-| `GET /v1/admin/lease-changes`                  | reviewer | Landlord and payout changes, `PENDING` by default                                                |
-| `POST /v1/admin/lease-changes/:id/decide`      | reviewer | Approve a pending change early, or reject it                                                     |
-| `GET /v1/admin/screening/hits`                 | reviewer | Screening hits: `open` by default, or `cleared`, or `all`                                        |
-| `POST /v1/admin/screening/:id/clear`           | reviewer | Clear a hit with a reason. A `MATCH` needs the admin role                                        |
-| `GET /v1/admin/businesses/:id/identity`        | reviewer | Verification state of a business and its owners                                                  |
-| `GET /v1/admin/reviews`                        | reviewer | Applications the engine referred, with its recommendation, the triggers, and the integrity flags |
-| `POST /v1/admin/applications/:id/review`       | reviewer | Record a decision: `{ decision, reasonCodes, notes }`. See `UNDERWRITING.md`                     |
-| `POST /v1/admin/rent-plans/:id/release-freeze` | reviewer | Lift a freeze, with `{ reason }`. Refused while a screening hit is open                          |
-| `POST /v1/admin/payouts/:id/resend`            | reviewer | Send a returned landlord payout again, once corrected details have applied                       |
-| `GET /v1/admin/delinquency`                    | reviewer | Plans and principal by bucket, the allowance, charge-offs, recoveries, held payouts              |
-| `GET /v1/admin/ledger/trial-balance`           | reviewer | Every account with debits, credits, and balance                                                  |
-| `GET /v1/admin/ledger/accounts`                | reviewer | The chart of accounts                                                                            |
-| `GET /v1/admin/capital`                        | reviewer | The pool's available balance                                                                     |
-| `GET /v1/admin/audit-events`                   | reviewer | The audit trail for one record: `?subjectType=...&subjectId=...`                                 |
+| Route                                            | Role     | What it does                                                                                            |
+| ------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------- |
+| `GET /v1/admin/whoami`                           | reviewer | The role and actor the API resolved                                                                     |
+| `POST /v1/admin/jobs/run`                        | admin    | Run all jobs as of `{ asOf }`, or one with `{ only }`                                                   |
+| `POST /v1/admin/capital/fund`                    | admin    | Add capital to the mock pool                                                                            |
+| `POST /v1/admin/circuit-breaker/trip`            | admin    | Pause new automatic approvals: trip the breaker by hand (rule `manual`), with a reason                  |
+| `POST /v1/admin/circuit-breaker/reset`           | admin    | Reset the circuit breaker, with a reason                                                                |
+| `POST /v1/admin/rent-plans/:id/freeze`           | admin    | Freeze a plan's next period (`OPERATOR_HOLD`), with a reason. Stores a `PLAN_FROZEN` notice             |
+| `GET /v1/admin/businesses/:id/limit`             | reviewer | The approved limit, any admin cap on it, and the limit in force                                         |
+| `POST /v1/admin/businesses/:id/limit/lower`      | admin    | Cap the limit below the one in force, with a reason. A value at or above it is refused                  |
+| `POST /v1/admin/businesses/:id/limit/remove-cap` | admin    | Take the cap off: the decision's limit applies again                                                    |
+| `GET /v1/admin/circuit-breaker`                  | reviewer | Whether it is tripped, by which rule, and when                                                          |
+| `GET /v1/admin/monitoring/summary`               | reviewer | Open alerts by severity, category and type, the breaker, the last run of every job and rule             |
+| `GET /v1/admin/alerts`                           | reviewer | List, filtered by `status`, `severity`, `category`, `type`, `subjectType`, `subjectId`; paged           |
+| `GET /v1/admin/alerts/:id`                       | reviewer | One alert with its subject, its rule, related alerts, and the audit trail                               |
+| `POST /v1/admin/alerts/:id/acknowledge`          | reviewer | Acknowledge, with optional notes                                                                        |
+| `POST /v1/admin/alerts/:id/resolve`              | reviewer | Resolve with a disposition and notes                                                                    |
+| `GET /v1/admin/lease-changes`                    | reviewer | Landlord and payout changes, `PENDING` by default                                                       |
+| `POST /v1/admin/lease-changes/:id/decide`        | reviewer | Approve a pending change early, or reject it                                                            |
+| `GET /v1/admin/screening/hits`                   | reviewer | Screening hits: `open` by default, or `cleared`, or `all`                                               |
+| `POST /v1/admin/screening/:id/clear`             | reviewer | Clear a hit with a reason. A `MATCH` needs the admin role                                               |
+| `GET /v1/admin/businesses/:id/identity`          | reviewer | Verification state of a business and its owners                                                         |
+| `GET /v1/admin/reviews`                          | reviewer | Applications the engine referred, with its recommendation, the triggers, and the integrity flags        |
+| `POST /v1/admin/applications/:id/review`         | reviewer | Record a decision: `{ decision, reasonCodes, notes }`. An approval above $10,000 a month needs an admin |
+| `POST /v1/admin/rent-plans/:id/release-freeze`   | reviewer | Lift a freeze, with `{ reason }`. An admin's hold needs an admin. Refused while a screening hit is open |
+| `POST /v1/admin/payouts/:id/resend`              | reviewer | Send a returned landlord payout again, once corrected details have applied                              |
+| `GET /v1/admin/delinquency`                      | reviewer | Plans and principal by bucket, the allowance, charge-offs, recoveries, held payouts                     |
+| `GET /v1/admin/ledger/trial-balance`             | reviewer | Every account with debits, credits, and balance                                                         |
+| `GET /v1/admin/ledger/accounts`                  | reviewer | The chart of accounts                                                                                   |
+| `GET /v1/admin/capital`                          | reviewer | The pool's available balance                                                                            |
+| `GET /v1/admin/audit-events`                     | reviewer | The audit trail for one record: `?subjectType=...&subjectId=...`                                        |
 
-The operations console (`apps/ops`) reads through these as well. They are all reads, in
-`src/routes/admin-console.ts`, and their responses are operator views built in
+The operations console (`apps/ops`) uses the routes above and these reads, in
+`src/routes/admin-console.ts`. They their responses are operator views built in
 `src/services/operator.ts`: they carry what the customer serializers leave out (the engine's
 terms on a referral, integrity flags, the fee build-up, screening detail, policy numbers), so
 no customer route uses them.
@@ -326,12 +336,11 @@ no customer route uses them.
 | `GET /v1/admin/portfolio`                    | reviewer | The live book: delinquency, pool and utilization, concentration against the caps, first payment default by origination month                                   |
 | `GET /v1/admin/policy`                       | reviewer | The credit, servicing, controls, and monitoring numbers in force                                                                                               |
 | `GET /v1/admin/policy/evaluation`            | reviewer | Gate results of the last default evaluation run, read from `evals/baseline.json`. Simulation, not the live book                                                |
+| `GET /v1/admin/delinquency/plans`            | reviewer | Every plan with anything past due or out of the current bucket: days past due, amount, held payouts and their release date                                     |
+| `GET /v1/admin/jobs`                         | reviewer | Each scheduled job's health (OK, running, failed, late, never run) and its recent runs                                                                         |
 
-`GET /v1/admin/reviews` also returns `ageDays` and `decisionDueOn` on each item.
-
-Owner routes added in this area: `PATCH /v1/leases/:id` now returns `pendingChange` and
-`pendingRentIncrease` (see "Lease change control" in `ARCHITECTURE.md`), and
-`POST /v1/leases/:id/pending-change/cancel` cancels a pending landlord change.
+`GET /v1/admin/reviews` also returns `ageDays` and `decisionDueOn` on each item. Who may do
+what, and why, is policy: [`CREDIT_POLICY.md`](CREDIT_POLICY.md), section 9.
 
 ## Dev tools
 
@@ -344,7 +353,7 @@ private network. `./dev` turns the flag on in the `.env` it generates.
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `GET /v1/dev/personas`               | Every persona: what it demonstrates, its state now, its next event, and the preset inputs of a fresh applicant |
 | `POST /v1/dev/personas/:key/session` | Sign in as a persona. The same session shape as `/v1/auth/login`, plus the persona and the screen to land on   |
-| `POST /v1/dev/personas/:key/reset`   | Rebuild one persona as a new account and sign in as it. 409 for the four personas that are replayed history    |
+| `POST /v1/dev/personas/:key/reset`   | Rebuild one persona as a new account and sign in as it. 409 for the seven personas that are replayed history   |
 | `GET /v1/dev/clock`                  | The simulated date, the real date, and the days between                                                        |
 | `POST /v1/dev/clock/advance`         | `{ days }`, `{ toDate }` or `{ toNextEventFor }`. Runs every job for each day crossed and returns what changed |
 | `POST /v1/dev/reset`                 | Wipe everything, rebuild every persona as of the real date. The clock goes back with it                        |

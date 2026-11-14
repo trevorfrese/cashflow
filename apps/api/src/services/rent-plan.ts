@@ -10,7 +10,9 @@ import type { AdminIdentity, CashFlowSummary } from '@cashflow/shared';
 
 import { effectiveAt } from '../dates.ts';
 import type { Db, Tx } from '../db.ts';
-import { conflict, forbidden, notFound, unprocessable } from '../errors.ts';
+import { cappedLimitCents } from '../controls/limit-cap.ts';
+import { OPERATOR_FREEZE_REASON } from '../controls/operator-actions.ts';
+import { AppError, conflict, forbidden, notFound, unprocessable } from '../errors.ts';
 import { ensureReceivableAccount } from '../ledger/accounts.ts';
 import type { Providers } from '../providers/index.ts';
 import { checkNewPlan } from '../underwriting/exposure.ts';
@@ -163,7 +165,12 @@ export async function createRentPlanTx(tx: Tx, providers: Providers, args: Creat
   if (application.status !== 'APPROVED' || !decision || decision.outcome !== 'APPROVED') {
     throw unprocessable('APPLICATION_NOT_APPROVED', 'Application has not been approved');
   }
-  const limit = decision.approvedMonthlyLimitCents ?? 0;
+  // An admin's cap on the business, if any, can only lower the decision's limit.
+  const limit = await cappedLimitCents(
+    tx,
+    lease.businessId,
+    decision.approvedMonthlyLimitCents ?? 0,
+  );
   if (lease.monthlyRentCents > limit) {
     throw unprocessable('RENT_OVER_LIMIT', 'Monthly rent exceeds the approved limit', {
       monthlyRentCents: lease.monthlyRentCents,
@@ -294,6 +301,15 @@ export async function releaseAdvanceFreeze(
     if (plan.status === 'CLOSED') throw unprocessable('PLAN_CLOSED', 'This plan is closed');
     if (plan.advanceFrozenAt === null) {
       throw unprocessable('PLAN_NOT_FROZEN', 'This plan is not frozen');
+    }
+    // A freeze an admin set by hand is lifted by an admin: a reviewer cannot undo a control
+    // that was put on above their authority.
+    if (plan.advanceFrozenReason === OPERATOR_FREEZE_REASON && args.identity.role !== 'admin') {
+      throw new AppError(
+        403,
+        'ADMIN_FREEZE',
+        'An admin froze this plan by hand. Only an admin can release it',
+      );
     }
     // A screening hit is lifted by clearing the hit, which records why it is not the party.
     // Releasing the freeze around it would leave the hit open and the plan paying.

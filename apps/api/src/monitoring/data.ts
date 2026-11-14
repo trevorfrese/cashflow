@@ -328,9 +328,17 @@ async function booksFacts(tx: Tx): Promise<BooksFact> {
     );
   }
   // A pass-through collection that came back after its landlord was paid is owed on the
-  // receivable account until the business pays it.
+  // receivable account until the business pays it. Since the receivable is serviced as an
+  // installment (counted above), only a month returned before that existed counts here.
+  const serviced = await tx.landlordPayout.findMany({
+    where: { passThroughPeriodId: { not: null } },
+    select: { passThroughPeriodId: true },
+  });
   const returnedAfterPayout = await tx.passThroughPeriod.findMany({
-    where: { status: 'RETURNED_AFTER_PAYOUT' },
+    where: {
+      status: 'RETURNED_AFTER_PAYOUT',
+      id: { notIn: serviced.map((r) => r.passThroughPeriodId!) },
+    },
     select: { amountCents: true, rentPlan: { select: { businessId: true } } },
   });
   for (const p of returnedAfterPayout) {

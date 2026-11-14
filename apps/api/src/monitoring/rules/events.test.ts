@@ -61,6 +61,14 @@ describe('alerts from audit events', () => {
     expect(evaluateRules(data, MONITORING_POLICY, EVENT_RULES).candidates).toEqual([]);
   });
 
+  it('titles a cancelled payout in words, not codes', () => {
+    const data = inputs({ auditEvents: [event('PAYOUT_CANCELLED')] });
+    const [alert] = byType('payments.payout_cancelled').evaluate(data, MONITORING_POLICY);
+    expect(alert!.title).toBe(
+      'Landlord payout for Nov 2026 cancelled: an earlier installment was past due',
+    );
+  });
+
   it('ignores a payout cancelled because its plan closed', () => {
     const data = inputs({
       auditEvents: [event('PAYOUT_CANCELLED', { payload: { reason: 'PLAN_CLOSED' } })],

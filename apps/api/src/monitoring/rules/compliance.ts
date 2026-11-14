@@ -54,6 +54,7 @@ const NOTICE_LABEL: Record<AdverseActionFact['kind'], string> = {
   COUNTER_OFFER_NOT_ACCEPTED: 'a counter offer not taken up',
   INCOMPLETE: 'an incomplete application (notice of incompleteness)',
   INCOMPLETE_DECLINED: 'an application closed as incomplete',
+  PLAN_FROZEN: 'a rent plan frozen at periodic review',
 };
 
 export const adverseActionNoticeMissing: Rule = {

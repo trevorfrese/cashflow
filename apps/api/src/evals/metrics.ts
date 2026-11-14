@@ -217,6 +217,44 @@ export interface PassThroughMetrics {
   graduatedByGrade: Record<string, SegmentMetrics>;
   /** The origination book and the graduates as one book. */
   bookWithGraduates: SegmentMetrics;
+  /**
+   * The bad rate first time approvals had at the graduates' scores: each funded graduate
+   * counted at the origination book's bad rate in its five point score band. Against
+   * `graduated.badRateBps`, how much more often graduates go bad at the same score.
+   */
+  graduatedFirstTimeBadRateBps: number;
+}
+
+/**
+ * The bad rate `reference` plans had at the scores of `cohort`: the mean, over the funded
+ * plans in `cohort`, of the reference bad rate in each one's five point score band. A band
+ * with no reference plans falls back to the reference book's overall rate.
+ */
+export function sameScoreBadRateBps(
+  cohort: readonly CustomerResult[],
+  reference: readonly CustomerResult[],
+): number {
+  const funded = (c: CustomerResult) => c.payoutCount > 0 && c.score !== null;
+  const byBand = new Map<string, { plans: number; bad: number }>();
+  let plans = 0;
+  let bad = 0;
+  for (const c of reference) {
+    if (!funded(c)) continue;
+    const cell = byBand.get(calibrationBand(c.score!)) ?? { plans: 0, bad: 0 };
+    cell.plans += 1;
+    if (c.bad) cell.bad += 1;
+    byBand.set(calibrationBand(c.score!), cell);
+    plans += 1;
+    if (c.bad) bad += 1;
+  }
+  const overall = plans === 0 ? 0 : bad / plans;
+  const members = cohort.filter(funded);
+  if (members.length === 0) return 0;
+  const expected = members.reduce((sum, c) => {
+    const cell = byBand.get(calibrationBand(c.score!));
+    return sum + (cell && cell.plans > 0 ? cell.bad / cell.plans : overall);
+  }, 0);
+  return Math.round((expected / members.length) * 10_000);
 }
 
 export interface BucketRollRow {
@@ -719,6 +757,7 @@ export function computeMetrics(
             GRADES,
           ),
           bookWithGraduates: segmentMetrics([...customers, ...result.graduates], costs),
+          graduatedFirstTimeBadRateBps: sameScoreBadRateBps(result.graduates, customers),
         }
       : null,
   };

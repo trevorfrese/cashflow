@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -14,6 +17,8 @@ import {
   payoutAction,
   requiredAllowanceCents,
   reserveCents,
+  RESERVE_MARGIN_BPS,
+  reserveRateFor,
   RETURN_CODES,
   returnCodeReason,
   shouldAttemptCollection,
@@ -219,5 +224,45 @@ describe('servicing policy', () => {
     expect(shouldHoldPayout(standard, null, '2026-04-01')).toBe(false);
     expect(shouldChargeOff(standard, '2026-03-01', '2026-05-29')).toBe(false);
     expect(shouldChargeOff(standard, '2026-03-01', '2026-05-30')).toBe(true);
+  });
+});
+
+describe('reserve rates against the measured roll rates', () => {
+  it('applies the stated margin: a quarter of the rate, rounded up to 5 bps, at most 100%', () => {
+    expect(RESERVE_MARGIN_BPS).toBe(2500);
+    expect(reserveRateFor(44)).toBe(55);
+    expect(reserveRateFor(40)).toBe(50);
+    expect(reserveRateFor(7947)).toBe(9935);
+    expect(reserveRateFor(9259)).toBe(10_000);
+    expect(reserveRateFor(0)).toBe(0);
+  });
+
+  it('never reserves below the roll rate the checked in evaluation measured', () => {
+    const baseline = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../../evals/baseline.json', import.meta.url)), 'utf8'),
+    ) as {
+      run: { gated: string };
+      configurations: Record<
+        string,
+        {
+          headline: {
+            base: {
+              rollRateBpsByBucket: Record<string, number>;
+              entryRollRateBpsByBucket: Record<string, number>;
+            };
+          };
+        }
+      >;
+    };
+    const measured = baseline.configurations[baseline.run.gated]!.headline.base;
+    for (const bucket of OPEN_BUCKETS) {
+      const roll = Math.max(
+        measured.rollRateBpsByBucket[bucket] ?? 0,
+        measured.entryRollRateBpsByBucket[bucket] ?? 0,
+      );
+      expect(STANDARD_SERVICING_POLICY.provisionRatesBps[bucket], bucket).toBeGreaterThanOrEqual(
+        roll,
+      );
+    }
   });
 });

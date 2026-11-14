@@ -996,6 +996,7 @@ export function runPortfolio(
       exposureContext: exposureFor(applicant.industry),
       periodicReview: true,
       paymentHistory: summary,
+      graduation: true,
     });
     if (decision.outcome === 'APPROVED') stats.reviewApproved += 1;
     else if (decision.outcome === 'DECLINED') stats.reviewDeclined += 1;

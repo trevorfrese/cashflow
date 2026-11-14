@@ -1,5 +1,6 @@
 import {
   addDays,
+  noticeReference,
   principalReason,
   selectPrincipalReasons,
   type AdverseActionNoticeKind,
@@ -80,6 +81,7 @@ interface CreateNoticeArgs {
   respondBy?: IsoDate | null;
   offer?: { limitCents: number; offeredOn: IsoDate; declinedByApplicant: boolean } | null;
   incomplete?: { askedOn: IsoDate; respondBy: IsoDate } | null;
+  frozen?: { monthlyRentCents: number; reviewedOn: IsoDate; byOperator?: boolean } | null;
   deliveredAt: Date;
   generatedBy: string;
   actor: AuditActor;
@@ -97,6 +99,7 @@ export async function createNoticeTx(tx: Tx, a: CreateNoticeArgs): Promise<Adver
     principalReasons: a.principalReasons,
     offer: a.offer ?? null,
     incomplete: a.incomplete ?? null,
+    frozen: a.frozen ?? null,
   });
   const notice = await tx.adverseActionNotice.create({
     data: {
@@ -170,6 +173,50 @@ export async function createDeclineNoticeTx(
     deadlineOn: addDays(received, NOTICE_POLICY.noticeDays),
     deliveredAt: args.decision.decidedAt,
     generatedBy: args.generatedBy,
+    actor: args.actor,
+  });
+}
+
+/**
+ * The notice for a plan frozen by a periodic review, written in the transaction that writes
+ * the review and the freeze. Stopping further advances on a running plan is an unfavorable
+ * change in the terms of existing credit, so it is treated as adverse action on an existing
+ * account (12 CFR 1002.9(a)(1)(iii)): the deadline counts from the freeze. `decision` is
+ * what the freeze rests on: the PERIODIC_REVIEW decision for a review, so there is at most one
+ * notice per review; for an operator hold, which has no decision, the PLAN_ADVANCE_FROZEN
+ * audit event, so there is one notice per hold.
+ */
+export async function createFreezeNoticeTx(
+  tx: Tx,
+  args: {
+    application: Pick<UnderwritingApplication, 'id' | 'businessId' | 'requestedMonthlyRentCents'>;
+    businessName: string;
+    plan: { monthlyRentCents: number };
+    decision: Pick<UnderwritingDecision, 'id' | 'decidedAt'>;
+    principalReasons: PrincipalReason[];
+    actor: AuditActor;
+    /** A hold an operator placed by hand, not a periodic review. */
+    byOperator?: boolean;
+    /** "job" for a periodic review, "<role>:<name>" for an operator hold. */
+    generatedBy?: string;
+  },
+): Promise<AdverseActionNotice> {
+  const reviewedOn = day(args.decision.decidedAt);
+  return createNoticeTx(tx, {
+    application: args.application,
+    businessName: args.businessName,
+    decisionId: args.decision.id,
+    kind: 'PLAN_FROZEN',
+    principalReasons: args.principalReasons,
+    actionOn: reviewedOn,
+    deadlineOn: addDays(reviewedOn, NOTICE_POLICY.existingAccountNoticeDays),
+    frozen: {
+      monthlyRentCents: args.plan.monthlyRentCents,
+      reviewedOn,
+      byOperator: args.byOperator ?? false,
+    },
+    deliveredAt: args.decision.decidedAt,
+    generatedBy: args.generatedBy ?? 'job',
     actor: args.actor,
   });
 }
@@ -358,6 +405,10 @@ async function createDueNoticeTx(
         respondBy: due.respondBy,
         incomplete: { askedOn: day(at), respondBy: due.respondBy! },
       });
+    case 'PLAN_FROZEN':
+      // Stored by the periodic review in the transaction that freezes the plan, never due
+      // from the schedule (which reads origination decisions only).
+      throw new Error('A plan freeze notice is written with the freeze, not by the notices job');
     case 'INCOMPLETE_DECLINED': {
       const asked = f.notices.find(
         (n) => n.decisionId === due.decisionId && n.kind === 'INCOMPLETE',
@@ -445,6 +496,7 @@ export function toNoticeView(n: AdverseActionNotice): AdverseActionNoticeView {
   return {
     id: n.id,
     applicationId: n.applicationId,
+    reference: noticeReference(n.applicationId),
     decisionId: n.decisionId,
     kind: n.kind,
     isAdverseAction: isAdverseAction(n.kind),

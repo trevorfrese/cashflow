@@ -19,8 +19,22 @@ export const AdverseActionNoticeKind = z.enum([
   'INCOMPLETE',
   /** The application stayed incomplete past that date and was closed. */
   'INCOMPLETE_DECLINED',
+  /**
+   * A periodic review stopped the advances on a running plan: an unfavorable change to
+   * existing credit (12 CFR 1002.2(c)(1)(ii)).
+   */
+  'PLAN_FROZEN',
 ]);
 export type AdverseActionNoticeKind = z.infer<typeof AdverseActionNoticeKind>;
+
+/**
+ * The short reference printed on a notice and shown beside it in the app: the last six
+ * characters of the application id, uppercased. Enough for support to find the application,
+ * without putting a raw database id in front of the owner.
+ */
+export function noticeReference(applicationId: string): string {
+  return applicationId.slice(-6).toUpperCase();
+}
 
 export const NoticeChannel = z.enum(['IN_APP']);
 export type NoticeChannel = z.infer<typeof NoticeChannel>;
@@ -28,6 +42,8 @@ export type NoticeChannel = z.infer<typeof NoticeChannel>;
 export const AdverseActionNoticeView = z.object({
   id: Id,
   applicationId: Id,
+  /** The reference number printed on the notice (`noticeReference`). */
+  reference: z.string(),
   decisionId: Id,
   kind: AdverseActionNoticeKind,
   /** A notice of incompleteness is not itself an adverse action. */

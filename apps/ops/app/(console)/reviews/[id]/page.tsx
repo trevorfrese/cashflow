@@ -52,6 +52,7 @@ import {
 } from '@/lib/labels';
 import { ConnectionsPanel } from '@/components/connections';
 import { ExplanationCard, NoticesCard } from '@/components/notices';
+import { useIsAdmin } from '@/lib/session-context';
 import { useAction, useApi } from '@/lib/use-api';
 
 type Detail = OperatorApplicationDetail;
@@ -519,8 +520,10 @@ function IdentityCard({ detail }: { detail: Detail }) {
 }
 
 function ReviewForm({ detail, onRecorded }: { detail: Detail; onRecorded: () => void }) {
-  const { application: a, current, identity, openScreeningHits } = detail;
+  const { application: a, current, identity, openScreeningHits, authority } = detail;
   const rec = current?.recommendation ?? null;
+  const isAdmin = useIsAdmin();
+  const ceiling = authority?.reviewerApprovalCeilingCents ?? null;
   const reviewable = (a.status === 'IN_REVIEW' || a.status === 'DECLINED') && current !== null;
 
   const [decision, setDecision] = useState<Decision | null>(null);
@@ -574,6 +577,10 @@ function ReviewForm({ detail, onRecorded }: { detail: Detail; onRecorded: () => 
       );
     if (feeBps === null || feeBps <= 0) problems.push('Enter the fee as a percentage.');
   }
+  if (approving && !isAdmin && ceiling !== null && limitCents !== null && limitCents > ceiling)
+    problems.push(
+      `A reviewer may approve up to ${money(ceiling)} a month. Approve a lower limit, or ask an admin.`,
+    );
   if (
     approving &&
     identity.verificationStatus !== 'VERIFIED' &&
@@ -622,6 +629,24 @@ function ReviewForm({ detail, onRecorded }: { detail: Detail; onRecorded: () => 
   return (
     <Card title={a.status === 'DECLINED' ? 'Reconsider this decline' : 'Record a decision'}>
       {recorded ? <Notice tone="good" title={recorded} /> : null}
+      {ceiling !== null ? (
+        authority?.needsAdmin ? (
+          <Notice tone={isAdmin ? 'info' : 'warn'} title="Above a reviewer's authority">
+            <p>
+              The engine&apos;s limit, {money(authority.recommendedLimitCents)}, is above the{' '}
+              {money(ceiling)} a reviewer may approve.{' '}
+              {isAdmin
+                ? 'You are signed in as an admin, so you can approve it.'
+                : 'An admin has to approve it at that limit. You can approve a lower limit, decline, or ask for information.'}
+            </p>
+          </Notice>
+        ) : (
+          <p className="muted small">
+            Reviewer authority: approvals up to {money(ceiling)} a month. Above that, an admin
+            approves.
+          </p>
+        )
+      ) : null}
       <form
         className="form"
         onSubmit={(e) => {

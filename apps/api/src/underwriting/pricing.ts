@@ -78,6 +78,30 @@ export interface PriceInput {
   /** Monthly rent the fee will be charged on. */
   rentCents: number;
   installmentsPerMonth: number;
+  /**
+   * Scale the PD read from the table, in basis points (10,000 is the table as is). Set for a
+   * graduate of the pass-through plan (`graduatePricing`).
+   */
+  pdMultiplierBps?: number;
+}
+
+/** The PD for a score, scaled by `multiplierBps` and held to 100%. */
+export function scaledPdBps(table: PdTable, score: number, multiplierBps = 10_000): number {
+  return Math.min(10_000, Math.round((pdBandFor(table, score).pdBps * multiplierBps) / 10_000));
+}
+
+/**
+ * The score a first time applicant would need to carry this PD: the top of the highest band
+ * whose PD is at least `pdBps`. Never above `score`. The table is calibrated on first time
+ * applicants, so this is how a PD measured on another population (graduates of the
+ * pass-through plan) is turned into a grade on the same scale.
+ */
+export function pdEquivalentScore(table: PdTable, pdBps: number, score: number): number {
+  let equivalent = 0;
+  for (const band of table.bands) {
+    if (band.pdBps >= pdBps && band.maxScore > equivalent) equivalent = band.maxScore;
+  }
+  return Math.min(score, equivalent);
 }
 
 export function priceFee(
@@ -87,9 +111,8 @@ export function priceFee(
   const p = policy.expectedLossPricing;
   const rent = Math.max(1, input.rentCents);
   const band = pdBandFor(p.pdTable, input.score);
-  const expectedLossBps = Math.ceil(
-    (band.pdBps * p.lossGivenDefaultBps) / 10_000 / p.expectedPeriods,
-  );
+  const pdBps = scaledPdBps(p.pdTable, input.score, input.pdMultiplierBps);
+  const expectedLossBps = Math.ceil((pdBps * p.lossGivenDefaultBps) / 10_000 / p.expectedPeriods);
   const cof = costOfFundsBps(p.costOfFundsAprBps, input.installmentsPerMonth);
   const servicingBps = Math.ceil((p.servicingCostCents * 10_000) / rent);
   const requiredBps = expectedLossBps + cof + servicingBps + p.targetMarginBps;
@@ -102,7 +125,7 @@ export function priceFee(
   return {
     rentCents: input.rentCents,
     scoreBand: `${band.minScore}-${band.maxScore}`,
-    pdBps: band.pdBps,
+    pdBps,
     lossGivenDefaultBps: p.lossGivenDefaultBps,
     expectedPeriods: p.expectedPeriods,
     expectedLossBps,

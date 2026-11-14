@@ -18,6 +18,11 @@ export interface ControlsPolicy {
   retentionMonths: number;
   /** Days from a complete application within which the applicant must have an answer. */
   decisionNoticeDays: number;
+  /**
+   * The largest monthly limit a reviewer may approve. An approval above it, at the engine's
+   * terms or the reviewer's, needs an admin. Enforced in `services/reviews.ts`.
+   */
+  reviewerApprovalCeilingCents: number;
 }
 
 export const CONTROLS_POLICY: ControlsPolicy = {
@@ -38,4 +43,15 @@ export const CONTROLS_POLICY: ControlsPolicy = {
   // Thirty days is the Regulation B deadline for notifying an applicant of action taken on
   // a completed application.
   decisionNoticeDays: 30,
+  // $10,000 of monthly rent. It is the same line at which the engine stops approving on its
+  // own (`referAmountCents` in the credit policy), so a reviewer's authority reaches exactly
+  // as far as the engine's: a reviewer settles the flag or the score that referred a case,
+  // and an amount the engine would not approve alone needs a second, more senior person.
+  // In money: one month fronted at $10,000 with the policy's loss given default (about 60%
+  // of a month) is roughly $6,000 lost if the plan goes bad, which is about 2.5% of the
+  // sandbox pool's capital and inside the 5% single business cap. Above that, a single
+  // approval starts to move the pool, and the person who answers for the pool should sign.
+  // Kept as its own number, not read from the credit policy, so a credit policy change does
+  // not quietly widen what one reviewer may approve.
+  reviewerApprovalCeilingCents: 1_000_000,
 };

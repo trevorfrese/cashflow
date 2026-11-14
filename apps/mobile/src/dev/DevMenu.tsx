@@ -60,7 +60,7 @@ export function DevMenu() {
       setError(null);
     } catch (e) {
       setError(
-        `${describeError(e)}. The dev menu needs the API at ${API_URL} running with ENABLE_DEV_TOOLS=true.`,
+        `${describeError(e).replace(/[^.?!]$/, '$&.')} The dev menu needs the API at ${API_URL} running with ENABLE_DEV_TOOLS=true.`,
       );
     }
   }, []);

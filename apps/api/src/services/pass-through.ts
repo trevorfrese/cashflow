@@ -30,6 +30,7 @@ import { passThroughEligibility, snapshotKnockouts } from '../underwriting/pass-
 import { CURRENT_POLICY } from '../underwriting/policy.ts';
 import { recordAudit, type AuditActor } from './audit.ts';
 import { currentDecision } from './decisions.ts';
+import { refreshDelinquency, UNPAID } from './delinquency.ts';
 import {
   claimDisbursement,
   confirmDisbursement,
@@ -38,7 +39,7 @@ import {
   releaseDisbursement,
 } from './disbursements.ts';
 import { openHitsForPlan } from './identity.ts';
-import type { ReturnOutcome } from './returns.ts';
+import { applyReturnConsequences, type ReturnOutcome } from './returns.ts';
 
 /**
  * Pass-through rent plans.
@@ -65,6 +66,8 @@ import type { ReturnOutcome } from './returns.ts';
  * exception is a collection that comes back after the landlord was paid (an unauthorized
  * return weeks later): then CashFlow's own money has covered the rent, the pool makes the
  * pass-through account whole, and the business owes the amount on its receivable account.
+ * That receivable is serviced exactly like a financed installment (see
+ * `reversePassThroughCollection`), and the plan advances nothing while it is unpaid.
  *
  * A missed month is not paid by CashFlow. The owner is told plainly to pay the landlord
  * directly, and the month is recorded in the payment history. There is no fee and no late fee.
@@ -447,15 +450,19 @@ export async function collectPassThroughPeriod(
     );
     if (action === 'wait') return 'skipped';
 
-    // A plan that is no longer running collects nothing new. The month is closed without
-    // any money moving, and the owner pays the landlord directly.
-    if (plan.status !== 'ACTIVE' || plan.advanceFrozenAt !== null) {
+    // A plan that is no longer running collects nothing new, and neither does one whose
+    // business owes CashFlow for a returned month. The month is closed without any money
+    // moving, and the owner pays the landlord directly.
+    const owes = plan.status === 'ACTIVE' && (await receivableOutstandingCents(tx, plan.id)) > 0;
+    if (plan.status !== 'ACTIVE' || plan.advanceFrozenAt !== null || owes) {
       const reason =
         plan.status === 'CLOSED'
           ? 'PLAN_CLOSED'
           : plan.status === 'PAUSED'
             ? 'PLAN_PAUSED'
-            : 'ADVANCE_FROZEN';
+            : plan.advanceFrozenAt !== null
+              ? 'ADVANCE_FROZEN'
+              : 'RECEIVABLE_OUTSTANDING';
       await tx.passThroughPeriod.update({
         where: { id: period.id },
         data: { status: 'CANCELLED', cancelledReason: reason },
@@ -632,6 +639,7 @@ async function passThroughHoldReason(
   plan: Pick<RentPlan, 'id' | 'leaseId' | 'businessId' | 'advanceFrozenAt'>,
 ): Promise<string | null> {
   if (plan.advanceFrozenAt !== null) return 'ADVANCE_FROZEN';
+  if ((await receivableOutstandingCents(tx, plan.id)) > 0) return 'RECEIVABLE_OUTSTANDING';
   const pending = await tx.leaseChange.findFirst({
     where: { leaseId: plan.leaseId, status: 'PENDING' },
     select: { id: true },
@@ -915,6 +923,23 @@ export async function processPassThroughPayouts(ctx: AppContext, asOf: IsoDate) 
 const RETURN_ACTOR: AuditActor = { type: 'job', id: 'reconcile-payments' };
 
 /**
+ * What a pass-through plan's business still owes CashFlow for collections that came back
+ * after the landlord was paid, in cents: unpaid installments on the plan's receivable rows,
+ * not counting any written off. While it is above zero the plan collects and pays nothing new.
+ */
+export async function receivableOutstandingCents(tx: Tx, planId: string): Promise<number> {
+  const owed = await tx.installment.aggregate({
+    where: {
+      rentPlanId: planId,
+      status: { in: UNPAID },
+      payout: { passThroughPeriodId: { not: null } },
+    },
+    _sum: { principalCents: true },
+  });
+  return owed._sum.principalCents ?? 0;
+}
+
+/**
  * A pass-through collection the business's bank sent back.
  *
  * Before the landlord was paid (inside the settlement window, or settled and not yet due):
@@ -924,7 +949,10 @@ const RETURN_ACTOR: AuditActor = { type: 'job', id: 'reconcile-payments' };
  * After the landlord was paid (an unauthorized return can arrive weeks later): the rent has
  * gone out and cannot be taken back. CashFlow's own money covers it: the pool makes the
  * pass-through account whole, and the business owes the amount on its receivable account.
- * The plan is closed, and a high severity event opens an alert.
+ * The amount owed becomes an installment serviced like any financed one: retried under the
+ * servicing policy, aged, provisioned, and charged off at the charge-off age with the same
+ * postings. The plan advances nothing while it is owed, an unauthorized code also freezes it
+ * for a reviewer, and a high severity event opens an alert.
  */
 export async function reversePassThroughCollection(
   ctx: AppContext,
@@ -1003,16 +1031,40 @@ export async function reversePassThroughCollection(
         returnedOn: ret.returnedOn,
       },
     });
-    if (plan.status !== 'CLOSED') {
-      await tx.rentPlan.update({
-        where: { id: plan.id },
-        data: { status: 'CLOSED', closedAt: at, closedReason: 'RETURNED_AFTER_PAYOUT' },
-      });
-      await tx.passThroughPeriod.updateMany({
-        where: { rentPlanId: plan.id, status: 'SCHEDULED' },
-        data: { status: 'CANCELLED', cancelledReason: 'PLAN_CLOSED' },
-      });
-    }
+
+    // The amount owed is serviced like a financed installment: a landlord payout row that is
+    // PAID from the start (nothing is sent for it: the landlord was paid by this month) with
+    // one installment of the whole rent and no fee, due the day the return arrived. From
+    // here the collection job retries it under the servicing policy, the aging job moves it
+    // through the buckets and writes it off at the charge-off age, the provision job reserves
+    // for it, and the owner can pay it by hand, all without code of their own.
+    const receivable = await tx.landlordPayout.create({
+      data: {
+        rentPlanId: plan.id,
+        periodMonth: period.periodMonth,
+        amountCents: period.amountCents,
+        scheduledFor: period.paidOn ?? ret.returnedOn,
+        status: 'PAID',
+        paidAt: period.paidAt ?? at,
+        passThroughPeriodId: period.id,
+        installments: {
+          create: {
+            rentPlanId: plan.id,
+            periodMonth: period.periodMonth,
+            sequence: 1,
+            principalCents: period.amountCents,
+            feeCents: 0,
+            totalCents: period.amountCents,
+            dueDate: ret.returnedOn,
+          },
+        },
+      },
+      include: { installments: true },
+    });
+
+    // The plan advances nothing while the amount is owed: a month that comes up is not
+    // collected and a settled one is not paid to the landlord (`receivableOutstandingCents`).
+    // Once it is paid the plan carries on, unless the return code froze it (below).
     await recordAudit(tx, {
       actor: RETURN_ACTOR,
       eventType: 'PASS_THROUGH_RETURNED_AFTER_PAYOUT',
@@ -1025,10 +1077,24 @@ export async function reversePassThroughCollection(
         returnCode: ret.returnCode,
         returnedOn: ret.returnedOn,
         owedCents: period.amountCents,
+        receivablePayoutId: receivable.id,
+        installmentId: receivable.installments[0]!.id,
       },
       severity: 'high',
       at,
     });
+    // What the return code means for collecting it: a hard or unauthorized code disables
+    // the bank link, so nothing is debited automatically until the owner links an account
+    // again; an unauthorized code also writes the high severity event monitoring alerts on.
+    await applyReturnConsequences(
+      tx,
+      { planId: plan.id, businessId: plan.businessId, bankLinkId: fresh.collectionBankLinkId },
+      ret.returnCode,
+      asOf,
+      RETURN_ACTOR,
+      { passThroughPeriodId: period.id },
+    );
+    await refreshDelinquency(tx, plan.id, asOf, RETURN_ACTOR);
     ctx.log.error(
       { periodId: period.id, returnCode: ret.returnCode },
       'pass-through collection returned after the landlord was paid',

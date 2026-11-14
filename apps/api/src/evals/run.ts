@@ -9,6 +9,7 @@ import {
   POLICY_V1,
   POLICY_V2,
   POLICY_V3,
+  POLICY_V4,
   type CreditPolicy,
 } from '../underwriting/policy.ts';
 import { ASSUMPTIONS, STRESS, poolSizeFor } from './assumptions.ts';
@@ -49,9 +50,11 @@ import { counterfactualCell, type CounterfactualCell } from './veracity-metrics.
  *   v2_baseline   version 2 with the baseline servicing: what underwriting alone buys
  *   v2_standard   version 2 with standard servicing: before the veracity checks
  *   v3_standard   version 3: before payment history, pass-through plans and graduation
+ *   v4_standard   version 4, with pass-through plans: graduates priced like first time
+ *                 applicants. Base case only; its origination decisions are the gated ones
  *
- * The gated configuration (version 4) is the only one that runs pass-through plans and
- * graduates from them. Challengers, sensitivities and counterfactuals run without them.
+ * The gated configuration (version 5) and `v4_standard` run pass-through plans and graduate
+ * from them. Challengers, sensitivities and counterfactuals run without them.
  *
  * Challengers change one thing about the gated configuration and report a swap set.
  *
@@ -76,8 +79,8 @@ export interface PolicyConfig {
 }
 
 export const GATED_CONFIG: PolicyConfig = {
-  name: 'v4_standard',
-  description: `${CURRENT_POLICY.version} decisions, standard servicing, with pass-through plans for credit declines and graduation from them. The gated configuration.`,
+  name: 'v5_standard',
+  description: `${CURRENT_POLICY.version} decisions, standard servicing, with pass-through plans for credit declines and graduation from them, graduates priced on their own PD. The gated configuration.`,
   policy: CURRENT_POLICY,
   servicing: STANDARD_SERVICING_POLICY,
   withMild: true,
@@ -119,6 +122,14 @@ export const COMPARISON_CONFIGS: readonly PolicyConfig[] = [
     policy: POLICY_V3,
     servicing: STANDARD_SERVICING_POLICY,
     withMild: true,
+  },
+  {
+    name: 'v4_standard',
+    description: `${POLICY_V4.version} decisions, standard servicing, with pass-through plans and graduation: graduates priced like first time applicants with the same score. Base case only.`,
+    policy: POLICY_V4,
+    servicing: STANDARD_SERVICING_POLICY,
+    withMild: false,
+    passThrough: true,
   },
 ];
 

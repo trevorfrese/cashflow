@@ -71,7 +71,7 @@ const EVENT_ALERTS: EventAlert[] = [
     description:
       'A landlord payout was not paid inside its release window and was cancelled. The landlord did not get that month from us, and the owner should hear it from a person.',
     title: (e) =>
-      `Landlord payout for ${text(e.payload.periodMonth)} cancelled: ${text(e.payload.reason)}`,
+      `Landlord payout for ${monthLabel(e.payload.periodMonth)} cancelled: ${cancelReason(e.payload.reason)}`,
   },
   {
     eventType: 'LOGIN_LOCKED',
@@ -88,7 +88,7 @@ const EVENT_ALERTS: EventAlert[] = [
     category: 'PAYMENTS',
     severity: 'HIGH',
     description:
-      'A pass-through rent collection came back after the landlord had been paid with it, usually an unauthorized return weeks later. CashFlow covered the rent from its own money, the business owes it on its receivable account, and the plan is closed. Someone has to contact the owner.',
+      'A pass-through rent collection came back after the landlord had been paid with it, usually an unauthorized return weeks later. CashFlow covered the rent from its own money, the business owes it on its receivable account, which is collected and charged off like a financed installment, and the plan advances nothing while it is owed. Someone has to contact the owner.',
     title: (e) =>
       `Pass-through rent for ${text(e.payload.periodMonth)} returned ${text(e.payload.returnCode)} after the landlord was paid`,
   },
@@ -141,3 +141,30 @@ function eventRule(spec: EventAlert): Rule {
 export const ALERTED_EVENT_TYPES = EVENT_ALERTS.map((e) => e.eventType);
 
 export const EVENT_RULES: Rule[] = EVENT_ALERTS.map(eventRule);
+
+/** Why a payout was cancelled, in words for an alert title. Unknown codes read as words. */
+const CANCEL_REASONS: Record<string, string> = {
+  PAST_DUE: 'an earlier installment was past due',
+  ADVANCE_FROZEN: 'the plan was frozen',
+  PLAN_PAUSED: 'the plan was paused',
+  PLAN_CLOSED: 'the plan was closed',
+  NOT_PAID_IN_TIME: 'not paid inside the release window',
+  LEASE_CHANGE_PENDING: 'a landlord change was waiting',
+  RENT_INCREASE_PENDING: 'a rent increase was waiting for approval',
+  PERIOD_ALREADY_PAID: 'the month was already paid',
+  GRADUATED: 'the plan graduated',
+};
+
+function cancelReason(reason: unknown): string {
+  if (typeof reason !== 'string' || reason === '') return 'reason not recorded';
+  return CANCEL_REASONS[reason] ?? reason.toLowerCase().replace(/_/g, ' ');
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "2026-08" as "Aug 2026". Anything else as it came. */
+function monthLabel(v: unknown): string {
+  const m = typeof v === 'string' ? /^(\d{4})-(\d{2})$/.exec(v) : null;
+  const name = m ? MONTHS[Number(m[2]) - 1] : undefined;
+  return m && name ? `${name} ${m[1]}` : text(v);
+}

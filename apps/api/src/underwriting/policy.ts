@@ -172,6 +172,24 @@ export interface GraduationPolicy {
   minOnTimeMonths: number;
   /** Days an offer stays open. */
   offerValidDays: number;
+  /**
+   * How a graduate's terms are set (version 5). Absent: exactly as a first time applicant
+   * with the same score, which is how version 4 priced graduates.
+   */
+  graduatePricing?: GraduatePricingPolicy;
+}
+
+/**
+ * Terms for a graduate of the pass-through plan (version 5). The PD table is calibrated on
+ * first time applicants; graduates went bad more often at the same score. A graduate is
+ * priced on its own PD: the table's PD at its score times `pdMultiplierBps`. That PD sets the
+ * expected loss in the fee, and the grade a first time applicant with the same PD would get
+ * (`pdEquivalentScore`) sets the fee floor and the largest rent share. The score and grade
+ * on the decision are the scorecard's; the terms are the graduate's.
+ */
+export interface GraduatePricingPolicy {
+  /** Graduate PD as a multiple of the table PD at the same score, in basis points. */
+  pdMultiplierBps: number;
 }
 
 export interface CreditPolicy {
@@ -462,7 +480,25 @@ export const POLICY_V4: CreditPolicy = {
   graduation: { minOnTimeMonths: 3, offerValidDays: 30 },
 };
 
-export const CURRENT_POLICY: CreditPolicy = POLICY_V4;
+/**
+ * Version 5: version 4, with graduates of the pass-through plan priced on their own PD. In
+ * the version 4 evaluation graduates went bad 2.1 to 2.3 times as often as first time
+ * approvals in the same score band (8.3% against 3.7% overall), and their realized loss was
+ * three times the expected loss their fees were built on. The multiplier is that ratio,
+ * rounded up. Every other number is version 4's, so a first time applicant gets exactly the
+ * version 4 decision; the PD table is not regenerated (see UNDERWRITING.md for why). The
+ * evidence is in `apps/api/evals/report.md`, "Pass-through plans and graduation".
+ */
+export const POLICY_V5: CreditPolicy = {
+  ...POLICY_V4,
+  version: 'cashflow-v5',
+  graduation: {
+    ...POLICY_V4.graduation!,
+    graduatePricing: { pdMultiplierBps: 25_000 },
+  },
+};
+
+export const CURRENT_POLICY: CreditPolicy = POLICY_V5;
 export const POLICY_VERSION: string = CURRENT_POLICY.version;
 
 /** Policies by version, for reading a stored decision back against the rules that made it. */
@@ -471,6 +507,7 @@ export const POLICIES: Readonly<Record<string, CreditPolicy>> = {
   [POLICY_V2.version]: POLICY_V2,
   [POLICY_V3.version]: POLICY_V3,
   [POLICY_V4.version]: POLICY_V4,
+  [POLICY_V5.version]: POLICY_V5,
 };
 
 /** The cutoffs in force, for the decision snapshot. Internal: never sent to applicants. */

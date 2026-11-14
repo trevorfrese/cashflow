@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest';
 
 import { ApiError, query, toApiError } from './api';
 import {
+  breakerRule,
   dispositionLabel,
   freezeReason,
   holdReason,
   FACTOR_STATUS,
   integrityLabel,
+  JOB_HEALTH,
   NOTICE_KINDS,
   reasonTitle,
   refusal,
@@ -52,8 +54,38 @@ describe('plain words', () => {
     expect(holdReason(null)).toBe('');
     expect(freezeReason('UNAUTHORIZED_RETURN')).toBe('A debit came back as unauthorized');
     expect(freezeReason(null)).toBe('Frozen');
+    expect(freezeReason('OPERATOR_HOLD')).toBe('An admin froze it by hand');
+    expect(freezeReason('SCORE_BELOW_WATCH')).toContain('below the watch level');
     expect(dispositionLabel('FALSE_POSITIVE')).toContain('False positive');
     expect(dispositionLabel(null)).toBe('');
+  });
+
+  it('says who tripped the breaker and how each job stands', () => {
+    expect(breakerRule('manual')).toBe('An admin, by hand');
+    expect(breakerRule('portfolio.fpd_rate')).toBe('Monitoring rule portfolio.fpd_rate');
+    expect(breakerRule(null)).toBe('-');
+    for (const health of ['OK', 'RUNNING', 'FAILED', 'LATE', 'NEVER_RAN']) {
+      expect(JOB_HEALTH[health]?.label, health).toBeTruthy();
+    }
+    expect(JOB_HEALTH.LATE!.tone).toBe('bad');
+  });
+
+  it('explains the refusals of the controls and the reviewer ceiling', () => {
+    for (const code of [
+      'BREAKER_ALREADY_TRIPPED',
+      'PLAN_ALREADY_FROZEN',
+      'ADMIN_FREEZE',
+      'NO_LIMIT_TO_LOWER',
+      'NO_LIMIT_CAP',
+    ]) {
+      expect(refusal({ code, message: 'x' }).title, code).not.toBe('The API refused this');
+    }
+    expect(
+      refusal({
+        code: 'ABOVE_REVIEWER_AUTHORITY',
+        message: 'A reviewer may approve up to $10,000.00',
+      }).body,
+    ).toContain('$10,000.00');
   });
 
   it('gives every severity a name and a distinct level, so it never relies on color', () => {

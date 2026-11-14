@@ -67,7 +67,8 @@ export async function gatherPoolState(tx: Tx, providers: Providers): Promise<Poo
  */
 export async function countOnTimePeriods(tx: Tx, businessId: string): Promise<number> {
   const payouts = await tx.landlordPayout.findMany({
-    where: { status: 'PAID', rentPlan: { businessId } },
+    // A receivable left by a returned pass-through month is never an on time period.
+    where: { status: 'PAID', rentPlan: { businessId }, passThroughPeriodId: null },
     select: {
       installments: {
         select: {

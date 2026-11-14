@@ -35,7 +35,7 @@ ledger mechanics are in [`ARCHITECTURE.md`](../../ARCHITECTURE.md); the evidence
 
 ## 1. Policy in force and how versions work
 
-**In force: `cashflow-v4`** (`CURRENT_POLICY` in `src/underwriting/policy.ts`), under the
+**In force: `cashflow-v5`** (`CURRENT_POLICY` in `src/underwriting/policy.ts`), under the
 `standard` servicing policy (`ACTIVE_SERVICING_POLICY` in `src/servicing/policy.ts`).
 
 | Version       | Status  | What it added                                                                                 |
@@ -43,7 +43,8 @@ ledger mechanics are in [`ARCHITECTURE.md`](../../ARCHITECTURE.md); the evidence
 | `cashflow-v1` | Retired | The launch policy. Kept so the evals can run it as the comparison                             |
 | `cashflow-v2` | Retired | Integrity checks, earlier decline detection, expected loss pricing, exposure rules, referrals |
 | `cashflow-v3` | Retired | The data veracity checks and a data depth factor that reads them                              |
-| `cashflow-v4` | Current | The payment history factor, and graduation from the pass-through plan. Otherwise version 3    |
+| `cashflow-v4` | Retired | The payment history factor, and graduation from the pass-through plan. Otherwise version 3    |
+| `cashflow-v5` | Current | Graduates of the pass-through plan priced on their own PD. Otherwise version 4                |
 
 How versions work:
 
@@ -57,8 +58,30 @@ How versions work:
 - A change to any number is a new version, and ships only through change control (section 14).
 
 Version 4 decides exactly as version 3 for any applicant without payment history with
-CashFlow: the factor is absent, not zero. The evals check this (`v3_standard` against
-`v4_standard` give the same origination decisions).
+CashFlow: the factor is absent, not zero. Version 5 decides exactly as version 4 for everyone
+but a graduation review. The evals check both (`v3_standard`, `v4_standard` and `v5_standard`
+give the same origination decisions).
+
+### Change log
+
+**`cashflow-v5`, with the standard servicing reserve rates re-set** (November 2026). Measured
+on the default evaluation (5 seeds of 2,000 applicants), before (`cashflow-v4`) and after:
+
+| What                                              | Why                                                                                                                         | Before                                        | After                                         |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | --------------------------------------------- |
+| Graduate pricing (`graduation.graduatePricing`)   | Graduates went bad 2.1 to 2.3 times as often as first time approvals at the same scores, at first time prices               | 229 graduates, fee 158 bps, margin 37 bps     | 227 graduates, fee 195 bps, margin 72 bps     |
+| Graduate bad rate against first time, same scores | Unchanged by design: version 5 prices the gap, it does not select it away                                                   | 8.3% against 4.0%                             | 8.4% against 3.8%                             |
+| Reserve rates (`STANDARD_SERVICING_POLICY`)       | The CURRENT reserve (0.40%) had fallen below the measured roll to charge-off (0.42%, 0.44% on entry). Now measured plus 25% | 0.40%, 85%, 95%, 100%                         | 0.55%, 99.35%, 100%, 100%                     |
+| Origination book, every gate                      | Unchanged: first time decisions are version 4's                                                                             | 11 of 11 pass, net loss 19 bps, margin 79 bps | 11 of 11 pass, net loss 19 bps, margin 79 bps |
+| Book with graduates, base                         |                                                                                                                             | Net loss 21 bps, margin 77 bps                | Net loss 21 bps, margin 78 bps                |
+
+The PD table was not regenerated: the scorecard, cutoffs and servicing that it was calibrated
+under did not change, and the multiplier is measured against it. Grade B graduates still lose
+money (20 plans, 20% bad, -67 bps), too few to price separately; see section 15. The same
+release, outside the credit policy: a trust failure at periodic review now freezes the plan and
+alerts (section 12), re-underwriting reads time in business on the review date, a freeze sends
+an adverse action notice, and a pass-through return after the landlord was paid is serviced as
+a receivable (section 10).
 
 ## 2. The product
 
@@ -350,18 +373,22 @@ principal reasons from the reason catalog with what would change each. See
 Operators reach the API with one of two tokens (`src/auth/admin.ts`). The person acting is named
 in the `X-Admin-Actor` header and recorded on every audit event; no request body can set it.
 
-| Action                                                                         |                   Reviewer                    |          Admin          |
-| ------------------------------------------------------------------------------ | :-------------------------------------------: | :---------------------: |
-| Approve, decline, or request information on a referred or declined application |                      Yes                      |           Yes           |
-| Approve at terms other than the engine's                                       |            Yes, with a reason code            | Yes, with a reason code |
-| Approve a business that is not verified                                        | Only with the `IDENTITY_VERIFIED` reason code |        The same         |
-| Clear a possible screening match                                               |                      Yes                      |           Yes           |
-| Clear a screening match                                                        |                      No                       |           Yes           |
-| Approve or reject a pending landlord change                                    |                      Yes                      |           Yes           |
-| Lift a freeze on a plan                                                        |      Yes, unless a screening hit is open      |        The same         |
-| Send a returned landlord payout again                                          |   Yes, once corrected details have applied    |           Yes           |
-| Reset the circuit breaker                                                      |                      No                       |   Yes, with a reason    |
-| Fund the pool, run jobs                                                        |                      No                       |           Yes           |
+| Action                                                                         |                        Reviewer                        |                Admin                |
+| ------------------------------------------------------------------------------ | :----------------------------------------------------: | :---------------------------------: |
+| Approve, decline, or request information on a referred or declined application |                          Yes                           |                 Yes                 |
+| Approve a monthly limit above $10,000 (`reviewerApprovalCeilingCents`)         |                           No                           |                 Yes                 |
+| Approve at terms other than the engine's                                       |                Yes, with a reason code                 |       Yes, with a reason code       |
+| Approve a business that is not verified                                        |     Only with the `IDENTITY_VERIFIED` reason code      |              The same               |
+| Clear a possible screening match                                               |                          Yes                           |                 Yes                 |
+| Clear a screening match                                                        |                           No                           |                 Yes                 |
+| Approve or reject a pending landlord change                                    |                          Yes                           |                 Yes                 |
+| Lift a freeze on a plan                                                        | Yes, unless a screening hit is open or an admin set it | Yes, unless a screening hit is open |
+| Send a returned landlord payout again                                          |        Yes, once corrected details have applied        |                 Yes                 |
+| Reset the circuit breaker                                                      |                           No                           |         Yes, with a reason          |
+| Pause new approvals (trip the circuit breaker by hand)                         |                           No                           |         Yes, with a reason          |
+| Freeze a plan's next period                                                    |                           No                           |         Yes, with a reason          |
+| Lower a business's limit, or take that cap off again                           |                           No                           |         Yes, with a reason          |
+| Fund the pool, run jobs                                                        |                           No                           |                 Yes                 |
 
 **Limits on any reviewer approval** (`src/services/reviews.ts`):
 
@@ -370,6 +397,35 @@ in the `X-Admin-Actor` header and recorded on every audit event; no request body
   engine's fee; that is an override and needs a reason code.
 - No approval while the business has an open screening hit.
 - Exposure and funding rules still apply when the plan opens.
+
+**Dollar authority** (`reviewerApprovalCeilingCents` in `src/controls/policy.ts`). A reviewer
+may approve a monthly limit up to $10,000. Above it only an admin approves, at the engine's
+terms or the reviewer's. The check is on the limit actually approved, in the review service, so
+a reviewer can still approve a lower limit (an override with `EXPOSURE_ADJUSTED`), decline, or
+ask for information. The API answers `ABOVE_REVIEWER_AUTHORITY` (403) otherwise.
+
+Why $10,000: it is the same line at which the engine stops approving alone (`referAmountCents`),
+so a reviewer's authority reaches exactly as far as the engine's. A reviewer settles the flag or
+the score that referred a case; an amount the engine would not approve on its own needs a
+second, more senior person. One month fronted at $10,000 at the policy's loss given default is
+about $6,000 lost if the plan goes bad, which is inside the single business cap on the sandbox
+pool. The ceiling is its own number in the controls, not read from the credit policy, so a
+credit policy change cannot quietly widen what one reviewer may approve. The console shows it
+on the review page and the policy page.
+
+**Tighten-only controls** (`src/controls/`). An admin can make the system stricter from the
+operations console, and only stricter. Each control needs a typed reason, writes an audit event
+in the same transaction as the change, is enforced by the API whatever the console shows, and
+has an undo an admin can use:
+
+| Control                | What it does                                                                                                                                                                           | Undo                                               |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| Pause new approvals    | Trips the circuit breaker with rule `manual` (section 13): an application the engine would approve is referred                                                                         | Reset the breaker                                  |
+| Freeze a plan          | The periodic review's freeze, reason `OPERATOR_HOLD`: no new period, a payout that falls due is held                                                                                   | Release the freeze (admin only for this reason)    |
+| Lower a business limit | Puts a cap on the business below its approved limit. The limit in force is the smaller of the two, for a new plan and for a rent increase. A running plan above the cap keeps its rent | Remove the cap: the decision's limit applies again |
+
+A value at or above the limit in force is refused (`LIMIT_NOT_LOWER`). There is no route that
+raises a limit: that is underwriting's, through a new application or a reviewer's decision.
 
 **Overrides.** A review whose outcome, limit or fee differs from the engine's recommendation is
 an override. It needs at least one reason code from `ReviewReasonCode`
@@ -422,8 +478,14 @@ whether the lease is real rules it out.
 
 CashFlow advances none of its own money on a pass-through plan, so it carries no credit risk and
 does not count toward the pool, the exposure caps, provisioning or the delinquency buckets. The
-one way it can cost money is an unauthorized return weeks after the landlord was paid; that is
-booked to the business's receivable and closes the plan.
+one way it can cost money is a collection returned after the landlord was paid (usually an
+unauthorized return weeks later). Then the pool covers the rent and the business owes it: a
+receivable (`LandlordPayout.passThroughPeriodId`, one installment of the rent, no fee, due the
+day the return arrived) serviced exactly as a financed installment under section 11: retried on
+the same schedule (after a hard or unauthorized code, only once the business links an account
+again), aged through the buckets, provisioned, open to a manual payment, and charged off at 90
+days past due with the same postings. While it is owed the plan collects and pays nothing new;
+an unauthorized code also freezes it for a reviewer.
 
 **Graduation** (`graduation` on `CURRENT_POLICY`, `src/services/graduation.ts`):
 
@@ -435,9 +497,13 @@ booked to the business's receivable and closes the plan.
 - On acceptance the financed plan opens from the next month, through the same opening checks as
   any plan, and starts on the first rung of the ladder.
 
-The evals found that graduates go bad more often than first time approvals at the same score
-(8.3% against 3.7% in the base case), and the cohort still earns a margin (37 bps). Pricing
-graduates on their own PD is the next calibration step once there are enough of them.
+**Graduate pricing** (version 5, `graduation.graduatePricing`). Under version 4 graduates went
+bad more than twice as often as first time approvals at the same scores (8.3% against 4.0%)
+and earned 37 bps. A graduate is now priced on its own PD: the PD table at its score times
+2.5, which is the expected loss in its fee, and the grade a first time applicant with that PD
+would get, which sets its fee floor and largest rent share. The score and grade on the decision
+stay the scorecard's. On the default evaluation 227 businesses graduate (229 before), pay 195
+bps (158), and earn 72 bps (37); they still go bad at 8.4%.
 
 ## 11. Servicing
 
@@ -486,17 +552,21 @@ and the fee to `fee_revenue`. The plan stays closed. The evals assume a 10% reco
 for credit losses to outstanding principal in each bucket times its reserve rate, and posts the
 change:
 
-| Bucket     | Reserve rate | Measured roll to charge-off, default evaluation |
-| ---------- | -----------: | ----------------------------------------------: |
-| CURRENT    |        0.40% |                 0.42% on the first of the month |
-| GRACE      |          85% |                    79.5% on entering the bucket |
-| DELINQUENT |          95% |                 92.6% on the first of the month |
-| DEFAULT    |         100% |                 99.4% on the first of the month |
+| Bucket     | Reserve rate | Measured roll to charge-off (first of month / on entry) | Highest single seed |
+| ---------- | -----------: | ------------------------------------------------------: | ------------------: |
+| CURRENT    |        0.55% |                                           0.42% / 0.44% |               0.48% |
+| GRACE      |       99.35% |                                             n/a / 79.5% |               94.3% |
+| DELINQUENT |         100% |                                           92.6% / 86.6% |                100% |
+| DEFAULT    |         100% |                                           99.4% / 98.6% |                100% |
 
-The rates are the evaluation's roll rates rounded up when they were set. On the current report
-the CURRENT roll rate (0.42%) sits just above its 0.40% reserve; see section 15. A charge-off
-never takes the allowance below zero: if the allowance is short, the same transaction tops it
-up first.
+The rule (`reserveRateFor`, `src/servicing/policy.ts`): the higher of the two measured roll
+rates plus a margin of a quarter of it (`RESERVE_MARGIN_BPS`), rounded up to 5 bps and held to
+100%. With that margin the allowance is above the measured loss on the pooled book and on every
+single seed. The report's roll table shows the reserve beside each measured rate and whether it
+covers it, and a unit test fails if a reserve falls below the checked in baseline's measured
+roll. Until version 5 the rates were the roll rates rounded up with no margin, and the CURRENT
+reserve (0.40%) had fallen below its measured 0.42%. A charge-off never takes the allowance
+below zero: if the allowance is short, the same transaction tops it up first.
 
 ## 12. Periodic re-underwriting
 
@@ -507,11 +577,18 @@ stored as a `PERIODIC_REVIEW` decision beside the original.
 - **Freeze** when the score is under the watch score of 50 (`reunderwriting.watchScore`), or the
   review declines for a deterioration reason (`DETERIORATION_CODES`: overdrafts, negative days,
   revenue decline, thin buffer decline, revenue too low, rent share, no free cash flow, no
-  capacity, score below minimum, round trip deposits).
+  capacity, score below minimum).
+- **Freeze and alert** on a trust failure: a decline for round trip deposits, accounts held by
+  someone else, or a rewritten bank history (`TRUST_CODES`), or a bank or sales history that
+  changed between pulls (`REWRITE_FINDINGS`), even when the engine only referred. A
+  `fraud.periodic_review_trust_failure` alert opens for a person, once per plan and month.
+- Time in business is what was stated at application plus the months since.
+- A freeze, by a review or by an operator's hold, stores a `PLAN_FROZEN` adverse action notice
+  with its catalog reasons, in the same transaction, shown in the app.
 - A decline for an origination rule (an exposure cap, the fee cap, rent not matching the
   account) does not freeze a customer who is repaying.
-- A frozen plan gets no new period and its next payout is held. Rent already paid to the
-  landlord is still collected.
+- A frozen plan gets no new period and its next payout is held: the freeze takes effect from
+  the next period, never mid-cycle. Rent already paid to the landlord is still collected.
 - A freeze is lifted only by a reviewer. The review needs data no more than 7 days old; a stale
   feed stores nothing and the job tries again the next day.
 - Stated revenue checks are skipped. A request to connect a payout account is shown to the owner
@@ -541,8 +618,9 @@ and Nacha").
 **The circuit breaker** (`src/services/circuit-breaker.ts`). When any of the five breaker rules
 opens or rises to critical, the breaker trips and every application the engine would approve is
 referred instead (`CIRCUIT_BREAKER`). Declines and requests for information are unchanged, and a
-reviewer can still approve. Only an admin can reset it, with a reason; trip and reset are both
-audited. Approvals made before the trip stay valid and can still open a plan, subject to the
+reviewer can still approve. An admin can also trip it by hand from the operations console, with a
+reason (rule `manual`, section 9). Only an admin can reset it, with a reason; trip and reset are
+both audited. Approvals made before the trip stay valid and can still open a plan, subject to the
 exposure and funding rules on the day.
 
 Referring was chosen over stopping new plans because a breach says recent automatic decisions
@@ -577,7 +655,7 @@ No gate threshold may be loosened to make a change pass. A gate threshold change
 policy change and needs its own written reason.
 
 **The gates** (`GATE_THRESHOLDS`, `src/evals/gates.ts`), judged on the mean of 5 seeds. Current
-results from [`evals/report.md`](evals/report.md), `cashflow-v4` under standard servicing:
+results from [`evals/report.md`](evals/report.md), `cashflow-v5` under standard servicing:
 
 | Gate                      | Threshold                                                                     | Current (mean) | Seeds                | Result |
 | ------------------------- | ----------------------------------------------------------------------------- | -------------: | -------------------- | ------ |
@@ -599,9 +677,13 @@ applicant is synthetic, the PD table and weights were set against the same simul
 fraud the checks catch is the fraud they were written for. See
 [`evals/README.md`](evals/README.md), "Limits".
 
-**Strict mode is not run in CI today.** CI runs lint, typecheck, unit and integration tests, and
-an end to end smoke test, but not the evaluation (about two and a half minutes). The rule is
-enforced by review: a pull request that changes a policy file must carry the regenerated report.
+**In CI.** Every push runs the gates on a small fixed seed sample of the policy in force (2
+seeds of 600 applicants, `src/evals/ci-gates.test.ts`), with the same thresholds and a negative
+control that the launch policy fails, inside the ordinary test step. The full strict evaluation
+(about six to eight minutes) runs in `.github/workflows/eval.yml`: nightly, on demand, and on
+any pull request that touches underwriting, servicing, veracity, the evals, or the shared money
+and reason code. It fails on any gate, and fails if the committed `report.md` or
+`baseline.json` is not what the code in the tree produces.
 
 ## 15. Known gaps
 
@@ -609,11 +691,14 @@ What a credit committee would ask about before lending real money, and the answe
 
 - **Calibration.** The scorecard weights, the cutoff, the PD table and the reserve rates come
   from a synthetic population. All need refitting on real outcomes.
-- **The CURRENT reserve rate.** The latest report measures a 0.42% roll to charge-off for
-  principal current on the first of the month, against a 0.40% reserve. It was 0.36% when the
-  rate was set. The difference is inside the simulation's noise, but it is the next thing to
-  look at when the policy is next versioned.
-- **The PD table is version 2's.** Not regenerated for versions 3 or 4, by choice, with reasons
+- **Reserve rates.** Re-set with version 5 at the measured roll rate plus a quarter (section
+  11). The GRACE and DELINQUENT reserves are at or near 100% because simulated businesses that
+  miss a payment have nearly always closed; real borrowers cure far more often.
+- **Graduates.** Version 5 prices graduates on their own PD, but they still go bad about twice
+  as often as first time approvals at the same scores, and the few grade B graduates lose
+  money. A larger cohort, or real outcomes, should decide whether graduation needs a stricter
+  rule than a price.
+- **The PD table is version 2's.** Not regenerated for versions 3 to 5, by choice, with reasons
   in [`UNDERWRITING.md`](UNDERWRITING.md).
 - **No dollar authority tiers.** Any reviewer can approve any amount up to the rent requested.
   A real operation would tier approval authority by amount and require a second approver above
@@ -623,8 +708,5 @@ What a credit committee would ask about before lending real money, and the answe
   happened outside the system.
 - **No personal guarantee, collateral or collections agency.** Recovery after charge-off is
   whatever the business pays by hand.
-- **Periodic review and veracity.** A periodic review that finds rewritten history declines for a
-  trust reason that is not on the deterioration list, so it does not freeze the plan; the
-  `fraud.history_rewritten` alert is what brings it to a person.
 - **Periodic review is not in the evaluation.** The simulation shows the book without that
   protection.

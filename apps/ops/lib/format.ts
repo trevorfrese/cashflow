@@ -184,6 +184,14 @@ export function fieldLabel(key: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
+/**
+ * An upper case code such as `PAST_DUE` or `PERIODIC_REVIEW`. Short tokens (`US`, `R01`)
+ * and anything with lower case letters are left alone: they are names, not codes.
+ */
+function isCode(value: string): boolean {
+  return value.length >= 4 && /^[A-Z]{2,}(_[A-Z0-9]+)*$/.test(value);
+}
+
 /** One value out of an alert's detail or an audit payload, formatted by what its key says. */
 export function fieldValue(key: string, value: unknown): string {
   if (value === null || value === undefined) return NONE;
@@ -197,6 +205,7 @@ export function fieldValue(key: string, value: unknown): string {
     if (/^\d{4}-\d{2}-\d{2}T/.test(value)) return dateTime(value);
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return date(value);
     if (/^\d{4}-\d{2}$/.test(value)) return month(value);
+    if (isCode(value)) return words(value);
     return value;
   }
   if (Array.isArray(value)) {

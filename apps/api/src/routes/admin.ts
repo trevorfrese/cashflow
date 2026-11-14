@@ -8,8 +8,10 @@ import {
   BusinessIdentityView,
   Cents,
   CircuitBreakerStatus,
+  BusinessLimitView,
   ClearScreeningRequest,
   DecideLeaseChangeRequest,
+  FreezeRentPlanRequest,
   DelinquencySummary,
   Id,
   IsoDateSchema,
@@ -18,10 +20,12 @@ import {
   LeaseChangeView,
   LedgerAccount,
   ListAlertsQuery,
+  LowerLimitRequest,
   MonitoringSummary,
   RecordReviewRequest,
   RecordReviewResponse,
   ReleaseFreezeRequest,
+  RemoveLimitCapRequest,
   RentPlan,
   ResendPayoutRequest,
   ResetCircuitBreakerRequest,
@@ -29,6 +33,7 @@ import {
   ReviewQueueItem,
   ScreeningResult,
   TrialBalance,
+  TripCircuitBreakerRequest,
   type LeaseChangeField,
 } from '@cashflow/shared';
 import type { FastifyInstance } from 'fastify';
@@ -36,6 +41,12 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 
 import { adminIdentity, requireRole } from '../auth/admin.ts';
+import {
+  businessLimitView,
+  lowerBusinessLimit,
+  removeBusinessLimitCap,
+} from '../controls/limit-cap.ts';
+import { freezePlanAdvance, pauseApprovals } from '../controls/operator-actions.ts';
 import { todayIso } from '../dates.ts';
 import type { Db } from '../db.ts';
 import { notFound } from '../errors.ts';
@@ -302,6 +313,112 @@ export async function adminRoutes(app: FastifyInstance) {
     },
     async (request) =>
       resetBreaker(db, { identity: adminIdentity(request), reason: request.body.reason }),
+  );
+
+  // ---------- Admin only: tighten-only controls ----------
+  // Each one only makes things stricter, needs a typed reason, writes an audit event, and
+  // has an undo an admin can use. See `controls/operator-actions.ts`.
+
+  /**
+   * Pause new automatic approvals by hand: trips the circuit breaker, so applications the
+   * engine would approve go to a reviewer. Undone by `circuit-breaker/reset`.
+   */
+  r.post(
+    '/admin/circuit-breaker/trip',
+    {
+      ...admin,
+      schema: {
+        tags,
+        security,
+        body: TripCircuitBreakerRequest,
+        response: { 200: CircuitBreakerStatus },
+      },
+    },
+    async (request) =>
+      pauseApprovals(db, { identity: adminIdentity(request), reason: request.body.reason }),
+  );
+
+  /**
+   * Freeze a plan's next period: no new period is generated and a payout that falls due is
+   * held. Undone by `rent-plans/:id/release-freeze`, which for this freeze needs an admin.
+   */
+  r.post(
+    '/admin/rent-plans/:id/freeze',
+    {
+      ...admin,
+      schema: {
+        tags,
+        security,
+        params: Params,
+        body: FreezeRentPlanRequest,
+        response: { 200: RentPlan },
+      },
+    },
+    async (request) => {
+      const plan = await freezePlanAdvance(db, {
+        planId: request.params.id,
+        identity: adminIdentity(request),
+        reason: request.body.reason,
+      });
+      const standings = await planStandings(db, [plan], todayIso());
+      return toRentPlan(plan, standings.get(plan.id));
+    },
+  );
+
+  /** A business's approved limit, any admin cap on it, and the limit in force. */
+  r.get(
+    '/admin/businesses/:id/limit',
+    {
+      ...reviewer,
+      schema: { tags, security, params: Params, response: { 200: BusinessLimitView } },
+    },
+    async (request) => businessLimitView(db, request.params.id),
+  );
+
+  /**
+   * Lower a business's limit. Refused unless strictly below the limit in force: the console
+   * never raises a limit, underwriting does. Undone by `limit/remove-cap`.
+   */
+  r.post(
+    '/admin/businesses/:id/limit/lower',
+    {
+      ...admin,
+      schema: {
+        tags,
+        security,
+        params: Params,
+        body: LowerLimitRequest,
+        response: { 200: BusinessLimitView },
+      },
+    },
+    async (request) =>
+      lowerBusinessLimit(db, {
+        businessId: request.params.id,
+        limitCents: request.body.limitCents,
+        reason: request.body.reason,
+        identity: adminIdentity(request),
+      }),
+  );
+
+  /** Take an admin's cap off a business's limit: the decision's limit applies again. */
+  r.post(
+    '/admin/businesses/:id/limit/remove-cap',
+    {
+      ...admin,
+      schema: {
+        tags,
+        security,
+        params: Params,
+        body: RemoveLimitCapRequest,
+        response: { 200: BusinessLimitView },
+      },
+    },
+    async (request) =>
+      removeBusinessLimitCap(db, {
+        businessId: request.params.id,
+        reason: request.body.reason,
+        identity: adminIdentity(request),
+      }),
   );
 
   // ---------- Reviewer: read the book ----------

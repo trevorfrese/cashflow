@@ -27,6 +27,7 @@ import {
 } from './common';
 import { BusinessIdentityView, LeaseChangeView, ScreeningResult } from './identity';
 import { Alert, AuditEventView } from './monitoring';
+import { BusinessLimitView, ReviewAuthority } from './operator-controls';
 import { GraduationOffer, PassThroughPeriod, PaymentHistory } from './pass-through';
 import { DelinquencySummary, Installment, LandlordPayout, RentPlan, Repayment } from './rent-plan';
 import {
@@ -215,6 +216,8 @@ export const OperatorBusinessDetail = z.object({
   graduationOffers: z.array(GraduationOffer).default([]),
   /** Every adverse action notice and notice of incompleteness sent, newest first. */
   notices: z.array(AdverseActionNoticeView).default([]),
+  /** The approved limit, any admin cap on it, and the limit in force. */
+  limit: BusinessLimitView.nullable().default(null),
 });
 export type OperatorBusinessDetail = z.infer<typeof OperatorBusinessDetail>;
 
@@ -333,6 +336,8 @@ export const OperatorApplicationDetail = z.object({
   explanation: DecisionExplanation.nullable().default(null),
   /** Notices sent on the application, oldest first, with their full text. */
   notices: z.array(AdverseActionNoticeView).default([]),
+  /** How far a reviewer may approve this one alone. */
+  authority: ReviewAuthority.nullable().default(null),
 });
 export type OperatorApplicationDetail = z.infer<typeof OperatorApplicationDetail>;
 
@@ -543,3 +548,5 @@ export const OperatorEvaluation = z.object({
   allPass: z.boolean(),
 });
 export type OperatorEvaluation = z.infer<typeof OperatorEvaluation>;
+
+export * from './operator-controls';

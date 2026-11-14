@@ -17,6 +17,7 @@ import {
   type TestHarness,
 } from '../test/helpers.ts';
 import { acceptGraduationOffer } from './graduation.ts';
+import { UNPAID } from './delinquency.ts';
 import { paymentHistorySummary } from './payment-history.ts';
 import { startPassThroughPlan } from './pass-through.ts';
 
@@ -334,8 +335,18 @@ describe('pass-through plan', () => {
     // CashFlow's own money covered the rent; the business owes it.
     expect(await accountBalance(h.db, receivableCode(business.id))).toBe(RENT);
     expect(await accountBalance(h.db, ACCOUNTS.CAPITAL_POOL)).toBe(5_000_000 - RENT);
-    const closed = await h.db.rentPlan.findUniqueOrThrow({ where: { id: plan.id } });
-    expect(closed).toMatchObject({ status: 'CLOSED', closedReason: 'RETURNED_AFTER_PAYOUT' });
+    // The amount owed is an installment on a receivable row, serviced like a financed one.
+    const receivable = await h.db.landlordPayout.findUniqueOrThrow({
+      where: { passThroughPeriodId: first.id },
+      include: { installments: true },
+    });
+    expect(receivable).toMatchObject({ rentPlanId: plan.id, status: 'PAID', amountCents: RENT });
+    expect(receivable.installments).toEqual([
+      expect.objectContaining({ principalCents: RENT, feeCents: 0, dueDate: period.returnedOn }),
+    ]);
+    // An unauthorized return freezes the plan for a reviewer and stops automatic debits.
+    const frozen = await h.db.rentPlan.findUniqueOrThrow({ where: { id: plan.id } });
+    expect(frozen).toMatchObject({ status: 'ACTIVE', advanceFrozenReason: 'UNAUTHORIZED_RETURN' });
     // The books agree with themselves: the receivable is expected, the payable is clear.
     expect(await passThroughBooks()).toMatchObject({ payable: 0, cash: 0, held: 0, alerts: [] });
     const alert = await h.db.alert.findFirst({
@@ -346,10 +357,150 @@ describe('pass-through plan', () => {
   }, 180_000);
 });
 
+describe('pass-through receivable after a return', () => {
+  /** The month a collection came back after the landlord was paid, and its receivable. */
+  async function receivableOf(periodId: string) {
+    return h.db.landlordPayout.findUniqueOrThrow({
+      where: { passThroughPeriodId: periodId },
+      include: { installments: { include: { repayments: true } } },
+    });
+  }
+
+  it('is collected under the servicing policy, and the plan carries on once it is paid', async () => {
+    const start = addDays(todayIso(), -80);
+    const { plan, first, bankLink, business } = await startPlan(start);
+    await fundPool(h.app, 5_000_000);
+    // Insufficient funds, reported three weeks late: a retryable code, so the bank link stays.
+    await h.db.bankLink.update({
+      where: { id: bankLink.id },
+      data: { providerAccountToken: 'mock_acct_ridgeline_late_return_r01_once' },
+    });
+    const returnDay = addDays(first.collectOn, 21);
+    await runThrough(start, addDays(returnDay, 1));
+
+    const period = await h.db.passThroughPeriod.findUniqueOrThrow({ where: { id: first.id } });
+    expect(period).toMatchObject({ status: 'RETURNED_AFTER_PAYOUT', returnCode: 'R01' });
+    // The collection job debited the amount owed on the day the return arrived, as the first
+    // attempt under the servicing policy, and it went through.
+    const receivable = await receivableOf(first.id);
+    const [owed] = receivable.installments;
+    expect(owed).toMatchObject({ status: 'PAID', attemptCount: 1, feeCents: 0 });
+    expect(owed!.repayments.map((r) => r.status)).toEqual(['SUCCEEDED']);
+    expect(await accountBalance(h.db, receivableCode(business.id))).toBe(0);
+    // The pool covered the return and the collection paid it back: nothing lost.
+    expect(await accountBalance(h.db, ACCOUNTS.CAPITAL_POOL)).toBe(5_000_000);
+    expect(
+      (await h.db.rentPlan.findUniqueOrThrow({ where: { id: plan.id } })).advanceFrozenAt,
+    ).toBeNull();
+
+    // With nothing owed, the next month is collected and paid to the landlord as usual.
+    const next = await h.db.passThroughPeriod.findFirstOrThrow({
+      where: { rentPlanId: plan.id, dueDate: { gt: first.dueDate } },
+      orderBy: { dueDate: 'asc' },
+    });
+    await runThrough(addDays(returnDay, 2), addDays(next.dueDate, 1));
+    expect(
+      (await h.db.passThroughPeriod.findUniqueOrThrow({ where: { id: next.id } })).status,
+    ).toBe('PAID');
+    expect(payoutsTo('mock_landlord_harbor')).toHaveLength(2);
+    expect(await passThroughBooks()).toMatchObject({ payable: 0, cash: 0, held: 0, alerts: [] });
+  }, 300_000);
+
+  it('holds every later month while owed, and is charged off at 90 days like a financed plan', async () => {
+    const start = addDays(todayIso(), -80);
+    const { plan, first, bankLink, business } = await startPlan(start);
+    await fundPool(h.app, 5_000_000);
+    // Unauthorized, three weeks late: the bank link is disabled, so nothing more can be
+    // debited automatically, and the plan is frozen for a reviewer.
+    await h.db.bankLink.update({
+      where: { id: bankLink.id },
+      data: { providerAccountToken: 'mock_acct_ridgeline_late_return_r10_once' },
+    });
+    const returnDay = addDays(first.collectOn, 21);
+    // Every day through the return and the first weeks after it. `run` checks that the trial
+    // balance balances and that a second run of the day changes nothing.
+    await runThrough(start, addDays(returnDay, 10));
+    const period = await h.db.passThroughPeriod.findUniqueOrThrow({ where: { id: first.id } });
+    expect(period).toMatchObject({ status: 'RETURNED_AFTER_PAYOUT', returnCode: 'R10' });
+    const returnedOn = period.returnedOn as IsoDate;
+    expect(await h.db.bankLink.findUniqueOrThrow({ where: { id: bankLink.id } })).toMatchObject({
+      status: 'ERROR',
+    });
+    // Not debited: there is no linked account to present it to. Waiting is not an attempt.
+    let [owed] = (await receivableOf(first.id)).installments;
+    expect(owed).toMatchObject({
+      status: 'LATE',
+      attemptCount: 0,
+      collectionSkipReason: 'NO_BANK_LINK',
+    });
+    expect(
+      (await h.db.rentPlan.findUniqueOrThrow({ where: { id: plan.id } })).delinquencyStatus,
+    ).toBe('DELINQUENT');
+
+    // Then weekly until just before the charge-off age, and daily across it.
+    for (let d = addDays(returnDay, 17); d < addDays(returnedOn, 88); d = addDays(d, 7)) {
+      await run(d);
+    }
+    await runThrough(addDays(returnedOn, 88), addDays(returnedOn, 89));
+    const beforeChargeOff = await h.db.rentPlan.findUniqueOrThrow({ where: { id: plan.id } });
+    expect(beforeChargeOff).toMatchObject({ status: 'ACTIVE', delinquencyStatus: 'DEFAULT' });
+    // The provision job reserved for it on the first of the month, at the DEFAULT rate.
+    expect(-(await accountBalance(h.db, ACCOUNTS.ALLOWANCE))).toBe(RENT);
+    // While it was owed, no later month was collected or paid: one payout to the landlord.
+    const later = await h.db.passThroughPeriod.findMany({
+      where: { rentPlanId: plan.id, dueDate: { gt: first.dueDate } },
+    });
+    expect(later.length).toBeGreaterThan(0);
+    for (const p of later) expect(p.status).toBe('CANCELLED');
+    expect(payoutsTo('mock_landlord_harbor')).toHaveLength(1);
+
+    // Day 90: written off against the allowance, the plan closed, the business suspended.
+    await runThrough(addDays(returnedOn, 90), addDays(returnedOn, 91));
+    [owed] = (await receivableOf(first.id)).installments;
+    expect(owed).toMatchObject({ status: 'CHARGED_OFF' });
+    expect(owed!.chargedOffAt).not.toBeNull();
+    expect(await h.db.rentPlan.findUniqueOrThrow({ where: { id: plan.id } })).toMatchObject({
+      status: 'CLOSED',
+      delinquencyStatus: 'CHARGED_OFF',
+      closedReason: 'CHARGED_OFF',
+    });
+    expect((await h.db.business.findUniqueOrThrow({ where: { id: business.id } })).status).toBe(
+      'SUSPENDED',
+    );
+    expect(await accountBalance(h.db, receivableCode(business.id))).toBe(0);
+    expect(await accountBalance(h.db, ACCOUNTS.ALLOWANCE)).toBe(0);
+    // The same posting as a financed charge-off: DR allowance, CR the business's receivable.
+    const chargeOff = await h.db.ledgerTransaction.findFirstOrThrow({
+      where: { referenceType: 'charge_off', referenceId: plan.id },
+      include: { entries: { include: { account: true } } },
+    });
+    expect(
+      chargeOff.entries.map((e) => [e.account.code, e.direction, e.amountCents]).sort(),
+    ).toEqual(
+      [
+        [ACCOUNTS.ALLOWANCE, 'DEBIT', RENT],
+        [receivableCode(business.id), 'CREDIT', RENT],
+      ].sort(),
+    );
+    // The loss is the pool's: it covered the rent and nothing came back.
+    expect(await accountBalance(h.db, ACCOUNTS.CAPITAL_POOL)).toBe(5_000_000 - RENT);
+    expect(
+      await h.db.installment.count({
+        where: { rentPlanId: plan.id, status: { in: UNPAID } },
+      }),
+    ).toBe(0);
+    expect(await passThroughBooks()).toMatchObject({ payable: 0, cash: 0, held: 0, alerts: [] });
+    expect((await trialBalance(h.db)).balanced).toBe(true);
+  }, 600_000);
+});
+
 describe('graduation', () => {
   it('offers a financed plan after three on time months, and it takes over from the next month once accepted', async () => {
     await fundPool(h.app, 25_000_000);
-    const start = addDays(todayIso(), -140);
+    // About 140 days back, on the 10th: the first rent date (the 1st) is then inside the
+    // 30 day horizon and its collection window is still open, whatever today's date is.
+    const back = addDays(todayIso(), -140);
+    const start = `${back.slice(0, 7)}-10` as IsoDate;
     const { plan, session } = await startPlan(start);
 
     // Play until the refresh-eligibility job makes an offer.

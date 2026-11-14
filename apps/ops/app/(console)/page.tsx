@@ -23,8 +23,9 @@ import {
   StatusPill,
   Table,
 } from '@/components/ui';
+import { ReasonAction } from '@/components/shared';
 import { date, dateTime, money, percent, words } from '@/lib/format';
-import { SEVERITY } from '@/lib/labels';
+import { breakerRule, SEVERITY } from '@/lib/labels';
 import { useIsAdmin } from '@/lib/session-context';
 import { useAction, useApi } from '@/lib/use-api';
 
@@ -111,7 +112,11 @@ export default function OverviewPage() {
 
             <Card
               title="Scheduled jobs"
-              aside={<span className="muted">As of {date(s.asOf)}</span>}
+              aside={
+                <span className="muted">
+                  As of {date(s.asOf)}. <Link href="/jobs">Run history</Link>
+                </span>
+              }
             >
               <Table
                 caption="Last run of every scheduled job"
@@ -266,8 +271,8 @@ function BreakerCard({ breaker, onReset }: { breaker: CircuitBreakerStatus; onRe
               <dd>{dateTime(breaker.trippedAt)}</dd>
             </div>
             <div>
-              <dt>Rule</dt>
-              <dd className="mono">{breaker.trippedByRule ?? '-'}</dd>
+              <dt>Tripped by</dt>
+              <dd>{breakerRule(breaker.trippedByRule)}</dd>
             </div>
             {breaker.trippedAlertId ? (
               <div>
@@ -327,6 +332,26 @@ function BreakerCard({ breaker, onReset }: { breaker: CircuitBreakerStatus; onRe
               {breaker.resetReason ? `: ${breaker.resetReason}` : ''}
             </p>
           ) : null}
+          {isAdmin ? (
+            <ReasonAction
+              path="circuit-breaker/trip"
+              schema={CircuitBreakerStatus}
+              body={(reason) => ({ reason })}
+              trigger="Pause new approvals"
+              submit="Pause approvals"
+              label="Why automatic approvals should stop"
+              hint="Recorded in the audit log under your name. An admin resets the breaker to resume."
+              variant="danger"
+              onDone={onReset}
+            >
+              <p className="small">
+                Applications the engine would approve go to the review queue instead. Declines,
+                requests for information, and running plans are not affected.
+              </p>
+            </ReasonAction>
+          ) : (
+            <p className="muted small">Pausing approvals by hand needs the admin role.</p>
+          )}
         </>
       )}
     </Card>

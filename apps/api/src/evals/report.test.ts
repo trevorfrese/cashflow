@@ -66,9 +66,16 @@ describe('evaluation and report', () => {
         ['v2_baseline', 'cashflow-v2', 'baseline'],
         ['v2_standard', 'cashflow-v2', 'standard'],
         ['v3_standard', 'cashflow-v3', 'standard'],
+        ['v4_standard', 'cashflow-v4', 'standard'],
       ],
     );
-    expect(POLICY_VERSION).toBe('cashflow-v4');
+    expect(POLICY_VERSION).toBe('cashflow-v5');
+    // Version 4 graduates at first time terms, base case only. Its origination decisions are
+    // the gated configuration's.
+    const v4 = evaluation.comparisons.find((c) => c.name === 'v4_standard')!;
+    expect(v4.gates).toBeNull();
+    expect(v4.base.passThrough).not.toBeNull();
+    expect(v4.swapSet!.swapIn.count + v4.swapSet!.swapOut.count).toBe(0);
     const [v1Baseline, v1Standard, v2Baseline] = evaluation.comparisons;
     expect(v1Baseline!.gates).toHaveLength(11);
     expect(v1Baseline!.throughTheDoor!.bySeed).toHaveLength(2);
@@ -114,7 +121,7 @@ describe('evaluation and report', () => {
     ]) {
       expect(md).toContain(heading);
     }
-    expect(md).toContain('v4_standard (gated)');
+    expect(md).toContain('v5_standard (gated)');
     expect(md).toContain('At most 5% of applicants referred to a reviewer');
     expect(md).toContain('all scored honest applicants');
     expect(md).toContain('Funded only AUC');
@@ -133,25 +140,28 @@ describe('evaluation and report', () => {
       'v2_standard',
       'v3_standard',
       'v4_standard',
+      'v5_standard',
     ]);
-    expect(baseline.configurations.v4_standard.gated).toBe(true);
+    expect(baseline.configurations.v5_standard.gated).toBe(true);
+    expect(baseline.configurations.v4_standard.gated).toBe(false);
+    expect(baseline.configurations.v4_standard.passThrough.base.graduated).toBeDefined();
     expect(baseline.configurations.v3_standard.gated).toBe(false);
-    expect(baseline.configurations.v4_standard.passThrough.base.stats.declined).toBeGreaterThan(0);
+    expect(baseline.configurations.v5_standard.passThrough.base.stats.declined).toBeGreaterThan(0);
     expect(baseline.configurations.v2_standard.gated).toBe(false);
-    expect(baseline.configurations.v4_standard.gates).toHaveLength(11);
+    expect(baseline.configurations.v5_standard.gates).toHaveLength(11);
     expect(baseline.configurations.v1_baseline.gates).toHaveLength(11);
-    expect(baseline.configurations.v4_standard.veracity.honest.applicants).toBeGreaterThan(0);
-    expect(baseline.configurations.v4_standard.throughTheDoor.bySeed).toHaveLength(2);
-    expect(baseline.configurations.v4_standard.throughTheDoor.honest.auc).toBe(
+    expect(baseline.configurations.v5_standard.veracity.honest.applicants).toBeGreaterThan(0);
+    expect(baseline.configurations.v5_standard.throughTheDoor.bySeed).toHaveLength(2);
+    expect(baseline.configurations.v5_standard.throughTheDoor.honest.auc).toBe(
       Math.round(evaluation.throughTheDoor.pooled.honest.auc! * 1000) / 1000,
     );
     // The funded only figure keeps its place in the headline, ungated.
     const fundedOnly = evaluation.base.rankOrdering.auc;
-    expect(baseline.configurations.v4_standard.headline.base.auc).toBe(
+    expect(baseline.configurations.v5_standard.headline.base.auc).toBe(
       fundedOnly === null ? null : Math.round(fundedOnly * 1000) / 1000,
     );
     expect(json.throughTheDoor.bySeed).toHaveLength(2);
-    expect(baseline.configurations.v4_standard.headline.base.netLossBps).toBe(
+    expect(baseline.configurations.v5_standard.headline.base.netLossBps).toBe(
       evaluation.base.overall.netLossBps,
     );
     for (const text of [md, renderJson(evaluation), renderBaseline(evaluation)])

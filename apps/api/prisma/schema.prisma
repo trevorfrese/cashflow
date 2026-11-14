@@ -110,6 +110,14 @@ model Business {
   verificationRef           String?
   /// Provider reason codes behind a REVIEW or FAILED status. Internal.
   verificationReasons       String[]           @default([])
+  /// A ceiling an admin put on the monthly rent this business may have fronted, below what
+  /// its decision approved. Only ever lowers the limit: the effective limit is the smaller
+  /// of the two. Null when no admin has lowered it. History is in the audit log
+  /// (LIMIT_CAP_SET, LIMIT_CAP_REMOVED). See `src/controls/limit-cap.ts`.
+  limitCapCents             Int?
+  limitCapSetAt             DateTime?
+  limitCapSetBy             String?
+  limitCapReason            String?
   createdAt                 DateTime           @default(now())
   updatedAt                 DateTime           @updatedAt
 
@@ -502,6 +510,9 @@ enum AdverseActionNoticeKind {
   INCOMPLETE
   /// The application stayed incomplete past the date in that notice and was closed.
   INCOMPLETE_DECLINED
+  /// A periodic review froze a running plan: no further rent is paid to the landlord until a
+  /// reviewer lifts it. An unfavorable change to existing credit.
+  PLAN_FROZEN
 }
 
 enum NoticeChannel {
@@ -989,6 +1000,13 @@ model LandlordPayout {
   returnCode    String?
   /// Times a returned payout was sent again. Each send has its own ledger posting key.
   resendCount   Int          @default(0)
+  /// Set on the receivable a pass-through plan is left with when the business's rent
+  /// collection comes back after the landlord was paid from it. Nothing is sent for this
+  /// row: the landlord was paid by that pass-through period, and the capital pool covered
+  /// the return. The row is PAID from the start and its one installment is what the business
+  /// owes, collected, aged and charged off like any financed installment. See
+  /// `reversePassThroughCollection` in `src/services/pass-through.ts`.
+  passThroughPeriodId String?  @unique
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 

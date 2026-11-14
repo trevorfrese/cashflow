@@ -36,8 +36,8 @@ import {
   type PolicyThresholds,
 } from './policy.ts';
 import type { PaymentHistoryFactor, PaymentHistorySummary } from './payment-history.ts';
-import { priceFee, type FeeBuildUp } from './pricing.ts';
-import { scoreCashFlow } from './scorecard.ts';
+import { pdEquivalentScore, priceFee, scaledPdBps, type FeeBuildUp } from './pricing.ts';
+import { gradeFor, scoreCashFlow } from './scorecard.ts';
 import { assessVeracity, depthCredit, findingsWith } from '../veracity/assess.ts';
 import type { VeracityInput } from '../veracity/types.ts';
 
@@ -104,6 +104,12 @@ export interface EngineInput {
    * `paymentHistory` (version 4).
    */
   paymentHistory?: PaymentHistorySummary | null;
+  /**
+   * A refresh-eligibility review of a pass-through customer: an approval is an offer to
+   * graduate to a financed plan. Under a policy with `graduation.graduatePricing` (version 5)
+   * the terms are set on the graduate's own PD.
+   */
+  graduation?: boolean;
 }
 
 /**
@@ -141,6 +147,16 @@ export interface DecisionSnapshot {
     summary: PaymentHistorySummary;
     factor: PaymentHistoryFactor;
     baseScore: number;
+  } | null;
+  /**
+   * How a graduate's terms were set (version 5): the PD multiplier, the PD it gave, and the
+   * score and grade the terms were read at. Null on any other decision.
+   */
+  graduatePricing?: {
+    pdMultiplierBps: number;
+    pdBps: number;
+    termsScore: number;
+    termsGrade: CreditGrade;
   } | null;
   /**
    * The scorecard factors with their points, which order the principal reasons. Internal:
@@ -317,6 +333,7 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
     referTriggers: [],
     veracity: null,
     paymentHistory: null,
+    graduatePricing: null,
     factors: null,
     recommendation: { outcome: 'NEEDS_INFO', approvedMonthlyLimitCents: null, feeBps: null },
   };
@@ -627,7 +644,20 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
   // rate rises as the rent falls, and a higher fee leaves less room under the coverage test.
   // Start at the requested rent and step down until the three agree. The rent only ever
   // falls, so this settles in a couple of rounds.
-  const gradeFeeBps = policy.pricing[card.grade].feeBps;
+  // A graduate's terms are read at the grade its own PD earns (version 5). Everyone else's at
+  // the scorecard's grade.
+  const graduateRules = input.graduation ? policy.graduation?.graduatePricing : undefined;
+  let termsGrade = card.grade;
+  let pdMultiplierBps: number | undefined;
+  if (graduateRules && policy.expectedLossPricing) {
+    const table = policy.expectedLossPricing.pdTable;
+    pdMultiplierBps = graduateRules.pdMultiplierBps;
+    const pdBps = scaledPdBps(table, card.score, pdMultiplierBps);
+    const termsScore = pdEquivalentScore(table, pdBps, card.score);
+    termsGrade = gradeFor(termsScore, policy);
+    snapshot.graduatePricing = { pdMultiplierBps, pdBps, termsScore, termsGrade };
+  }
+  const gradeFeeBps = policy.pricing[termsGrade].feeBps;
   const exposureContext = input.exposureContext ?? NO_EXPOSURE_CONTEXT;
   const leaseVerified = input.integrityContext?.leaseVerified ?? false;
   let rent = requested;
@@ -642,14 +672,15 @@ export function decide(input: EngineInput, policy: CreditPolicy = CURRENT_POLICY
           { pricing: policy.pricing, expectedLossPricing: policy.expectedLossPricing },
           {
             score: card.score,
-            grade: card.grade,
+            grade: termsGrade,
             rentCents: rent,
             installmentsPerMonth: installments,
+            pdMultiplierBps,
           },
         )
       : null;
     feeBps = fee?.feeBps ?? gradeFeeBps;
-    capacity = capacityCents(cashFlow, card.grade, policy, feeBps);
+    capacity = capacityCents(cashFlow, termsGrade, policy, feeBps);
     limit = policy.exposure
       ? approvedLimit(policy.exposure, {
           requestedCents: requested,

@@ -84,29 +84,60 @@ export interface ServicingPolicy {
 }
 
 /**
- * Reserve rates by bucket, read off the portfolio evaluation (credit policy v2, standard
- * servicing, five seeds of 2,000 applicants; "Roll to charge-off by bucket" in
- * `apps/api/evals/report.md`). The roll rate of a bucket is the share of the principal seen
- * in it that was later written off:
- *
- *   CURRENT      0.36% of principal outstanding on the evening of the first of a month
- *   GRACE        84.5% of principal in plans as they moved into grace
- *   DELINQUENT   94.3% of principal in delinquent plans on the first of a month
- *   DEFAULT      99.8% of the same in default
- *
- * The rates below are those rounded up. They are gross of recoveries, which are income only
- * when cash arrives. The steep step from CURRENT to GRACE is a property of the simulated
- * businesses, where an owner covers a short account from savings until the business fails,
- * so an installment that goes unpaid at all usually belongs to a business that has closed.
- * Real borrowers cure from grace far more often. These rates are a conservative starting
- * point and have to be re-measured on real roll rates before they mean anything.
+ * The first reserve rates, read off the portfolio evaluation under credit policy v2 (Phase
+ * R3): CURRENT 0.36%, GRACE 84.5%, DELINQUENT 94.3%, DEFAULT 99.8% roll to charge-off, rounded
+ * up with no further margin. Kept for the baseline servicing policy, which documents history.
+ * By the version 4 report the CURRENT roll rate (0.42%) had passed its 0.40% reserve.
  */
-const PROVISION_RATES_BPS: Record<OpenBucket, number> = {
+const PROVISION_RATES_BPS_R3: Record<OpenBucket, number> = {
   CURRENT: 40,
   GRACE: 8500,
   DELINQUENT: 9500,
   DEFAULT: 10_000,
 };
+
+/**
+ * Reserve rates by bucket, set with credit policy v5 from the default portfolio evaluation
+ * (five seeds of 2,000 applicants, standard servicing; "Roll to charge-off by bucket" in
+ * `apps/api/evals/report.md`). The roll rate of a bucket is the share of the principal seen in
+ * it that was later written off, measured two ways: on the evening of the first of a month,
+ * when the provision job runs, and as a plan enters the bucket. The rule:
+ *
+ *   reserve rate = the higher of the two pooled roll rates, plus a margin of a quarter of it,
+ *                  rounded up to 5 bps, and never above 100% (`reserveRateFor`).
+ *
+ *   Bucket       Measured (first of month / on entry)   Highest single seed   Reserve
+ *   CURRENT      0.42% / 0.44%                          0.48%                 0.55%
+ *   GRACE        n/a   / 79.47%                         94.29%                99.35%
+ *   DELINQUENT   92.59% / 86.57%                        100%                  100%
+ *   DEFAULT      99.38% / 98.58%                        100%                  100%
+ *
+ * The margin is there so the allowance is never below the loss the evaluation measured, on the
+ * pooled book or on any single seed. Rates are gross of recoveries, which are income only when
+ * cash arrives. The steep step from CURRENT to GRACE is a property of the simulated businesses,
+ * where an owner covers a short account from savings until the business fails, so an
+ * installment that goes unpaid at all usually belongs to a business that has closed. Real
+ * borrowers cure from grace far more often. These rates have to be re-measured on real roll
+ * rates before they mean anything. Re-measured on every policy version: a reserve below the
+ * measured roll rate is a finding.
+ */
+export const RESERVE_MARGIN_BPS = 2500;
+const PROVISION_RATES_BPS: Record<OpenBucket, number> = {
+  CURRENT: 55,
+  GRACE: 9935,
+  DELINQUENT: 10_000,
+  DEFAULT: 10_000,
+};
+
+/**
+ * The reserve rate for a measured roll rate under the rule above: the rate plus
+ * `RESERVE_MARGIN_BPS` of it, rounded up to 5 bps, at most 100%. Pure; the evaluation report
+ * uses it to show whether each bucket is covered.
+ */
+export function reserveRateFor(measuredRollBps: number): number {
+  const withMargin = (measuredRollBps * (10_000 + RESERVE_MARGIN_BPS)) / 10_000;
+  return Math.min(10_000, Math.ceil(withMargin / 5) * 5);
+}
 
 /**
  * How the services behaved before Phase R3: a failed debit was retried every day without
@@ -125,7 +156,7 @@ export const BASELINE_SERVICING_POLICY: ServicingPolicy = {
   payoutReleaseWindowDays: null,
   chargeOffAfterDays: null,
   recoveryRateBps: 1000,
-  provisionRatesBps: PROVISION_RATES_BPS,
+  provisionRatesBps: PROVISION_RATES_BPS_R3,
 };
 
 /**
@@ -153,6 +184,7 @@ export const BASELINE_SERVICING_POLICY: ServicingPolicy = {
  *     nothing more is debited automatically: the balance waits for a manual payment.
  *   - Charge off at 90 days past due and close the plan.
  *   - Recovery as in the baseline.
+ *   - Reserve by bucket at the measured roll rate plus a margin (`PROVISION_RATES_BPS`).
  */
 export const STANDARD_SERVICING_POLICY: ServicingPolicy = {
   name: 'standard',

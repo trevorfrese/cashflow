@@ -9,6 +9,7 @@ import {
   type UpdateLeaseRequest,
 } from '@cashflow/shared';
 
+import { cappedLimitCents } from '../controls/limit-cap.ts';
 import { CONTROLS_POLICY } from '../controls/policy.ts';
 import { clockNow, effectiveAt, todayIso } from '../dates.ts';
 import type { Db, Tx } from '../db.ts';
@@ -281,7 +282,11 @@ async function rentIncreaseRefusal(
   industry: RentChangeArgs['industry'],
 ): Promise<string | null> {
   const decision = await currentDecision(tx, plan.applicationId);
-  const limit = decision?.outcome === 'APPROVED' ? (decision.approvedMonthlyLimitCents ?? 0) : 0;
+  const limit = await cappedLimitCents(
+    tx,
+    plan.businessId,
+    decision?.outcome === 'APPROVED' ? (decision.approvedMonthlyLimitCents ?? 0) : 0,
+  );
   if (rentCents > limit) return 'RENT_OVER_LIMIT';
   const policy = CURRENT_POLICY;
   if (!policy.exposure) return null;
@@ -475,12 +480,13 @@ export async function applyApprovedRentIncreases(
     asOf: IsoDate;
   },
 ): Promise<number> {
+  const limit = await cappedLimitCents(tx, args.businessId, args.approvedMonthlyLimitCents);
   const plans = await tx.rentPlan.findMany({
     where: {
       businessId: args.businessId,
       kind: 'FINANCED',
       ...OPEN_PLAN,
-      pendingRentCents: { not: null, lte: args.approvedMonthlyLimitCents },
+      pendingRentCents: { not: null, lte: limit },
     },
   });
   for (const plan of plans) {

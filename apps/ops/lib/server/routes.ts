@@ -1,7 +1,8 @@
 /**
  * The API routes the console may reach through its proxy, and nothing else. A path that is
  * not listed here is not forwarded, whatever the session's role: the console has no button
- * for funding the pool or running jobs, so its proxy has no route for them either.
+ * for funding the pool or running jobs, so its proxy has no route for them either. It reads
+ * the job history and the ledger; it cannot run a job or post to the ledger.
  *
  * `:id` matches one path segment of letters, digits, `_` and `-`.
  */
@@ -11,6 +12,7 @@ export const PROXIED_ROUTES: ReadonlyArray<{ method: 'GET' | 'POST'; path: strin
   { method: 'GET', path: 'delinquency' },
   { method: 'GET', path: 'circuit-breaker' },
   { method: 'POST', path: 'circuit-breaker/reset' },
+  { method: 'POST', path: 'circuit-breaker/trip' },
   // Review queue
   { method: 'GET', path: 'reviews' },
   { method: 'GET', path: 'applications/:id' },
@@ -37,9 +39,17 @@ export const PROXIED_ROUTES: ReadonlyArray<{ method: 'GET' | 'POST'; path: strin
   { method: 'GET', path: 'businesses/:id/rent-plans' },
   { method: 'GET', path: 'businesses/:id/connections' },
   { method: 'POST', path: 'rent-plans/:id/release-freeze' },
+  { method: 'POST', path: 'rent-plans/:id/freeze' },
+  { method: 'GET', path: 'businesses/:id/limit' },
+  { method: 'POST', path: 'businesses/:id/limit/lower' },
+  { method: 'POST', path: 'businesses/:id/limit/remove-cap' },
   { method: 'POST', path: 'payouts/:id/resend' },
   // Audit
   { method: 'GET', path: 'audit-log' },
+  // Operations: read only
+  { method: 'GET', path: 'delinquency/plans' },
+  { method: 'GET', path: 'jobs' },
+  { method: 'GET', path: 'ledger/trial-balance' },
 ];
 
 const SEGMENT = /^[A-Za-z0-9_-]{1,64}$/;

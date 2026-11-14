@@ -18,8 +18,11 @@ const NAV: Array<{ href: string; label: string; count?: CountKey }> = [
   { href: '/alerts', label: 'Alerts', count: 'alerts' },
   { href: '/lease-changes', label: 'Lease changes', count: 'leaseChanges' },
   { href: '/screening', label: 'Screening', count: 'screening' },
+  { href: '/late-plans', label: 'Late plans' },
   { href: '/portfolio', label: 'Portfolio' },
+  { href: '/ledger', label: 'Ledger' },
   { href: '/customers', label: 'Customers' },
+  { href: '/jobs', label: 'Jobs' },
   { href: '/audit', label: 'Audit log' },
   { href: '/policy', label: 'Policy' },
 ];

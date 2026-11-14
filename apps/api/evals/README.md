@@ -9,10 +9,11 @@ It draws a synthetic population, runs every applicant through the real `decide()
 by day against simulated bank accounts and a finite capital pool. Nothing touches the
 database, the network, or a clock. The same seeds always give the same report.
 
-**Current state: 11 of 11 gates pass** under `cashflow-v4` (version 3 plus the payment history
+**Current state: 11 of 11 gates pass** under `cashflow-v5` (version 4 with graduates of the
+pass-through plan priced on their own PD; version 4 was version 3 plus the payment history
 factor, with credit declines put on the free pass-through plan and graduated from it; see
 "Pass-through and graduation" below). Its origination decisions are version 3's for every
-applicant, so every gated number equals `v3_standard`'s. Version 3 was version 2 plus the data
+applicant, so every gated number equals `v3_standard`'s and `v4_standard`'s. Version 3 was version 2 plus the data
 veracity checks on a population extended with connection data, honest messiness, and five more
 fraud archetypes. See "Data veracity" below for what changed and what it cost. The eleventh
 gate, `adverse_action_reasons`, checks that every decline and counter offer gives the applicant
@@ -50,7 +51,7 @@ pnpm --filter @cashflow/api eval:calibrate                    # regenerate the P
 
 Output:
 
-- `report.md`: the gates, the six configurations side by side, swap sets, then for the
+- `report.md`: the gates, the seven configurations side by side, swap sets, then for the
   gated configuration the headline numbers and cuts by grade, score band, archetype, and
   industry, calibration, the stress table, the pool by month, roll rates by delinquency
   bucket, the sensitivities, and the challengers.
@@ -61,6 +62,14 @@ Output:
   checked in, so a policy change shows up as a diff.
 
 The command exits 0 when gates fail unless `--strict` is passed.
+
+**In CI.** `src/evals/ci-gates.test.ts` runs the gated configuration on a fixed seed sample (2
+seeds of 600 applicants, 12 periods, about 20 seconds) in the unit tests on every push, and
+requires every gate to pass at the default thresholds, with a negative control (the launch
+policy under baseline servicing must fail the loss and fraud gates). `.github/workflows/eval.yml`
+runs the default strict evaluation nightly, on demand, and on pull requests that touch
+underwriting, servicing, veracity, the evals or the shared money and reason code, and fails if
+the checked in `report.md` or `baseline.json` differs from what the tree produces.
 
 ## What is gated, and what it is compared with
 
@@ -348,15 +357,21 @@ plans and graduation", with a table of the book with and without them. They shar
 the pool path and the pool gate include them. Challengers, sensitivities and every
 counterfactual run without pass-through. Default run, seeds pooled:
 
-| Scenario | Offered pass-through | Months | On time | Reviews | Would refer | Graduated | Graduates bad | Net loss | Margin |
-| -------- | -------------------: | -----: | ------: | ------: | ----------: | --------: | ------------: | -------: | -----: |
-| Base     |                2,844 | 32,362 |   44.2% |   8,068 |         980 |       229 |          8.3% |   56 bps | 37 bps |
-| Mild     |                3,381 | 37,622 |   42.5% |   9,130 |         629 |       417 |          6.0% |   33 bps | 59 bps |
-| Severe   |                3,853 | 43,479 |   44.5% |  11,846 |         244 |       424 |          4.5% |   23 bps | 69 bps |
+| Scenario | Offered pass-through | Months | On time | Reviews | Would refer | Graduated | Graduates bad | Net loss |  Margin |
+| -------- | -------------------: | -----: | ------: | ------: | ----------: | --------: | ------------: | -------: | ------: |
+| Base     |                2,844 | 32,383 |   44.2% |   8,087 |          11 |       227 |          8.4% |   57 bps |  72 bps |
+| Mild     |                3,381 | 37,634 |   42.6% |   9,137 |          14 |       412 |          6.3% |   33 bps |  94 bps |
+| Severe   |                3,853 | 43,504 |   44.5% |  11,866 |          35 |       419 |          4.5% |   24 bps | 109 bps |
 
-With graduates the base book's net loss is 21 bps (19 without) and its margin 77 bps (79).
-Graduates go bad two to three times as often as first time approvals at the same scores, but
-the cohort still makes money at the fees the PD table sets. "Would refer" counts reviews whose
+With graduates the base book's net loss is 21 bps (19 without) and its margin 78 bps (79).
+Graduates go bad about twice as often as first time approvals at the same scores (8.4% against
+3.8%, the report's "First time, same scores" column). Under version 4 they were priced as first
+time applicants and earned 37 bps (229 graduates, fee 158 bps). Version 5 prices them on their
+own PD (the table PD times 2.5, read back as a grade for the fee floor and rent share): 227
+graduate, the fee is 195 bps, and the margin 72 bps. The report's cohort table shows both, from
+the `v4_standard` comparison on the same applicants. "Would refer" fell from 980 to 11: at the
+graduate's lower grade most of those reviews now come out as a capacity decline instead of a
+referral near the cutoff. "Would refer" counts reviews whose
 outcome was a referral: they are not offered and not queued, so the refer rate is unchanged.
 
 Limits: the review reads the raw bank history (no veracity facts or point of sale), uptake of
@@ -532,17 +547,17 @@ should wait until the counter offer question above is settled.
 ## Roll rates and the loss reserve
 
 The report's "Roll to charge-off by bucket" table is where the reserve rates in
-`STANDARD_SERVICING_POLICY.provisionRatesBps` come from. On the evening of the first of each
-month, which is when the provision job runs, 0.36% of the principal outstanding in current
-plans was later charged off when the rates were set (Phase R3), 94.3% of the principal in
-delinquent plans, and 99.8% of the principal in default. No plan is in grace on the first,
-because all rent here is due on the first, so grace is measured on entry: 84.5% of principal in
-plans as they moved into grace. The policy uses those rounded up: 0.40%, 85%, 95%, and 100%.
-
-On the current report the same measures are 0.42%, 92.6%, 99.4%, and 79.5%. Every rate but the
-current one is still covered; current principal now rolls slightly above its 0.40% reserve.
-That is inside the simulation's noise, and a reason to revisit the rates at the next policy
-version (see [`../CREDIT_POLICY.md`](../CREDIT_POLICY.md), "Known gaps").
+`STANDARD_SERVICING_POLICY.provisionRatesBps` come from. It measures each bucket twice: on the
+evening of the first of each month, which is when the provision job runs, and as a plan enters
+the bucket. No plan is in grace on the first, because all rent here is due on the first, so
+grace has only the entry measure. Since version 5 the reserve is the higher of the two measures
+plus a quarter of it, rounded up to 5 bps and held to 100% (`reserveRateFor`): CURRENT 0.55%
+(measured 0.42% and 0.44%), GRACE 99.35% (79.5% on entry), DELINQUENT and DEFAULT 100% (92.6%
+and 99.4%). That covers the pooled rate and every single seed (the highest, 0.48% for CURRENT
+and 94.3% for GRACE). The table now shows the reserve beside the measures and whether it covers
+them, and a unit test fails if a reserve falls below the checked in baseline's measured roll.
+Until version 5 the reserves were the Phase R3 measures rounded up with no margin (0.40%, 85%,
+95%, 100%), and by version 4 the CURRENT roll (0.42%) had passed its reserve.
 
 The step from current to grace says more about the simulation than about lending. Owners
 here cover a short account from savings until the business fails, and the balance check waits

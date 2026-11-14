@@ -1,5 +1,10 @@
 import { catalogEntry, formatCents } from '@cashflow/shared';
 
+import {
+  BASELINE_SERVICING_POLICY,
+  STANDARD_SERVICING_POLICY,
+  type OpenBucket,
+} from '../servicing/policy.ts';
 import { ASSUMPTIONS, STRESS } from './assumptions.ts';
 import { GATE_THRESHOLDS, type GateResult } from './gates.ts';
 import {
@@ -443,6 +448,10 @@ function swapSection(e: Evaluation): string[] {
 function rollTable(m: PortfolioMetrics): string {
   const rate = (r: { observedCents: number; rollRateBps: number }) =>
     r.observedCents === 0 ? 'n/a' : pct(r.rollRateBps, 2);
+  const servicing =
+    m.servicingPolicy === BASELINE_SERVICING_POLICY.name
+      ? BASELINE_SERVICING_POLICY
+      : STANDARD_SERVICING_POLICY;
   return markdownTable(
     [
       'Bucket',
@@ -452,9 +461,16 @@ function rollTable(m: PortfolioMetrics): string {
       'Principal on entering the bucket',
       'Later written off',
       'Roll rate',
+      'Reserve rate',
+      'Covered',
     ],
     m.bucketRoll.map((r, i) => {
       const entry = m.bucketEntryRoll[i]!;
+      const reserve = servicing.provisionRatesBps[r.bucket as OpenBucket];
+      const measured = Math.max(
+        r.observedCents === 0 ? 0 : r.rollRateBps,
+        entry.observedCents === 0 ? 0 : entry.rollRateBps,
+      );
       return [
         r.bucket,
         dollars(r.observedCents),
@@ -463,9 +479,11 @@ function rollTable(m: PortfolioMetrics): string {
         dollars(entry.observedCents),
         dollars(entry.chargedOffCents),
         rate(entry),
+        pct(reserve, 2),
+        reserve >= measured ? 'yes' : 'NO',
       ];
     }),
-    ['left', 'right', 'right', 'right', 'right', 'right', 'right'],
+    ['left', 'right', 'right', 'right', 'right', 'right', 'right', 'right', 'left'],
   );
 }
 
@@ -959,7 +977,11 @@ function passThroughSection(e: Evaluation): string[] {
       count(s.graduated),
     ];
   });
-  const cohortRows = scenarios.map(([name, m]) => {
+  // The same applicants under the comparisons that also graduate (version 4), base case.
+  const earlier = e.comparisons
+    .filter((c) => c.base.passThrough !== null)
+    .map((c) => [`Base, \`${c.name}\``, c.base] as const);
+  const cohortRows = [...scenarios, ...earlier].map(([name, m]) => {
     const g = m.passThrough!.graduated;
     return [
       name,
@@ -967,6 +989,7 @@ function passThroughSection(e: Evaluation): string[] {
       count(g.planMonths),
       dollars(g.volumeCents),
       pct(g.badRateBps),
+      pct(m.passThrough!.graduatedFirstTimeBadRateBps),
       `${g.netLossBps} bps`,
       dollars(g.netMarginCents),
       `${g.netMarginBps} bps`,
@@ -1027,6 +1050,13 @@ function passThroughSection(e: Evaluation): string[] {
     '',
     '### The graduated cohort',
     '',
+    'Graduates are priced on their own PD under the gated policy: the PD table at their score',
+    'times the policy multiplier, read back as the grade a first time applicant with that PD',
+    'would get, which sets the fee floor and the largest rent share. Rows for an earlier',
+    'policy show the same applicants graduating at first time terms. "First time, same',
+    'scores" is the bad rate first time approvals had in the graduates\' five point score',
+    'bands: what the PD table expects of a graduate at first time terms.',
+    '',
     markdownTable(
       [
         'Scenario',
@@ -1034,13 +1064,14 @@ function passThroughSection(e: Evaluation): string[] {
         'Plan months',
         'Volume',
         'Bad rate',
+        'First time, same scores',
         'Net loss',
         'Net margin',
         'Margin',
         'Profitable',
       ],
       cohortRows,
-      ['left', ...Array<Align>(8).fill('right')],
+      ['left', ...Array<Align>(9).fill('right')],
     ),
     '',
     'By grade at graduation (base case):',
@@ -1167,12 +1198,13 @@ export function renderMarkdown(e: Evaluation): string {
     '',
     '## What underwriting bought and what servicing bought',
     '',
-    'The same applicants under six configurations. Reading left to right along the top:',
+    `The same applicants under ${e.comparisons.length + 1} configurations. Reading left to right along the top:`,
     'changing only servicing (`v1_baseline` to `v1_standard`), changing only the credit policy',
     '(`v1_baseline` to `v2_baseline`), both (`v2_standard`), the data veracity checks on top',
-    '(`v3_standard`), and payment history with pass-through plans and graduation on top of',
-    `that (\`${e.run.gated}\`, the gated configuration). Its origination decisions are`,
-    "version 3's for every applicant; it differs in the pool its graduates share.",
+    '(`v3_standard`), payment history with pass-through plans and graduation on top of that',
+    `(\`v4_standard\`), and graduates priced on their own PD (\`${e.run.gated}\`, the gated`,
+    "configuration). The last two make version 3's origination decisions for every applicant;",
+    'they differ in the pool their graduates share and in what graduates pay.',
     '',
     ...e.comparisons.map((c) => `- \`${c.name}\`: ${c.description}`),
     '',
@@ -1254,8 +1286,10 @@ export function renderMarkdown(e: Evaluation): string {
     'plan first moves into a bucket. The roll rate is the share of that principal that was',
     'later written off. All rent here is due on the first, so no plan is in the grace bucket on',
     'a provision date: only the entry measure sees it. The reserve rates in',
-    '`src/servicing/policy.ts` are the first of the month rates for CURRENT, DELINQUENT, and',
-    'DEFAULT and the entry rate for GRACE, rounded up.',
+    '`src/servicing/policy.ts` are the higher of the two measures plus a margin of a quarter of',
+    'it, rounded up to 5 bps and held to 100% (`reserveRateFor`). "Covered" says whether the',
+    'reserve is at least both measured rates on this run: a NO is a finding for the next',
+    'policy version.',
     '',
     rollTable(e.base),
     '',
@@ -1513,6 +1547,7 @@ function passThroughSummary(m: PortfolioMetrics) {
       netMarginCents: g.netMarginCents,
       netMarginBps: g.netMarginBps,
     },
+    graduatedFirstTimeBadRateBps: p.graduatedFirstTimeBadRateBps,
     bookWithGraduates: {
       netLossBps: p.bookWithGraduates.netLossBps,
       netMarginBps: p.bookWithGraduates.netMarginBps,
@@ -1563,6 +1598,7 @@ export function renderBaseline(e: Evaluation): string {
         ? { throughTheDoor: throughTheDoorSummary(c.throughTheDoor, e.run.seeds) }
         : {}),
       ...(c.gates ? { gates: gateSummary(c.gates) } : {}),
+      ...(c.base.passThrough ? { passThrough: { base: passThroughSummary(c.base) } } : {}),
     };
   }
   configurations[e.run.gated] = {

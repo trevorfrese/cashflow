@@ -2,6 +2,7 @@ import {
   addDays,
   catalogEntry,
   daysBetween,
+  formatCents,
   principalReasonsFromCodes,
   selectPrincipalReasons,
   type PrincipalReason,
@@ -17,7 +18,7 @@ import { CONTROLS_POLICY } from '../controls/policy.ts';
 
 import { clockNow, todayIso } from '../dates.ts';
 import type { Db } from '../db.ts';
-import { notFound, unprocessable } from '../errors.ts';
+import { AppError, notFound, unprocessable } from '../errors.ts';
 import type { Prisma, UnderwritingDecision } from '../generated/prisma/client.ts';
 import type { DecisionSnapshot } from '../underwriting/engine.ts';
 import { CURRENT_POLICY } from '../underwriting/policy.ts';
@@ -176,6 +177,17 @@ export async function recordReview(db: Db, args: RecordReviewArgs) {
           'LIMIT_OUT_OF_RANGE',
           'The approved limit must be above zero and no more than the rent requested',
           { requestedMonthlyRentCents: application.requestedMonthlyRentCents },
+        );
+      }
+      // Dollar authority: a reviewer approves up to the ceiling, an admin above it. Checked
+      // here, on the limit actually approved, whatever the console offered.
+      const ceiling = CONTROLS_POLICY.reviewerApprovalCeilingCents;
+      if (args.identity.role !== 'admin' && limitCents > ceiling) {
+        throw new AppError(
+          403,
+          'ABOVE_REVIEWER_AUTHORITY',
+          `A reviewer may approve a monthly limit up to ${formatCents(ceiling)}. This one is ${formatCents(limitCents)}: an admin has to approve it, or approve a lower limit`,
+          { reviewerApprovalCeilingCents: ceiling, approvedMonthlyLimitCents: limitCents },
         );
       }
       const maxFeeBps = CURRENT_POLICY.expectedLossPricing?.maxFeeBps ?? 10_000;

@@ -10,6 +10,7 @@ import {
   POLICY_V2,
   POLICY_V3,
   POLICY_V4,
+  POLICY_V5,
   POLICY_VERSION,
   type CreditPolicy,
 } from './policy.ts';
@@ -20,12 +21,13 @@ const flagCodes = (r: ReturnType<typeof decide>) => r.snapshot.integrityFlags.ma
 
 describe('policy versions', () => {
   it('names the current policy and keeps the launch policy available', () => {
-    expect(CURRENT_POLICY).toBe(POLICY_V4);
-    expect(POLICY_VERSION).toBe('cashflow-v4');
+    expect(CURRENT_POLICY).toBe(POLICY_V5);
+    expect(POLICY_VERSION).toBe('cashflow-v5');
     expect(POLICIES['cashflow-v1']).toBe(POLICY_V1);
     expect(POLICIES['cashflow-v2']).toBe(POLICY_V2);
     expect(POLICIES['cashflow-v3']).toBe(POLICY_V3);
     expect(POLICIES['cashflow-v4']).toBe(POLICY_V4);
+    expect(POLICIES['cashflow-v5']).toBe(POLICY_V5);
     // Version 3 is version 2 plus the veracity checks and nothing else.
     const { version: _v3, scorecard: _s3, veracity, ...rest3 } = POLICY_V3;
     const { version: _v2, scorecard: _s2, veracity: none, ...rest2 } = POLICY_V2;
@@ -45,6 +47,11 @@ describe('policy versions', () => {
     expect(noGraduation).toBeNull();
     expect(paymentHistory).not.toBeNull();
     expect(graduation).toEqual({ minOnTimeMonths: 3, offerValidDays: 30 });
+    // Version 5 is version 4 with graduates priced on their own PD, nothing else.
+    const { version: _v5, graduation: graduation5, ...rest5 } = POLICY_V5;
+    const { version: _v4b, graduation: graduation4, ...rest4b } = POLICY_V4;
+    expect(rest5).toEqual(rest4b);
+    expect(graduation5).toEqual({ ...graduation4, graduatePricing: { pdMultiplierBps: 25_000 } });
   });
 
   it('stamps every outcome with the version that made it', () => {
@@ -55,9 +62,9 @@ describe('policy versions', () => {
     expect(needsInfo.outcome).toBe('NEEDS_INFO');
     expect(declined.outcome).toBe('DECLINED');
     for (const r of [approved, needsInfo, declined]) {
-      expect(r.policyVersion).toBe('cashflow-v4');
-      expect(r.snapshot.policyVersion).toBe('cashflow-v4');
-      expect(r.snapshot.thresholds.minScore).toBe(POLICY_V4.minScore);
+      expect(r.policyVersion).toBe('cashflow-v5');
+      expect(r.snapshot.policyVersion).toBe('cashflow-v5');
+      expect(r.snapshot.thresholds.minScore).toBe(POLICY_V5.minScore);
     }
     expect(decide(engineInput(account()), POLICY_V1).policyVersion).toBe('cashflow-v1');
     expect(decide(engineInput(account()), POLICY_V2).policyVersion).toBe('cashflow-v2');

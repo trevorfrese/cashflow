@@ -151,6 +151,8 @@ export async function reviewEligibility(
     periodicReview: true,
     veracity,
     paymentHistory: history,
+    // An approval here is an offer to graduate: priced on the graduate's own PD (version 5).
+    graduation: true,
   });
   const limit = result.approvedMonthlyLimitCents ?? 0;
   const qualifies = result.outcome === 'APPROVED' && limit >= plan.monthlyRentCents;

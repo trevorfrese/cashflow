@@ -179,10 +179,13 @@ export function ReasonAction<T>({
     );
   }
   if (!open) {
+    // Wrapped so a column layout does not stretch the button across the card.
     return (
-      <Button variant={variant} onClick={() => setOpen(true)}>
-        {trigger}
-      </Button>
+      <div>
+        <Button variant={variant} onClick={() => setOpen(true)}>
+          {trigger}
+        </Button>
+      </div>
     );
   }
   return (

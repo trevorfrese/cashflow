@@ -1,10 +1,18 @@
-import { daysBetween, type IsoDate } from '@cashflow/shared';
+import {
+  daysBetween,
+  principalReason,
+  selectPrincipalReasons,
+  type IsoDate,
+  type PrincipalReason,
+} from '@cashflow/shared';
 
 import type { AppContext } from '../context.ts';
-import { effectiveAt } from '../dates.ts';
+import { effectiveAt, monthsBetween } from '../dates.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
+import { openAlert } from '../monitoring/service.ts';
 import type { EngineInput, EngineResult } from '../underwriting/engine.ts';
 import { CURRENT_POLICY, type CreditPolicy } from '../underwriting/policy.ts';
+import { createFreezeNoticeTx } from './adverse-action.ts';
 import { recordAudit } from './audit.ts';
 import { gatherExposureContext } from './portfolio-state.ts';
 import { gatherDecisionData } from './connections.ts';
@@ -39,8 +47,43 @@ export const DETERIORATION_CODES: ReadonlySet<string> = new Set([
   'NEGATIVE_FREE_CASH_FLOW',
   'INSUFFICIENT_CAPACITY',
   'SCORE_BELOW_MINIMUM',
-  'UNVERIFIED_DEPOSITS',
 ]);
+
+/**
+ * Decline reasons that question the data itself, not the business's finances: deposits that
+ * round trip, connected accounts held by someone else, and a bank history that was rewritten
+ * between pulls. A periodic review that declines for one of these freezes the next period
+ * like a deterioration, and also opens an alert, because a person has to look at it.
+ */
+export const TRUST_CODES: ReadonlySet<string> = new Set([
+  'UNVERIFIED_DEPOSITS',
+  'ACCOUNT_OWNERSHIP_NOT_CONFIRMED',
+  'ACCOUNT_HISTORY_NOT_VERIFIED',
+]);
+
+/**
+ * Veracity findings that say the bank or sales history changed between pulls for days that
+ * were already final. On an application only `HISTORY_REWRITTEN` declines; the other two
+ * refer. A running plan has no review queue to refer to, so at periodic review all three
+ * freeze the next period and open an alert, and a reviewer decides whether to lift it.
+ */
+export const REWRITE_FINDINGS: ReadonlySet<string> = new Set([
+  'HISTORY_REWRITTEN',
+  'HISTORY_CHANGED',
+  'SALES_HISTORY_CHANGED',
+]);
+
+/** The catalog reason the owner is told for each rewrite finding. */
+const REWRITE_REASON: Readonly<Record<string, string>> = {
+  HISTORY_REWRITTEN: 'ACCOUNT_HISTORY_NOT_VERIFIED',
+  HISTORY_CHANGED: 'ACCOUNT_HISTORY_NOT_VERIFIED',
+  SALES_HISTORY_CHANGED: 'SALES_HISTORY_NOT_VERIFIED',
+};
+
+/** A freeze reason that is about trust in the data: it opens an alert as well. */
+export function isTrustReason(reason: string | null): boolean {
+  return reason !== null && (TRUST_CODES.has(reason) || REWRITE_FINDINGS.has(reason));
+}
 
 /**
  * A periodic review needs fresh data. When the newest transaction the bank returns is more
@@ -57,8 +100,18 @@ export function dataAgeDays(bankData: EngineInput['bankData'], asOf: IsoDate): n
   return Math.max(0, daysBetween(latest, asOf));
 }
 
-/** Why a periodic review freezes the next period, or null when it does not. Pure. */
+/**
+ * Why a periodic review freezes the next period, or null when it does not. Pure. Trust comes
+ * first: a rewritten history freezes whatever the score says, and whether the engine declined
+ * on it (bank history) or referred (sales history, or a change that is not all one way).
+ */
 export function watchReason(result: EngineResult, policy: CreditPolicy): string | null {
+  if (result.outcome === 'DECLINED') {
+    const trust = result.reasons.find((r) => TRUST_CODES.has(r.code));
+    if (trust) return trust.code;
+  }
+  const rewrite = result.snapshot.veracity?.findings.find((f) => REWRITE_FINDINGS.has(f.code));
+  if (rewrite) return rewrite.code;
   if (result.score === null) return null;
   if (result.outcome === 'DECLINED') {
     const reason = result.reasons.find((r) => DETERIORATION_CODES.has(r.code));
@@ -66,6 +119,37 @@ export function watchReason(result: EngineResult, policy: CreditPolicy): string 
   }
   if (result.score < policy.reunderwriting.watchScore) return 'SCORE_BELOW_WATCH';
   return null;
+}
+
+/**
+ * What the owner is told on the notice for a freeze: the catalog reasons behind it, at most
+ * four. A trust reason is stated as itself. A credit reason is stated the way a decline is,
+ * with the factors that cost the most points in place of the score. Pure.
+ */
+export function freezePrincipalReasons(result: EngineResult, reason: string): PrincipalReason[] {
+  const messages = new Map(result.reasons.map((r) => [r.code, r.message]));
+  if (REWRITE_FINDINGS.has(reason)) return [principalReason(REWRITE_REASON[reason]!)];
+  if (TRUST_CODES.has(reason)) return [principalReason(reason, messages.get(reason))];
+  return selectPrincipalReasons({
+    outcome: 'DECLINED',
+    counterOffer: false,
+    reasons: result.reasons,
+    factors: result.snapshot.factors,
+  });
+}
+
+/**
+ * Time in business on the review date: what was stated at application, plus the months
+ * since. The stated figure is a floor, and the business has kept trading since. Pure.
+ */
+export function timeInBusinessAt(
+  application: { timeInBusinessMonths: number; submittedAt: Date | null; createdAt: Date },
+  asOf: IsoDate,
+): number {
+  const statedOn = (application.submittedAt ?? application.createdAt)
+    .toISOString()
+    .slice(0, 10) as IsoDate;
+  return application.timeInBusinessMonths + monthsBetween(statedOn, asOf);
 }
 
 /**
@@ -105,13 +189,14 @@ export async function reunderwritePlan(
 
   const bankLink = plan.business.bankLinks[0] ?? null;
   const commerceLink = plan.business.commerceLinks[0] ?? null;
+  const timeInBusinessMonths = timeInBusinessAt(plan.application, asOf);
   // The same path as an application: snapshots, the freshness rule, and the veracity facts.
   const { bankData, commerceData, veracity } = bankLink
     ? await gatherDecisionData(ctx, {
         businessId: plan.businessId,
         bankLink,
         commerceLink,
-        timeInBusinessMonths: plan.application.timeInBusinessMonths,
+        timeInBusinessMonths,
         asOf,
         reason: 'REUNDERWRITE',
         periodicReview: true,
@@ -137,8 +222,8 @@ export async function reunderwritePlan(
   const policy = CURRENT_POLICY;
   const result = await providers.underwriting.decide({
     statedMonthlyRevenueCents: plan.application.statedMonthlyRevenueCents,
-    // Time in business moves on with the calendar. The stated figure is a floor.
-    timeInBusinessMonths: plan.application.timeInBusinessMonths,
+    // Time in business moves on with the calendar from what was stated at application.
+    timeInBusinessMonths,
     requestedMonthlyRentCents: plan.monthlyRentCents,
     bankData,
     commerceData,
@@ -151,7 +236,8 @@ export async function reunderwritePlan(
   });
 
   const reason = watchReason(result, policy);
-  const unscored = result.score === null;
+  const trust = isTrustReason(reason);
+  const unscored = result.score === null && !trust;
   const wasFrozen = plan.advanceFrozenAt !== null;
   const freeze = reason !== null;
 
@@ -221,6 +307,47 @@ export async function reunderwritePlan(
       ctx.log.warn(
         { planId: plan.id, reason, score: result.score },
         'rent plan frozen by periodic review',
+      );
+      // Stopping the advances on a running plan is an unfavorable change to existing credit:
+      // the owner gets a notice with the reasons, stored with the freeze.
+      await createFreezeNoticeTx(tx, {
+        application: plan.application,
+        businessName: plan.business.legalName,
+        plan,
+        decision,
+        principalReasons: freezePrincipalReasons(result, reason!),
+        actor,
+      });
+    }
+    if (trust) {
+      // A rewritten history or accounts that are not the business's own is a fraud question.
+      // A person has to look, whether or not the plan was already frozen. One alert per plan
+      // and month.
+      await openAlert(
+        tx,
+        {
+          type: 'fraud.periodic_review_trust_failure',
+          category: 'FRAUD',
+          severity:
+            reason === 'HISTORY_REWRITTEN' || reason === 'ACCOUNT_HISTORY_NOT_VERIFIED'
+              ? 'CRITICAL'
+              : 'HIGH',
+          subjectType: 'rent_plan',
+          subjectId: plan.id,
+          title: `Periodic review could not trust the data: ${plan.business.legalName}`,
+          detail: {
+            planId: plan.id,
+            businessId: plan.businessId,
+            decisionId: decision.id,
+            period,
+            reason,
+            findings: result.snapshot.veracity?.findings.map((f) => f.code) ?? [],
+            frozenNow: freeze && !wasFrozen,
+          },
+          dedupeKey: `periodic_review_trust:${plan.id}:${period}`,
+        },
+        effectiveAt(asOf),
+        actor,
       );
     }
     if (unscored) return 'unscored';

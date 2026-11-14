@@ -34,7 +34,8 @@ argument and defaults to `CURRENT_POLICY`.
 | `cashflow-v1` | Retired | The launch policy. Kept as `POLICY_V1` so the portfolio evals can run it beside the current one.          |
 | `cashflow-v2` | Retired | Integrity checks, earlier decline detection, expected loss pricing, exposure rules, and manual referrals. |
 | `cashflow-v3` | Retired | Version 2 plus the data veracity checks (`src/veracity/`) and a data depth factor that reads them.        |
-| `cashflow-v4` | Current | Version 3 plus the payment history factor and graduation from the free pass-through plan.                 |
+| `cashflow-v4` | Retired | Version 3 plus the payment history factor and graduation from the free pass-through plan.                 |
+| `cashflow-v5` | Current | Version 4 with graduates of the pass-through plan priced on their own PD (see "Graduation").              |
 
 Phases named below are rounds of the project's evaluation work: Phase R1 first measured
 version 1 in the portfolio simulation, R2 produced version 2, and R3 changed the simulator to
@@ -739,9 +740,12 @@ rent, the applicant will be told the specific reasons in writing.
 `AdverseActionNotice` is append only (a trigger rejects UPDATE and DELETE) and, like
 `DataSnapshot`, has no foreign keys, so deleting a business never deletes a notice it was
 sent (records are kept under 1002.12(b)). Each row stores the kind, the principal reasons as
-rendered, the full text as delivered, the statement version (`cashflow-notice-v1`), the date
+rendered, the full text as delivered, the statement version (`cashflow-notice-v2`), the date
 the action was taken, the deadline it had to meet, the delivery time and channel (`IN_APP`;
-there is no email seam yet), and who generated it. One notice per decision and kind.
+there is no email seam yet), and who generated it. One notice per decision and kind. Since
+`cashflow-notice-v2` a notice names the application by a short reference number (the last six
+characters of its id, uppercased, `noticeReference` in `packages/shared`), never the raw id;
+the app shows the same reference beside the notice.
 
 | Kind                         | When                                                                                        | Deadline                                                       |
 | ---------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
@@ -749,6 +753,7 @@ there is no email seam yet), and who generated it. One notice per decision and k
 | `COUNTER_OFFER_NOT_ACCEPTED` | The owner declines the offer (`POST .../decline-offer`), or 30 days pass with no plan on it | 90 days after the counter offer, 1002.9(a)(1)(iv)              |
 | `INCOMPLETE`                 | 10 days waiting on information: a notice of incompleteness with a date 30 days out          | 30 days after the application, 1002.9(a)(1)(ii) and (c)(1)-(2) |
 | `INCOMPLETE_DECLINED`        | The day after that date, if still incomplete, and only once the first notice was sent       | 30 days after closing it, 1002.9(a)(1)(ii)                     |
+| `PLAN_FROZEN`                | In the transaction that freezes a running plan: a periodic review, or an operator hold      | 30 days after the freeze, 1002.9(a)(1)(iii)                    |
 
 A counter offer taken up (a financed plan opened on it) gets no notice: it is not adverse
 action. The counter offer window is for the notice only; a plan can still be opened on an
@@ -813,9 +818,11 @@ below are its question 10, 2 is 2, 3 is 3, 4 is 4, 5 is 5, 6 is 6, 7 is 7, 8 is 
    incompleteness goes unanswered; CashFlow sends a closing notice anyway. Confirm that
    this is harmless, and that 10 days then 30 days are reasonable.
 7. **Periodic reviews and freezes.** A monthly review that freezes advances on a running
-   plan could be "an unfavorable change in the terms of an account" (1002.2(c)(1)(ii)). No
-   notice is sent today. Does the delinquency exception (1002.2(c)(2)(ii)) cover a freeze
-   for deterioration, or is a notice owed?
+   plan, and an operator's hold, are treated as "an unfavorable change in the terms of an
+   account" (1002.2(c)(1)(ii)), and a `PLAN_FROZEN` notice is stored with the freeze. Does the
+   delinquency exception (1002.2(c)(2)(ii)) make it unnecessary for a freeze for
+   deterioration, is "plan under review" (`PLAN_UNDER_REVIEW`, the reason on an operator
+   hold) specific enough, and is the wording of the freeze notice adequate?
 8. **Reviewer declines for suspected fraud.** The reviewer must pick a catalog reason, for
    example "We could not verify the revenue on your application". Is that specific enough
    (comment 9(b)(2)-2 allows "unable to verify"), and is it ever acceptable to withhold the
@@ -893,8 +900,20 @@ of on time months barely separates them (six months instead of three changed the
 rate from about 10% to 8% on three seeds, with fewer graduates). On the default run (five
 seeds) 229 businesses graduate in the base case: 8.3% go bad, net loss 56 bps of volume, and
 the cohort still earns a 37 bps margin; with them the book's net loss is 21 bps against 19.
-The details are in `evals/report.md`, "Pass-through plans and graduation". Pricing graduates on their own PD is
-the next calibration step once there are enough of them.
+The details are in `evals/report.md`, "Pass-through plans and graduation".
+
+**Graduate pricing (version 5).** Graduates went bad 2.1 to 2.3 times as often as first time
+approvals in the same five point score band, and their realized loss was about three times
+the expected loss their fees were built on. Version 5 prices them on their own PD
+(`graduation.graduatePricing`): the PD table at the graduate's score times 2.5 (the measured
+ratio, rounded up) is the PD in the expected loss build up, and the grade a first time
+applicant with that PD would get (`pdEquivalentScore`, `src/underwriting/pricing.ts`) sets the
+fee floor and the largest rent share. The decision keeps the scorecard's score and grade; the
+snapshot records the graduate PD and the grade the terms were read at (`graduatePricing`).
+The engine applies it only when the service says the review is a graduation review
+(`EngineInput.graduation`), so a first time applicant's decision is version 4's exactly. This
+prices the gap; it does not close it: the same businesses graduate, and they pay for their
+risk. The measured effect is in `CREDIT_POLICY.md`, section 1, and `evals/report.md`.
 
 ## Periodic re-underwriting
 
@@ -904,8 +923,9 @@ plan it freezes gets no new period and no payout that day. Once a calendar month
 each active financed plan on fresh bank data, through the same data path and veracity checks as
 an application, with the plan's rent as the request, and stores the result as
 a decision of kind `PERIODIC_REVIEW` beside the origination decision (it does not replace
-it). When the result is a credit decline, or the score is below the watch threshold (50), the
-plan is frozen: `advanceFrozenAt` is set, no new rent period is generated, and a payout
+it). Time in business is what was stated at application plus the months since
+(`timeInBusinessAt`). When the result is a credit decline, a trust failure, or the score is
+below the watch threshold (50), the plan is frozen: `advanceFrozenAt` is set, no new rent period is generated, and a payout
 that falls due is held (`HELD`, reason `ADVANCE_FROZEN`). A period already paid out is not
 touched and is collected as normal.
 
@@ -915,14 +935,25 @@ touched and is collected as normal.
 - A decline for an origination rule (an exposure cap, the fee cap) does not freeze a customer
   who is repaying. Only deterioration does: the decline reasons in `DETERIORATION_CODES`
   (overdrafts, negative days, revenue decline, thin buffer decline, revenue too low, rent
-  share, no free cash flow, no capacity, score below the minimum, round trip deposits), or a
-  score under the watch score.
+  share, no free cash flow, no capacity, score below the minimum), or a score under the
+  watch score.
+- A trust failure freezes too, and also opens a `fraud.periodic_review_trust_failure` alert
+  (critical for a rewritten bank history, high otherwise), one per plan and month, whether or
+  not the plan was already frozen: a decline for a reason in `TRUST_CODES` (round trip
+  deposits, accounts held by someone else, a rewritten bank history), or a veracity finding in
+  `REWRITE_FINDINGS` (`HISTORY_REWRITTEN`, `HISTORY_CHANGED`, `SALES_HISTORY_CHANGED`), which
+  freezes even when the engine only referred. A running plan has no review queue, so a
+  reviewer decides whether to lift it.
+- A freeze is an unfavorable change to existing credit. The owner gets a `PLAN_FROZEN`
+  adverse action notice, stored in the transaction that freezes the plan, with catalog
+  reasons: the trust reason itself (`ACCOUNT_HISTORY_NOT_VERIFIED`,
+  `SALES_HISTORY_NOT_VERIFIED`, ...) or the principal reasons a decline would give. It is
+  listed with the application's other notices and shown on the plan in the app while the
+  freeze lasts. An operator's hand freeze (`OPERATOR_HOLD`) sends the same notice with the
+  reason `PLAN_UNDER_REVIEW`.
 - The stated revenue checks are skipped and the lease is treated as verified. A request to
   connect a payout account is shown to the owner but does not stop the review; a bank that
   cannot be pulled does.
-- A veracity knockout on a periodic review (rewritten history, for example) declines with a
-  trust reason that is not on the deterioration list, so it does not freeze the plan by
-  itself. The `fraud.history_rewritten` monitoring alert is what brings it to a person.
 - A freeze is not lifted automatically. A reviewer lifts it with
   `POST /v1/admin/rent-plans/:id/release-freeze`. A payout held by the freeze is then paid
   only if it is still within 5 days of its scheduled date. Otherwise it is cancelled, and a

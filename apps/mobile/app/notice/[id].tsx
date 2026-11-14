@@ -38,6 +38,7 @@ export default function NoticeScreen() {
             tone={notice.isAdverseAction ? 'late' : 'due'}
           />
           <Text variant="body">{`Sent ${longDate(notice.deliveredAt)} in the app.`}</Text>
+          <Text variant="body" tone="muted">{`Reference number ${notice.reference}`}</Text>
           {notice.respondBy ? (
             <Text variant="bodyStrong">{`Please respond by ${longDate(notice.respondBy)}.`}</Text>
           ) : null}

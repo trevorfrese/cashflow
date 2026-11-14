@@ -161,8 +161,14 @@ describe('words and labels', () => {
     expect(fieldValue('buckets', { CURRENT: 1 })).toBe('{"CURRENT":1}');
     expect(detailRows({ owedCents: 100, status: 'OPEN' })).toEqual([
       { key: 'owedCents', label: 'Owed', value: '$1.00' },
-      { key: 'status', label: 'Status', value: 'OPEN' },
+      { key: 'status', label: 'Status', value: 'Open' },
     ]);
+    // Codes read as words; names, country codes, and return codes do not change.
+    expect(fieldValue('reason', 'PAST_DUE')).toBe('Past due');
+    expect(fieldValue('kind', 'PERIODIC_REVIEW')).toBe('Periodic review');
+    expect(fieldValue('country', 'US')).toBe('US');
+    expect(fieldValue('returnCode', 'R01')).toBe('R01');
+    expect(fieldValue('name', 'Blue Door Bakery LLC')).toBe('Blue Door Bakery LLC');
   });
 
   it('formats a policy value by its unit', () => {

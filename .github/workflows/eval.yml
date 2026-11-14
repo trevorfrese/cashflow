@@ -1,0 +1,81 @@
+name: Portfolio eval
+
+# The full strict portfolio evaluation: 5 seeds of 2,000 synthetic applicants, 12 periods,
+# 11 gates (apps/api/evals/README.md). It takes several minutes, so it does not run on every
+# push; the fixed seed sample in apps/api/src/evals/ci-gates.test.ts does, inside the CI
+# workflow. This runs nightly, on demand, and on any pull request that touches credit policy,
+# pricing, servicing, or the evals themselves. Change control is in apps/api/CREDIT_POLICY.md.
+
+on:
+  schedule:
+    # Nightly, 07:17 UTC.
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/api/src/underwriting/**'
+      - 'apps/api/src/servicing/**'
+      - 'apps/api/src/evals/**'
+      - 'apps/api/src/veracity/**'
+      - 'apps/api/evals/**'
+      - 'packages/shared/src/money/**'
+      - 'packages/shared/src/adverse-action/**'
+      - '.github/workflows/eval.yml'
+
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    name: Strict portfolio eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      TURBO_TELEMETRY_DISABLED: 1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # The evaluation imports the API's Prisma types through the services it shares code with.
+      - name: Generate Prisma client
+        run: pnpm --filter @cashflow/api db:generate
+
+      # Exits non-zero if any gate fails. Writes report.md, report.json and baseline.json.
+      - name: Evaluate (strict)
+        run: pnpm --filter @cashflow/api eval:portfolio --strict
+
+      # The committed report and baseline must be what the code in the tree produces. A policy
+      # change that did not commit its regenerated report fails here.
+      - name: Report is current
+        run: |
+          git diff --stat -- apps/api/evals/report.md apps/api/evals/baseline.json
+          git diff --quiet -- apps/api/evals/report.md apps/api/evals/baseline.json || {
+            echo "::error::apps/api/evals/report.md or baseline.json differs from what the code produces. Run pnpm --filter @cashflow/api eval:portfolio --strict and commit both."
+            exit 1
+          }
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portfolio-eval
+          path: |
+            apps/api/evals/report.md
+            apps/api/evals/report.json
+            apps/api/evals/baseline.json
+          if-no-files-found: ignore

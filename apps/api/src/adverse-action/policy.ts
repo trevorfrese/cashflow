@@ -35,13 +35,19 @@ export const NOTICE_POLICY = {
    * choice.
    */
   incompleteDeclinedNoticeDays: 30,
+  /**
+   * 1002.9(a)(1)(iii): notice within 30 days after taking adverse action on an existing
+   * account. A freeze at periodic review is stored with the freeze, on the same day.
+   */
+  existingAccountNoticeDays: 30,
 } as const;
 
 /**
  * Bumped whenever the notice template or a statement in it changes. Stored on every notice,
- * so what an applicant was sent can always be matched to the wording in force.
+ * so what an applicant was sent can always be matched to the wording in force. v2 prints a
+ * short reference number in place of the application id and adds the plan freeze notice.
  */
-export const NOTICE_STATEMENT_VERSION = 'cashflow-notice-v1';
+export const NOTICE_STATEMENT_VERSION = 'cashflow-notice-v2';
 
 /**
  * The creditor named on every notice (1002.9(a)(2)). PLACEHOLDERS: there is no company

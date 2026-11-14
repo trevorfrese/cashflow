@@ -2,7 +2,7 @@ import { addDays, type IsoDate } from '@cashflow/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { AppContext } from '../context.ts';
-import { todayIso } from '../dates.ts';
+import { monthsBetween, setDevClockDate, todayIso } from '../dates.ts';
 import { runAllJobs } from '../jobs/index.ts';
 import { reunderwriteJob } from '../jobs/reunderwrite.ts';
 import { ACCOUNTS } from '../ledger/accounts.ts';
@@ -24,6 +24,7 @@ import {
 import { POLICY_VERSION } from '../underwriting/policy.ts';
 import { CURRENT_DECISION, decisionHistory } from './decisions.ts';
 import { createRentPlan } from './rent-plan.ts';
+import { reunderwritePlan } from './reunderwriting.ts';
 
 let h: TestHarness;
 let ctx: AppContext;
@@ -862,5 +863,99 @@ describe('periodic re-underwriting', () => {
     expect(
       (await h.db.rentPlan.findUniqueOrThrow({ where: { id: planId } })).advanceFrozenAt,
     ).toBeNull();
+  });
+});
+
+describe('periodic re-underwriting on the review date', () => {
+  /** A plan opened today on a bank token of our choosing. */
+  async function planOn(bankToken: string) {
+    await fundPool(h.app, 25_000_000);
+    const session = await registerUser(h.app);
+    const api = client(h.app, session);
+    const { businessId, applicationId } = await approvedBusiness(h.app, session, { bankToken });
+    const today = todayIso();
+    const lease = await api.post<{ id: string }>('/v1/leases', demoLease(businessId));
+    const plan = await createRentPlan(ctx, {
+      userId: session.userId,
+      leaseId: lease.body.id,
+      applicationId,
+      installmentsPerMonth: 2,
+      asOf: today,
+    });
+    return { api, businessId, applicationId, planId: plan.id, today };
+  }
+
+  /** Run a review `days` ahead, with the sandbox bank's clock moved there too. */
+  async function reviewAhead(planId: string, today: IsoDate, days: number) {
+    const on = addDays(today, days);
+    setDevClockDate(on);
+    try {
+      return { on, outcome: await reunderwritePlan(ctx, planId, on) };
+    } finally {
+      setDevClockDate(null);
+    }
+  }
+
+  it('scores time in business as of the review date, not the application date', async () => {
+    const { applicationId, planId, today } = await planOn('mock_healthy_rev_48000_rent_6200');
+    const { on, outcome } = await reviewAhead(planId, today, 65);
+    expect(outcome).toBe('ok');
+    const review = await h.db.underwritingDecision.findFirstOrThrow({
+      where: { applicationId, kind: 'PERIODIC_REVIEW' },
+    });
+    const inputs = (review.snapshot as { inputs: { timeInBusinessMonths: number } }).inputs;
+    expect(monthsBetween(today, on)).toBeGreaterThanOrEqual(2);
+    expect(inputs.timeInBusinessMonths).toBe(36 + monthsBetween(today, on));
+  });
+
+  it('freezes the next period, alerts, and sends a notice when the bank history was rewritten', async () => {
+    // A doctored feed: later pulls leave out debt payments from days that were already final.
+    const { api, applicationId, planId, today } = await planOn(
+      'mock_healthy_rewrites_rev_48000_rent_6200',
+    );
+    const { outcome } = await reviewAhead(planId, today, 35);
+    expect(outcome).toBe('frozen');
+
+    const review = await h.db.underwritingDecision.findFirstOrThrow({
+      where: { applicationId, kind: 'PERIODIC_REVIEW' },
+    });
+    const findings = (
+      review.snapshot as { veracity: { findings: Array<{ code: string }> } }
+    ).veracity.findings.map((f) => f.code);
+    expect(findings).toContain('HISTORY_REWRITTEN');
+
+    // The next period is frozen. Nothing already paid is touched: the plan is still active.
+    const plan = await h.db.rentPlan.findUniqueOrThrow({ where: { id: planId } });
+    expect(plan.status).toBe('ACTIVE');
+    expect(plan.advanceFrozenAt).not.toBeNull();
+    expect(['ACCOUNT_HISTORY_NOT_VERIFIED', 'HISTORY_REWRITTEN']).toContain(
+      plan.advanceFrozenReason,
+    );
+
+    // A person is told: one critical fraud alert on the plan.
+    const alerts = await h.db.alert.findMany({
+      where: { type: 'fraud.periodic_review_trust_failure', subjectId: planId },
+    });
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({ category: 'FRAUD', severity: 'CRITICAL', status: 'OPEN' });
+
+    // The owner is told too: an adverse action notice with a catalog reason, in the app.
+    const notices = await api.get<
+      Array<{ kind: string; reference: string; text: string; principalReasons: { code: string }[] }>
+    >(`/v1/underwriting/applications/${applicationId}/notices`);
+    expect(notices.status).toBe(200);
+    const notice = notices.body.find((n) => n.kind === 'PLAN_FROZEN')!;
+    expect(notice.principalReasons.map((r) => r.code)).toEqual(['ACCOUNT_HISTORY_NOT_VERIFIED']);
+    expect(notice.reference).toBe(applicationId.slice(-6).toUpperCase());
+    expect(notice.text).toContain(`Reference number: ${notice.reference}`);
+    expect(notice.text).not.toContain(applicationId);
+    const explanation = await api.get<{ notices: Array<{ kind: string }> }>(
+      `/v1/underwriting/applications/${applicationId}/explanation`,
+    );
+    expect(explanation.body.notices.map((n) => n.kind)).toContain('PLAN_FROZEN');
+
+    // A second run in the same month changes nothing: no second notice, no second alert.
+    expect((await reviewAhead(planId, today, 36)).outcome).toBe('already_reviewed');
+    expect(await h.db.adverseActionNotice.count({ where: { kind: 'PLAN_FROZEN' } })).toBe(1);
   });
 });

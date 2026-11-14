@@ -105,6 +105,17 @@ describe('fraud.landlord_change_pending', () => {
     expectDedupes(landlordChangePending, data);
   });
 
+  it('says how close the payout is in words', () => {
+    const title = (days: number) =>
+      run(
+        landlordChangePending,
+        inputs({ leaseChanges: [change({ upcomingPayouts: [payout(addDays(AS_OF, days))] })] }),
+      )[0]!.title;
+    expect(title(0)).toMatch(/^Landlord details changed on the day of a payout: /);
+    expect(title(1)).toMatch(/^Landlord details changed 1 day before a payout: /);
+    expect(title(2)).toMatch(/^Landlord details changed 2 days before a payout: /);
+  });
+
   it('is a warning when no payout is near', () => {
     const [alert] = run(
       landlordChangePending,

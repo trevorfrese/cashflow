@@ -420,8 +420,9 @@ h3.sub {
   }
 }
 
-/* Two cards that each hold a wide table go one above the other sooner. */
-@media (max-width: 1400px) {
+/* Two cards that each hold a wide table go one above the other sooner: side by side they
+   need about 1,800px before five columns and a meter fit without clipping. */
+@media (max-width: 1800px) {
   .grid-roomy {
     grid-template-columns: minmax(0, 1fr);
   }

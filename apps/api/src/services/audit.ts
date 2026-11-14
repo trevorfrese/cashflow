@@ -74,10 +74,14 @@ export const AUDIT_EVENTS = [
   'ALERT_OPENED',
   'ALERT_ACKNOWLEDGED',
   'ALERT_RESOLVED',
-  /** The circuit breaker on automatic approvals was tripped by a monitoring rule. */
+  /** The circuit breaker on automatic approvals was tripped by a monitoring rule or an admin. */
   'CIRCUIT_BREAKER_TRIPPED',
   /** An admin reset the circuit breaker. */
   'CIRCUIT_BREAKER_RESET',
+  /** An admin lowered a business's limit below its decision's from the console. */
+  'LIMIT_CAP_SET',
+  /** An admin took that cap off: the decision's limit applies again. */
+  'LIMIT_CAP_REMOVED',
   /** Capital was added to the pool through the operator route. */
   'POOL_FUNDED',
   /** An admin ran the jobs by hand. */

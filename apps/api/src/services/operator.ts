@@ -23,8 +23,10 @@ import {
   type OperatorPortfolio,
   type OperatorRentPlan,
   type PolicyParameter,
+  type ReviewAuthority,
 } from '@cashflow/shared';
 
+import { businessLimitView } from '../controls/limit-cap.ts';
 import { CONTROLS_POLICY } from '../controls/policy.ts';
 import { todayIso } from '../dates.ts';
 import type { Db } from '../db.ts';
@@ -281,7 +283,9 @@ export async function businessDetail(db: Db, businessId: string): Promise<Operat
     where: { businessId: b.id },
     orderBy: [{ deliveredAt: 'desc' }, { createdAt: 'desc' }],
   });
+  const limit = await businessLimitView(db, b.id);
   return {
+    limit,
     business: {
       id: b.id,
       legalName: b.legalName,
@@ -461,6 +465,19 @@ function operatorDecision(d: DecisionWithReview, requestedCents: number): Operat
   };
 }
 
+/** How far a reviewer may approve alone, against what the engine recommends. */
+export function reviewAuthority(
+  recommended: { approvedMonthlyLimitCents: number | null } | null,
+): ReviewAuthority {
+  const ceiling = CONTROLS_POLICY.reviewerApprovalCeilingCents;
+  const limit = recommended?.approvedMonthlyLimitCents ?? null;
+  return {
+    reviewerApprovalCeilingCents: ceiling,
+    recommendedLimitCents: limit,
+    needsAdmin: limit !== null && limit > ceiling,
+  };
+}
+
 export async function applicationDetail(
   db: Db,
   applicationId: string,
@@ -515,6 +532,7 @@ export async function applicationDetail(
     auditEvents: events.map(toAuditEventView),
     explanation: buildExplanation(a, current, notices),
     notices: notices.map(toNoticeView),
+    authority: reviewAuthority(current ? engineRecommendation(current) : null),
   };
 }
 
@@ -876,6 +894,13 @@ export function policyView(): OperatorPolicy {
             'An applicant must have an answer within',
             CONTROLS_POLICY.decisionNoticeDays,
             'days',
+          ),
+          param(
+            'reviewerApprovalCeilingCents',
+            'A reviewer may approve a monthly limit up to',
+            CONTROLS_POLICY.reviewerApprovalCeilingCents,
+            'cents',
+            'Above it only an admin approves. The same line at which the engine refers an amount.',
           ),
           param(
             'retentionMonths',

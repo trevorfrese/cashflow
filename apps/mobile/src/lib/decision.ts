@@ -28,6 +28,7 @@ export const NOTICE_KIND_LABEL: Record<AdverseActionNoticeKind, string> = {
   COUNTER_OFFER_NOT_ACCEPTED: 'Notice about your counter offer',
   INCOMPLETE: 'Notice of incomplete application',
   INCOMPLETE_DECLINED: 'Notice: application closed as incomplete',
+  PLAN_FROZEN: 'Notice about your rent plan',
 };
 
 /** "November 12, 2026" from a timestamp or a calendar date. */

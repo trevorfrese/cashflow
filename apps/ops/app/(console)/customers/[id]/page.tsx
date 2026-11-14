@@ -17,6 +17,7 @@ import { Fragment, use } from 'react';
 import { z } from 'zod';
 
 import { ConnectionsPanel } from '@/components/connections';
+import { FreezePlan, LimitCard } from '@/components/controls';
 import { NoticesCard } from '@/components/notices';
 import { AlertsTable, AuditTable, ReasonAction } from '@/components/shared';
 import {
@@ -32,6 +33,7 @@ import {
 } from '@/components/ui';
 import { date, dateTime, days, money, month, percent, words } from '@/lib/format';
 import { freezeReason, holdReason } from '@/lib/labels';
+import { useIsAdmin } from '@/lib/session-context';
 import { useApi } from '@/lib/use-api';
 
 const Plans = z.array(OperatorRentPlan);
@@ -52,6 +54,10 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
     <>
       <Load from={business} rows={10}>
         {(b) => <Profile detail={b} />}
+      </Load>
+
+      <Load from={business} rows={3}>
+        {(b) => (b.limit ? <LimitCard limit={b.limit} onChanged={reloadAll} /> : null)}
       </Load>
 
       <Load from={plans} rows={8}>
@@ -478,7 +484,9 @@ function PassThroughTable({ periods }: { periods: PassThroughPeriod[] }) {
 }
 
 function PlanCard({ plan, onChanged }: { plan: OperatorRentPlan; onChanged: () => void }) {
+  const isAdmin = useIsAdmin();
   const frozen = plan.advanceFrozenAt !== null;
+  const adminFreeze = plan.advanceFrozenReason === 'OPERATOR_HOLD';
   const held = plan.payouts.filter((p) => p.status === 'HELD');
   const passThrough = plan.kind === 'PASS_THROUGH';
   return (
@@ -540,6 +548,11 @@ function PlanCard({ plan, onChanged }: { plan: OperatorRentPlan; onChanged: () =
               label="Why it is safe to resume"
               hint="Recorded in the audit log under your name."
               onDone={onChanged}
+              disabledReason={
+                adminFreeze && !isAdmin
+                  ? 'An admin froze this plan by hand. Releasing it needs the admin role.'
+                  : undefined
+              }
             >
               <p>
                 A payout held by the freeze is paid on the next job run if it is still inside its
@@ -548,6 +561,10 @@ function PlanCard({ plan, onChanged }: { plan: OperatorRentPlan; onChanged: () =
             </ReasonAction>
           ) : null}
         </Notice>
+      ) : null}
+
+      {!frozen && plan.status !== 'CLOSED' ? (
+        <FreezePlan planId={plan.id} onChanged={onChanged} />
       ) : null}
 
       {held.length > 0 ? (

@@ -39,6 +39,7 @@ import {
   useConnections,
   useInstallments,
   useLeases,
+  useNotices,
   usePassThroughOffer,
   usePayInstallment,
   usePaymentHistory,
@@ -46,6 +47,7 @@ import {
   useRentPlans,
 } from '@/lib/queries';
 import { pendingActions } from '@/lib/connections';
+import { longDate } from '@/lib/decision';
 import { heldPayoutNotice, IN_REVIEW_COPY, pastDueNotice } from '@/lib/plan-notices';
 import { deriveStage, type Stage } from '@/lib/stage';
 import { border, colors, spacing } from '@/theme';
@@ -477,6 +479,7 @@ function PlanSummary({ planId, lease }: { planId: string; lease: Lease | undefin
         <Notice tone={pastDue.tone} title={pastDue.title} message={pastDue.message} />
       ) : null}
       {held ? <Notice tone={held.tone} title={held.title} message={held.message} /> : null}
+      {d.advanceFrozen ? <FreezeNoticeCard applicationId={d.applicationId} /> : null}
       <Card tone="gold" shadow="l">
         <Text variant="label">{period ? `${formatPeriod(period)} rent` : 'Rent'}</Text>
         <Text variant="money" numberOfLines={1} adjustsFontSizeToFit>
@@ -513,6 +516,36 @@ function PlanSummary({ planId, lease }: { planId: string; lease: Lease | undefin
         />
       )}
     </>
+  );
+}
+
+/**
+ * A plan a periodic review put on hold: the notice we sent about it, with the reasons, like
+ * the notices on a decision. Shown while the hold lasts.
+ */
+function FreezeNoticeCard({ applicationId }: { applicationId: string }) {
+  const notices = useNotices(applicationId);
+  const notice = [...(notices.data ?? [])]
+    .filter((n) => n.kind === 'PLAN_FROZEN')
+    .sort((a, b) => (a.deliveredAt < b.deliveredAt ? 1 : -1))[0];
+  if (!notice) return null;
+  return (
+    <Card>
+      <Pill label="Notice of action" tone="late" />
+      <Text variant="bodyStrong">{notice.title}</Text>
+      <Text variant="body" tone="muted">
+        {`We will not pay your landlord for new rent periods until our team has reviewed your plan. Sent ${longDate(notice.deliveredAt)} in the app.`}
+      </Text>
+      <Button
+        title="Read the notice"
+        variant="secondary"
+        size="sm"
+        icon="arrow-right"
+        onPress={() =>
+          router.push({ pathname: '/notice/[id]', params: { id: notice.id, applicationId } })
+        }
+      />
+    </Card>
   );
 }
 

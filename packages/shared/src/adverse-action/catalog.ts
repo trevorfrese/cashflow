@@ -368,13 +368,40 @@ export const REASON_CATALOG = [
     code: 'ACCOUNT_HISTORY_NOT_VERIFIED',
     title: 'Account history',
     applicantText: 'We could not verify the account history we received.',
-    guidance: 'Contact support and we will help you finish your application.',
+    guidance: 'Contact support and we will help you confirm your account history.',
     adverseActionEligible: true,
     kind: 'DECLINE',
     source: 'VERACITY',
-    producedBy: 'veracity/rules.ts: HISTORY_REWRITTEN',
+    producedBy:
+      'veracity/rules.ts: HISTORY_REWRITTEN; at periodic review also HISTORY_CHANGED (reunderwriting.ts)',
     relatedFactor: null,
     reviewerActions: DECLINE_PICK,
+  },
+  {
+    code: 'SALES_HISTORY_NOT_VERIFIED',
+    title: 'Sales history',
+    applicantText:
+      'The sales your connected platform reported for past days changed after we first received them, so we could not verify your sales history.',
+    guidance: 'Contact support and we will help you confirm your sales history.',
+    adverseActionEligible: true,
+    kind: 'DECLINE',
+    source: 'VERACITY',
+    producedBy: 'reunderwriting.ts: SALES_HISTORY_CHANGED at periodic review',
+    relatedFactor: null,
+    reviewerActions: [],
+  },
+  {
+    code: 'PLAN_UNDER_REVIEW',
+    title: 'Plan under review',
+    applicantText:
+      'A member of our team placed your plan on hold while they review your account and the payments on it.',
+    guidance: 'Contact support and we will tell you what the review needs from you.',
+    adverseActionEligible: true,
+    kind: 'DECLINE',
+    source: 'REVIEWER',
+    producedBy: 'controls/operator-actions.ts: freezePlanAdvance (OPERATOR_HOLD)',
+    relatedFactor: null,
+    reviewerActions: [],
   },
 
   // ---- Reviewer declines ----

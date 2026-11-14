@@ -1,6 +1,6 @@
 # @cashflow/ops
 
-The CashFlow operations console: the staff side of the product. Review queue, monitoring alerts, lease changes, screening hits, the live portfolio, customers with their plans and payments, the audit log, and the policy in force.
+The CashFlow operations console: the staff side of the product. Review queue, monitoring alerts, lease changes, screening hits, late plans, the live portfolio, the ledger, customers with their plans and payments, scheduled jobs, the audit log, and the policy in force, with the tighten-only controls an admin can use.
 
 **Local only.** This app is not deployed anywhere and has no hosting configuration. It runs on a staff machine next to the API, talks only to that API, and tells crawlers to stay away (`noindex` in the page metadata, an `X-Robots-Tag` header, and a `robots.txt` that disallows everything). Like the rest of the repo it is sandbox only: no real money moves.
 
@@ -39,7 +39,7 @@ The browser never holds the operator token in anything JavaScript can read.
 
 **CSRF.** The cookie is `SameSite=Strict`, so a browser does not attach it to a request another site started. On top of that every state-changing request (sign in, sign out, every proxied `POST`) must carry an `Origin` header naming the host the request was sent to, or `Sec-Fetch-Site: same-origin` when there is no `Origin`. A request with neither is refused. Proxied `POST`s must also be JSON.
 
-**Roles.** What each role may decide, and the reason codes a reviewer gives, are policy: see [`apps/api/CREDIT_POLICY.md`](../api/CREDIT_POLICY.md), section 9. The role from `whoami` decides what the console offers: a reviewer is not offered the circuit breaker reset or clearing a confirmed match. That is a convenience. The API enforces the role on every request whatever the console shows.
+**Roles.** What each role may decide, and the reason codes a reviewer gives, are policy: see [`apps/api/CREDIT_POLICY.md`](../api/CREDIT_POLICY.md), section 9. The role from `whoami` decides what the console offers: a reviewer is not offered the circuit breaker, the other tighten-only controls, or clearing a confirmed match. That is a convenience. The API enforces the role on every request whatever the console shows.
 
 **What the browser can see:** your name, your role, when the session ends, and the API's JSON responses. **What it cannot:** the token, in any response body, header, or readable storage. The console uses no localStorage or sessionStorage.
 
@@ -47,23 +47,32 @@ What this does not do: the token is shared by a team and the name is typed, not 
 
 ## Pages
 
-| Page              | Reads (through `/api/admin/...`)                           | Actions                                               |
-| ----------------- | ---------------------------------------------------------- | ----------------------------------------------------- |
-| `/sign-in`        | `POST /api/session`                                        | Sign in                                               |
-| `/` Overview      | `monitoring/summary`, `portfolio`                          | `circuit-breaker/reset` (admin)                       |
-| `/reviews`        | `reviews`                                                  |                                                       |
-| `/reviews/[id]`   | `applications/:id`                                         | `applications/:id/review`                             |
-| `/alerts`         | `alerts`                                                   |                                                       |
-| `/alerts/[id]`    | `alerts/:id`                                               | `alerts/:id/acknowledge`, `alerts/:id/resolve`        |
-| `/lease-changes`  | `lease-changes`                                            | `lease-changes/:id/decide`                            |
-| `/screening`      | `screening/hits`                                           | `screening/:id/clear` (a match: admin)                |
-| `/portfolio`      | `portfolio`, `policy/evaluation`                           |                                                       |
-| `/customers`      | `businesses`                                               |                                                       |
-| `/customers/[id]` | `businesses/:id`, `businesses/:id/rent-plans`, `audit-log` | `rent-plans/:id/release-freeze`, `payouts/:id/resend` |
-| `/audit`          | `audit-log`                                                |                                                       |
-| `/policy`         | `policy`                                                   |                                                       |
+| Page              | Reads (through `/api/admin/...`)                                            | Actions                                                                                                                                                |
+| ----------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/sign-in`        | `POST /api/session`                                                         | Sign in                                                                                                                                                |
+| `/` Overview      | `monitoring/summary`, `portfolio`                                           | `circuit-breaker/trip` and `circuit-breaker/reset` (admin)                                                                                             |
+| `/reviews`        | `reviews`                                                                   |                                                                                                                                                        |
+| `/reviews/[id]`   | `applications/:id`                                                          | `applications/:id/review` (above the reviewer ceiling: admin)                                                                                          |
+| `/alerts`         | `alerts`                                                                    |                                                                                                                                                        |
+| `/alerts/[id]`    | `alerts/:id`                                                                | `alerts/:id/acknowledge`, `alerts/:id/resolve`                                                                                                         |
+| `/lease-changes`  | `lease-changes`                                                             | `lease-changes/:id/decide`                                                                                                                             |
+| `/screening`      | `screening/hits`                                                            | `screening/:id/clear` (a match: admin)                                                                                                                 |
+| `/late-plans`     | `delinquency/plans`                                                         |                                                                                                                                                        |
+| `/portfolio`      | `portfolio`, `policy/evaluation`                                            |                                                                                                                                                        |
+| `/ledger`         | `ledger/trial-balance`                                                      |                                                                                                                                                        |
+| `/customers`      | `businesses`                                                                |                                                                                                                                                        |
+| `/customers/[id]` | `businesses/:id` (with its limit), `businesses/:id/rent-plans`, `audit-log` | `rent-plans/:id/release-freeze`, `payouts/:id/resend`; admin: `rent-plans/:id/freeze`, `businesses/:id/limit/lower`, `businesses/:id/limit/remove-cap` |
+| `/jobs`           | `jobs`                                                                      |                                                                                                                                                        |
+| `/audit`          | `audit-log`                                                                 |                                                                                                                                                        |
+| `/policy`         | `policy`                                                                    |                                                                                                                                                        |
 
 Every page under the console layout is rendered only with a valid session; without one the server redirects to `/sign-in`. The policy page shows what the customer API hides, and is reachable only signed in.
+
+**Read-only operations pages.** Late plans lists every plan with something past due or out of the current bucket (written off ones included), most days past due first, with the amount, held payouts and their release date, and a link to the customer. Ledger shows every account's debits, credits, and natural balance by type, and whether the trial balance balances. Jobs shows each scheduled job's health (OK, running, failed, late, never run; late means its last good run is older than the monitoring policy allows, the same measure as the `books.job_stale` rule) and the recent runs. The console reads jobs and the ledger; it cannot run a job or post an entry.
+
+**Tighten-only controls (admin).** Pause new approvals (trip the circuit breaker by hand), freeze a plan's next period, and lower a business's limit. Each only makes things stricter, needs a typed reason, writes an audit event, and has an undo an admin can use: reset the breaker, release the freeze (a freeze an admin set needs an admin to release), remove the cap. The API enforces the role and the direction (`apps/api/src/controls/`); a lower limit at or above the one in force is refused, and there is no route that raises one. See `apps/api/CREDIT_POLICY.md`, section 9.
+
+**Reviewer authority.** A reviewer approves a monthly limit up to the ceiling in the controls policy ($10,000); above it only an admin approves. The review page and the policy page show it, and the API refuses a reviewer's approval above it.
 
 The evaluation gate results on the portfolio page are read by the API from the checked in `apps/api/evals/baseline.json`. They come from a simulated population and are labelled that way on the page.
 

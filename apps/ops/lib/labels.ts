@@ -110,11 +110,29 @@ const FREEZES: Record<string, string> = {
   PAYOUT_RETURNED: "A payout came back from the landlord's bank",
   SCREENING_REVIEW: 'A screening hit is open',
   BUSINESS_CHARGED_OFF: 'Another plan of this business was written off',
+  SCORE_BELOW_WATCH: 'The monthly review scored the business below the watch level',
+  OPERATOR_HOLD: 'An admin froze it by hand',
 };
 
 export function freezeReason(reason: string | null | undefined): string {
   return reason ? (FREEZES[reason] ?? words(reason)) : 'Frozen';
 }
+
+/** What tripped the circuit breaker: a monitoring rule, or an admin by hand. */
+export function breakerRule(rule: string | null | undefined): string {
+  if (!rule) return '-';
+  if (rule === 'manual') return 'An admin, by hand';
+  return `Monitoring rule ${rule}`;
+}
+
+/** How a scheduled job stands, in words with a tone. */
+export const JOB_HEALTH: Record<string, { label: string; tone: Tone }> = {
+  OK: { label: 'OK', tone: 'good' },
+  RUNNING: { label: 'Running', tone: 'info' },
+  FAILED: { label: 'Failed', tone: 'bad' },
+  LATE: { label: 'Late', tone: 'bad' },
+  NEVER_RAN: { label: 'Never run', tone: 'warn' },
+};
 
 const DISPOSITIONS: Record<string, string> = {
   CONFIRMED: 'Confirmed: the alert was right and has been dealt with',
@@ -325,6 +343,38 @@ export function refusal(error: Refusal): {
         title: 'The breaker is not tripped',
         body: 'Automatic approvals are already running. Reload to see the current state.',
       };
+    case 'BREAKER_ALREADY_TRIPPED':
+      return {
+        title: 'Approvals are already paused',
+        body: 'The circuit breaker is already tripped. Reload to see who tripped it and why.',
+      };
+    case 'PLAN_ALREADY_FROZEN':
+      return {
+        title: 'The plan is already frozen',
+        body: 'It fronts no new rent until the freeze is released. Reload to see why it was frozen.',
+      };
+    case 'ADMIN_FREEZE':
+      return {
+        title: 'An admin froze this plan',
+        body: 'A freeze an admin set by hand can only be released by an admin.',
+      };
+    case 'LIMIT_NOT_LOWER':
+      return {
+        title: 'That would not lower the limit',
+        body: `${error.message}.`,
+      };
+    case 'NO_LIMIT_TO_LOWER':
+      return {
+        title: 'There is no limit to lower',
+        body: 'This business has no approved limit, so nothing can be fronted for it now.',
+      };
+    case 'NO_LIMIT_CAP':
+      return { title: 'There is no cap to take off', body: 'Reload to see the current limit.' };
+    case 'ABOVE_REVIEWER_AUTHORITY':
+      return {
+        title: "Above a reviewer's authority",
+        body: `${error.message}.`,
+      };
     case 'VALIDATION_ERROR': {
       const fields = Array.isArray(error.details)
         ? (error.details as Array<{ path?: unknown; message?: unknown }>)
@@ -357,6 +407,7 @@ export const NOTICE_KINDS: Record<AdverseActionNoticeKind, string> = {
   COUNTER_OFFER_NOT_ACCEPTED: 'Counter offer not taken up',
   INCOMPLETE: 'Notice of incompleteness',
   INCOMPLETE_DECLINED: 'Closed as incomplete',
+  PLAN_FROZEN: 'Plan frozen by a periodic review',
 };
 
 /** How a scorecard factor is shown to the applicant: helping, neutral, or hurting. */

@@ -8,6 +8,9 @@ import {
   OperatorBusinessListQuery,
   OperatorConnections,
   OperatorEvaluation,
+  OperatorJobs,
+  OperatorJobsQuery,
+  OperatorLatePlans,
   OperatorPolicy,
   OperatorPortfolio,
   OperatorRentPlan,
@@ -19,7 +22,9 @@ import { z } from 'zod';
 import { requireRole } from '../auth/admin.ts';
 import { notFound } from '../errors.ts';
 import { todayIso } from '../dates.ts';
+import { JOB_NAMES } from '../jobs/index.ts';
 import { operatorConnections } from '../services/connection-views.ts';
+import { jobsView, latePlansView } from '../services/operations.ts';
 import {
   applicationDetail,
   auditLog,
@@ -148,6 +153,29 @@ export async function adminConsoleRoutes(app: FastifyInstance) {
     '/admin/portfolio',
     { ...reviewer, schema: { tags, security, response: { 200: OperatorPortfolio } } },
     async () => portfolioView(db, providers, todayIso()),
+  );
+
+  /**
+   * Scheduled jobs: each job's latest run and whether it is healthy, late, or failing (the
+   * measure `books.job_stale` uses), and the most recent runs of every job.
+   */
+  r.get(
+    '/admin/jobs',
+    {
+      ...reviewer,
+      schema: { tags, security, querystring: OperatorJobsQuery, response: { 200: OperatorJobs } },
+    },
+    async (request) => jobsView(db, todayIso(), JOB_NAMES, request.query.limit),
+  );
+
+  /**
+   * The plans behind `/admin/delinquency`: every plan with anything past due or out of the
+   * current bucket, with days past due, the amount, and held payouts.
+   */
+  r.get(
+    '/admin/delinquency/plans',
+    { ...reviewer, schema: { tags, security, response: { 200: OperatorLatePlans } } },
+    async () => latePlansView(db, todayIso()),
   );
 
   /** The credit, servicing, controls, and monitoring numbers in force. Staff only. */

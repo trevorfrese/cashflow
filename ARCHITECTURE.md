@@ -237,6 +237,7 @@ receivables gives the net figure.
 | Pass-through collection returned, unpaid   | mirror of the collection  | mirror of the collection                            |
 | Pass-through rent refunded to the business | `landlord_payable`        | `pass_through_cash`                                 |
 | Pass-through collection returned after pay | `receivable:<biz>`        | `capital_pool` (via `pass_through_cash`)            |
+| That receivable collected                  | `cash`                    | `receivable:<biz>` (as any installment)             |
 
 Rules the postings follow:
 
@@ -328,8 +329,19 @@ stateDiagram-v2
   paid. The rent has gone out and cannot be taken back, so CashFlow's own money covers the
   hole: one posting takes the collection out of `pass_through_cash`, puts the pool's money
   back in, and books the amount on the business's receivable (DR `receivable:<biz>` /
-  CR `capital_pool`, net). The plan is closed and a high severity alert opens. This is the
-  one way a pass-through plan can cost CashFlow money.
+  CR `capital_pool`, net). The amount owed becomes a receivable serviced like a financed
+  installment: a `LandlordPayout` row that is `PAID` from the start (nothing is sent for it;
+  `passThroughPeriodId` links it to the month) with one installment of the rent, no fee, due
+  the day the return arrived. The collection job retries it under the servicing policy (after
+  a hard or unauthorized code, only once the business links an account again), the aging job
+  moves it through the buckets and charges it off at 90 days with the usual postings, the
+  provision job reserves for it, and the owner can pay it by hand. While it is unpaid the plan
+  collects and pays nothing new (`receivableOutstandingCents`; a month that comes up is
+  `CANCELLED`, reason `RECEIVABLE_OUTSTANDING`), and the payout hold rule holds the business's
+  financed payouts too once it is past grace. An unauthorized code also freezes the plan. A
+  high severity alert opens. It is kept out of the payment history and the limit ladder,
+  which read the month itself. This is the one way a pass-through plan can cost CashFlow
+  money.
 - **Returned landlord payout.** Sent back by the landlord's bank: reversed, refunded to the
   business, and the plan frozen until the landlord details are corrected.
 
@@ -530,8 +542,9 @@ YYYY-MM-DD`. Each is idempotent for a given date:
    assessment, which the monitoring rules read. A failed pull marks the connection. Once a
    day per business.
 4. **reunderwrite** re-scores each active financed plan once a month and freezes one that
-   has deteriorated. Before payouts, so a plan it freezes gets no new period and no payout the
-   same day.
+   has deteriorated or whose data it cannot trust (a trust failure also opens an alert), and
+   stores a `PLAN_FROZEN` adverse action notice with the freeze. Before payouts, so a plan it
+   freezes gets no new period and no payout the same day.
 5. **refresh-eligibility** expires stale graduation offers, opens the financed plan for an
    accepted one once no pass-through month is in flight, and re-underwrites pass-through
    customers with three on time months in a row on fresh data and payment history, at most

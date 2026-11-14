@@ -30,16 +30,16 @@ Applicants are businesses applying for business purposes; some will be sole prop
 **pass-through plan** extends no credit: CashFlow collects the rent from the business first and
 then pays the landlord, for free.
 
-| Area                           | Built                                                                                                          | Unresolved                                                  |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Adverse action (Regulation B)  | Reason catalog, at most four principal reasons, stored notices with deadlines, monitoring of deadlines         | Delivery, agency, creditor details, periodic review freezes |
-| FCRA                           | No consumer report is pulled                                                                                   | Whether identity checks on owners are consumer reports      |
-| Fair lending                   | No protected characteristics collected; plain, auditable scorecard                                             | No disparate impact testing exists                          |
-| KYB and sanctions              | Verification of business and owners, screening of business, owners, landlord and payee, rescreen every 30 days | No real vendor; whether a formal AML program is needed      |
-| Money transmission             | Pass-through funds held in a separate ledger account behind a liability                                        | Whether the pass-through plan is money transmission         |
-| State disclosure and licensing | Fee shown in dollars and as a share of rent                                                                    | Commercial financing disclosures, licensing, usury          |
-| Data protection                | Read-only connections, sealed tokens, append-only hashed snapshots, minimal identity data                      | Retention schedule, consent wording, platform terms         |
-| Payments                       | Return codes classified, return rates monitored against the network thresholds                                 | Origination agreements, authorization wording               |
+| Area                           | Built                                                                                                          | Unresolved                                                |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Adverse action (Regulation B)  | Reason catalog, at most four principal reasons, stored notices with deadlines, monitoring of deadlines         | Delivery, agency, creditor details, freeze notice wording |
+| FCRA                           | No consumer report is pulled                                                                                   | Whether identity checks on owners are consumer reports    |
+| Fair lending                   | No protected characteristics collected; plain, auditable scorecard                                             | No disparate impact testing exists                        |
+| KYB and sanctions              | Verification of business and owners, screening of business, owners, landlord and payee, rescreen every 30 days | No real vendor; whether a formal AML program is needed    |
+| Money transmission             | Pass-through funds held in a separate ledger account behind a liability                                        | Whether the pass-through plan is money transmission       |
+| State disclosure and licensing | Fee shown in dollars and as a share of rent                                                                    | Commercial financing disclosures, licensing, usury        |
+| Data protection                | Read-only connections, sealed tokens, append-only hashed snapshots, minimal identity data                      | Retention schedule, consent wording, platform terms       |
+| Payments                       | Return codes classified, return rates monitored against the network thresholds                                 | Origination agreements, authorization wording             |
 
 ## 2. ECOA and Regulation B
 
@@ -73,11 +73,14 @@ the pass-through plan is credit is question 2.
 | Counter offer not accepted | When the owner declines it, or 30 days pass with no plan opened on it | 90 days after the counter offer, 1002.9(a)(1)(iv)      |
 | Incompleteness             | After 10 days waiting on information, giving 30 days to respond       | 1002.9(a)(1)(ii) and (c)                               |
 | Incomplete, closed         | The day after that response date, if still incomplete                 | 30 days after closing it                               |
+| Plan frozen                | With the freeze: a periodic review, or an operator's hold             | 30 days after the freeze, 1002.9(a)(1)(iii)            |
 
 - **Content.** Every notice carries a statement of the action, the creditor's name and address
   (1002.9(a)(2)), the specific principal reasons (1002.9(b)(2)), and the ECOA statement in the
   words of 1002.9(b)(1), naming the Federal Trade Commission as the agency. The creditor details
-  are placeholders marked `[PLACEHOLDER]` in `apps/api/src/adverse-action/policy.ts`.
+  are placeholders marked `[PLACEHOLDER]` in `apps/api/src/adverse-action/policy.ts`. A notice
+  names the application by a short reference number (the last six characters of its id), not
+  the raw database id.
 - **Timing.** Every notice is stored by the `adverse-action-notices` job the day it falls due or
   with the decision. Monitoring alerts on any notice not stored a day after it fell due (high,
   critical past its deadline), on any notice delivered late, and on any application undecided
@@ -92,8 +95,11 @@ the pass-through plan is credit is question 2.
   in the portfolio simulation carries a catalog reason with applicant text: 100% today.
 
 **What is not built.** Delivery is in the app only, with no email or mail and no E-SIGN consent
-flow (question 4). No notice is sent when a periodic review freezes a running plan (question 7).
-The creditor details are placeholders (question 10).
+flow (question 4). A freeze of a running plan, by a periodic review or by an operator's hold, is
+treated as an unfavorable change to existing credit and stores a notice with catalog reasons,
+but whether one is owed, and whether its wording and the operator hold's reason ("plan under
+review") are adequate, is for counsel (question 7). The creditor details are placeholders
+(question 10).
 
 ### Record retention
 
@@ -388,6 +394,7 @@ Numbers in the code that follow a regulation or a network rule, all working assu
 | Record retention floor                              | 12 months                        | `CONTROLS_POLICY.retentionMonths`               | 1002.12(b), business credit            |
 | Counter offer window                                | 30 days, notice within 90        | `NOTICE_POLICY`, `src/adverse-action/policy.ts` | 1002.9(a)(1)(iv)                       |
 | Incompleteness                                      | Notice at 10 days, 30 to respond | `NOTICE_POLICY`                                 | 1002.9(a)(1)(ii), (c)                  |
+| Plan freeze notice                                  | With the freeze, within 30 days  | `NOTICE_POLICY.existingAccountNoticeDays`       | 1002.9(a)(1)(iii)                      |
 | Rescreen interval                                   | 30 days                          | `CONTROLS_POLICY.rescreenIntervalDays`          | No rule; the floor for a batch program |
 | Return rate window                                  | 60 days                          | `MONITORING_POLICY.payments`                    | Nacha, to confirm with the bank        |
 | Unauthorized, administrative, overall return levels | 0.5%, 3%, 15%                    | `MONITORING_POLICY.payments`                    | Nacha Operating Rules 2.17.2           |
@@ -427,10 +434,13 @@ comes from in the code or the docs.
 6. **Incomplete applications.** Is sending a closing notice after an unanswered notice of
    incompleteness harmless, and are 10 days then 30 days reasonable? Arises in:
    `UNDERWRITING.md` 6; `NOTICE_POLICY`.
-7. **Periodic reviews and freezes.** Is freezing advances on a running plan after a monthly
-   review an unfavorable change in terms (1002.2(c)(1)(ii)) needing notice, or does the
-   delinquency exception (1002.2(c)(2)(ii)) cover a freeze for deterioration? Arises in:
-   `UNDERWRITING.md` 7; `src/services/reunderwriting.ts`.
+7. **Periodic reviews and freezes.** Freezing advances on a running plan, after a monthly
+   review or by an operator's hold, is treated as an unfavorable change in terms
+   (1002.2(c)(1)(ii)) and a `PLAN_FROZEN` notice is stored with the freeze. Is one owed, or does
+   the delinquency exception (1002.2(c)(2)(ii)) cover a freeze for deterioration? Is the notice
+   wording adequate, and is "plan under review" a specific enough reason for a hold an operator
+   placed for a reason that cannot be disclosed? Should it also go by email or mail? Arises in:
+   `UNDERWRITING.md` 7; `src/services/reunderwriting.ts`; `src/controls/operator-actions.ts`.
 8. **Reasons drawn from fraud and veracity controls.** Is "we could not verify the revenue" or
    "account holder does not match" specific enough (commentary 9(b)(2) allows "unable to
    verify"), how can such reasons be worded without disclosing fraud controls, and is withholding

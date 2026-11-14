@@ -1,4 +1,4 @@
-import { findJargon } from '@cashflow/shared';
+import { AdverseActionNoticeKind, findJargon } from '@cashflow/shared';
 import { describe, expect, it } from 'vitest';
 
 import { APPLICATION_DISCLOSURE, longDate, needsInfoStep, NOTICE_KIND_LABEL } from './decision';
@@ -12,7 +12,9 @@ describe('decision copy', () => {
   });
 
   it('labels every notice kind and formats dates without a time zone shift', () => {
-    expect(Object.keys(NOTICE_KIND_LABEL)).toHaveLength(4);
+    expect(Object.keys(NOTICE_KIND_LABEL).sort()).toEqual(
+      [...AdverseActionNoticeKind.options].sort(),
+    );
     expect(longDate('2026-11-12')).toBe('November 12, 2026');
     expect(longDate('2026-11-12T23:30:00.000Z')).toBe('November 12, 2026');
   });

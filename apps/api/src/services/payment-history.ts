@@ -42,7 +42,14 @@ export async function paymentHistoryMonths(
   const policy = ACTIVE_SERVICING_POLICY;
   const [payouts, periods] = await Promise.all([
     tx.landlordPayout.findMany({
-      where: { status: 'PAID', scheduledFor: { lte: asOf }, rentPlan: { businessId } },
+      // A receivable left by a returned pass-through month is not a month of its own: that
+      // month is already in the history as RETURNED_AFTER_PAYOUT.
+      where: {
+        status: 'PAID',
+        scheduledFor: { lte: asOf },
+        rentPlan: { businessId },
+        passThroughPeriodId: null,
+      },
       select: {
         rentPlanId: true,
         periodMonth: true,

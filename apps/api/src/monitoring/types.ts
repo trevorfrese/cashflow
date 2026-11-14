@@ -250,7 +250,8 @@ export interface AdverseActionFact {
   decisionId: string;
   applicationId: string;
   businessName: string;
-  kind: 'DECLINE' | 'COUNTER_OFFER_NOT_ACCEPTED' | 'INCOMPLETE' | 'INCOMPLETE_DECLINED';
+  kind:
+    'DECLINE' | 'COUNTER_OFFER_NOT_ACCEPTED' | 'INCOMPLETE' | 'INCOMPLETE_DECLINED' | 'PLAN_FROZEN';
   /** The day the notice became due to be sent. */
   actionOn: IsoDate;
   /** The last day it may be delivered. */

@@ -55,6 +55,8 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # Includes the portfolio gates on a small fixed seed sample of the policy in force
+      # (apps/api/src/evals/ci-gates.test.ts). The full strict evaluation is eval.yml.
       - name: Test
         run: pnpm test
 

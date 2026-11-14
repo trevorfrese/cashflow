@@ -1,5 +1,6 @@
 import {
   formatCents,
+  noticeReference,
   type AdverseActionNoticeKind,
   type IsoDate,
   type PrincipalReason,
@@ -32,6 +33,8 @@ export interface NoticeFacts {
   offer?: { limitCents: number; offeredOn: IsoDate; declinedByApplicant: boolean } | null;
   /** Notices of incompleteness, and the closing notice after one. */
   incomplete?: { askedOn: IsoDate; respondBy: IsoDate } | null;
+  /** A plan frozen by a periodic review: the rent on the plan and the review date. */
+  frozen?: { monthlyRentCents: number; reviewedOn: IsoDate; byOperator?: boolean } | null;
 }
 
 export interface RenderedNotice {
@@ -45,6 +48,7 @@ export const NOTICE_TITLES: Record<AdverseActionNoticeKind, string> = {
   COUNTER_OFFER_NOT_ACCEPTED: 'Notice of action taken on your counter offer',
   INCOMPLETE: 'Notice of incomplete application',
   INCOMPLETE_DECLINED: 'Notice of action taken: application incomplete',
+  PLAN_FROZEN: 'Notice of action taken on your rent plan',
 };
 
 /** A notice of incompleteness asks for information; the others record adverse action. */
@@ -81,7 +85,7 @@ export function renderNotice(f: NoticeFacts): RenderedNotice {
     longDate(f.noticeOn),
     '',
     `To: ${f.businessName}`,
-    `Application: ${f.applicationId}`,
+    `Reference number: ${noticeReference(f.applicationId)}`,
     `From: ${CREDITOR.name}, ${CREDITOR.address}`,
     '',
   ];
@@ -128,12 +132,27 @@ export function renderNotice(f: NoticeFacts): RenderedNotice {
       );
       break;
     }
+    case 'PLAN_FROZEN': {
+      const frozen = f.frozen!;
+      lines.push(
+        frozen.byOperator
+          ? `On ${longDate(frozen.reviewedOn)} a member of our team placed your plan for rent of ${usd(frozen.monthlyRentCents)} a month on hold, and we have stopped paying your landlord for new rent periods on it.`
+          : `We review the accounts of every business with a rent plan once a month. On ${longDate(frozen.reviewedOn)} we reviewed yours, and we have stopped paying your landlord for new rent periods on your plan for rent of ${usd(frozen.monthlyRentCents)} a month.`,
+        'Rent we have already paid your landlord is still collected on its schedule. We will not pay your landlord again until a member of our team has reviewed your plan.',
+        '',
+        'The principal reasons for our decision:',
+        ...reasonList(f.principalReasons),
+      );
+      break;
+    }
   }
 
   lines.push(
     '',
-    'You may apply again at any time. If you have questions about this notice, contact us at ' +
-      `${CREDITOR.contact}.`,
+    (f.kind === 'PLAN_FROZEN'
+      ? 'Until then, please pay your landlord directly for any rent we have not paid. '
+      : 'You may apply again at any time. ') +
+      `If you have questions about this notice, contact us at ${CREDITOR.contact}.`,
     '',
     ECOA_STATEMENT,
   );

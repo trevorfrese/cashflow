@@ -34,7 +34,7 @@ export function pendingLeaseChangeCandidate(
     subjectType: 'lease',
     subjectId: change.leaseId,
     title: next
-      ? `Landlord details changed ${daysBetween(change.requestedOn, next.scheduledFor)} days before a payout: ${change.businessName}`
+      ? `Landlord details changed ${beforePayout(daysBetween(change.requestedOn, next.scheduledFor))}: ${change.businessName}`
       : `Landlord details change pending: ${change.businessName}`,
     detail: {
       leaseChangeId: change.id,
@@ -389,3 +389,9 @@ export const FRAUD_RULES: Rule[] = [
   reapplyAfterDecline,
   screeningHit,
 ];
+
+/** "on the day of a payout", "1 day before a payout", "3 days before a payout". */
+function beforePayout(days: number): string {
+  if (days <= 0) return 'on the day of a payout';
+  return `${days} ${days === 1 ? 'day' : 'days'} before a payout`;
+}

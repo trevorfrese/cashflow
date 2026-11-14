@@ -43,6 +43,32 @@ const ROUTES: Array<{
     body: { reason: 'because' },
     role: 'admin',
   },
+  // Tighten-only controls (controls/).
+  {
+    method: 'post',
+    url: '/v1/admin/circuit-breaker/trip',
+    body: { reason: 'because' },
+    role: 'admin',
+  },
+  {
+    method: 'post',
+    url: '/v1/admin/rent-plans/x/freeze',
+    body: { reason: 'because' },
+    role: 'admin',
+  },
+  { method: 'get', url: '/v1/admin/businesses/x/limit', role: 'reviewer' },
+  {
+    method: 'post',
+    url: '/v1/admin/businesses/x/limit/lower',
+    body: { limitCents: 100, reason: 'because' },
+    role: 'admin',
+  },
+  {
+    method: 'post',
+    url: '/v1/admin/businesses/x/limit/remove-cap',
+    body: { reason: 'because' },
+    role: 'admin',
+  },
   { method: 'get', url: '/v1/admin/ledger/trial-balance', role: 'reviewer' },
   { method: 'get', url: '/v1/admin/ledger/accounts', role: 'reviewer' },
   { method: 'get', url: '/v1/admin/capital', role: 'reviewer' },
@@ -66,6 +92,8 @@ const ROUTES: Array<{
   { method: 'get', url: '/v1/admin/portfolio', role: 'reviewer' },
   { method: 'get', url: '/v1/admin/policy', role: 'reviewer' },
   { method: 'get', url: '/v1/admin/policy/evaluation', role: 'reviewer' },
+  { method: 'get', url: '/v1/admin/jobs', role: 'reviewer' },
+  { method: 'get', url: '/v1/admin/delinquency/plans', role: 'reviewer' },
   { method: 'get', url: '/v1/admin/reviews', role: 'reviewer' },
   {
     method: 'post',

@@ -85,3 +85,36 @@ describe('renderNotice', () => {
     expect(() => renderNotice(facts({ principalReasons: [] }))).toThrow(/principal reason/);
   });
 });
+
+describe('notice references and the plan freeze notice', () => {
+  it('prints a short reference number, never the raw application id', () => {
+    const { text } = renderNotice(facts({ applicationId: 'cmh7x2k9q0001abcdef4f7a2c' }));
+    expect(text).toContain('Reference number: 4F7A2C');
+    expect(text).not.toContain('cmh7x2k9q0001abcdef4f7a2c');
+    expect(text).not.toContain('Application:');
+  });
+
+  it('tells the owner what a freeze stops, what continues, and why', () => {
+    const frozen = facts({
+      kind: 'PLAN_FROZEN',
+      principalReasons: [principalReason('ACCOUNT_HISTORY_NOT_VERIFIED')],
+      frozen: { monthlyRentCents: 620_000, reviewedOn: '2026-11-12' },
+    });
+    const { text, title } = renderNotice(frozen);
+    expect(title).toBe('Notice of action taken on your rent plan');
+    expect(isAdverseAction('PLAN_FROZEN')).toBe(true);
+    expect(text).toContain('we have stopped paying your landlord for new rent periods');
+    expect(text).toContain('$6,200');
+    expect(text).toContain('still collected on its schedule');
+    expect(text).toContain('1. Account history.');
+    expect(text).toContain(ECOA_STATEMENT);
+    expect(text).not.toContain('You may apply again');
+    expect(findJargon(text.replace(ECOA_STATEMENT, ''))).toBeNull();
+    const held = renderNotice({
+      ...frozen,
+      principalReasons: [principalReason('PLAN_UNDER_REVIEW')],
+      frozen: { monthlyRentCents: 620_000, reviewedOn: '2026-11-12', byOperator: true },
+    });
+    expect(held.text).toContain('a member of our team placed your plan');
+  });
+});

@@ -494,7 +494,8 @@ describe('portfolio simulator: fixed seed end to end', () => {
   });
 });
 
-describe('portfolio simulator: through the door', () => {
+// Whole populations are played forward here, which takes seconds on a CI runner.
+describe('portfolio simulator: through the door', { timeout: 30_000 }, () => {
   const population = drawPopulation({ n: 300, seed: 'e2e' });
   const gatedConfig = {
     servicing: STANDARD_SERVICING_POLICY,

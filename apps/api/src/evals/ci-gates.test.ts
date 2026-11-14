@@ -20,75 +20,69 @@ import { evaluate, GATED_CONFIG } from './run.ts';
  */
 const CI_RUN = { n: 600, seeds: ['ci-1', 'ci-2'], horizonMonths: 12 } as const;
 
-// Each test plays a whole sample forward: give CI runners room beyond the 5s default.
-describe(
-  'portfolio gates on a fixed seed sample',
-  { timeout: 60_000 },
-  () => {
-    const evaluation = evaluate({ ...CI_RUN, comparisons: [] });
-    const byId = new Map(evaluation.gates.map((g) => [g.id, g]));
+describe('portfolio gates on a fixed seed sample', () => {
+  const evaluation = evaluate({ ...CI_RUN, comparisons: [] });
+  const byId = new Map(evaluation.gates.map((g) => [g.id, g]));
 
-    it('judges the policy in force under the gated servicing, on every gate', () => {
-      expect(evaluation.run.policyVersion).toBe(CURRENT_POLICY.version);
-      expect(evaluation.run.gated).toBe(GATED_CONFIG.name);
-      expect(evaluation.gates.map((g) => g.id).sort()).toEqual(
-        [
-          'adverse_action_reasons',
-          'approval_floor',
-          'auc',
-          'bad_rate_monotonic',
-          'fraud_approval',
-          'net_loss_base',
-          'net_margin_base',
-          'net_margin_mild_stress',
-          'pool_funding',
-          'refer_rate',
-          'veracity_honest_adverse',
-        ].sort(),
-      );
-      // Every gate measured something on every seed: a gate that cannot be measured fails.
-      for (const g of evaluation.gates) {
-        expect(g.value, g.id).not.toBeNull();
-        expect(g.min, g.id).not.toBeNull();
-      }
-    });
+  it('judges the policy in force under the gated servicing, on every gate', () => {
+    expect(evaluation.run.policyVersion).toBe(CURRENT_POLICY.version);
+    expect(evaluation.run.gated).toBe(GATED_CONFIG.name);
+    expect(evaluation.gates.map((g) => g.id).sort()).toEqual(
+      [
+        'adverse_action_reasons',
+        'approval_floor',
+        'auc',
+        'bad_rate_monotonic',
+        'fraud_approval',
+        'net_loss_base',
+        'net_margin_base',
+        'net_margin_mild_stress',
+        'pool_funding',
+        'refer_rate',
+        'veracity_honest_adverse',
+      ].sort(),
+    );
+    // Every gate measured something on every seed: a gate that cannot be measured fails.
+    for (const g of evaluation.gates) {
+      expect(g.value, g.id).not.toBeNull();
+      expect(g.min, g.id).not.toBeNull();
+    }
+  });
 
-    it('passes every gate at the thresholds the default run uses', () => {
-      const failed = evaluation.gates.filter((g) => !g.pass);
-      expect(failed.map((g) => `${g.id}=${g.value} (${g.comparator} ${g.threshold})`)).toEqual([]);
-      // The thresholds are the gates', not a looser copy.
-      expect(byId.get('net_loss_base')!.threshold).toBe(GATE_THRESHOLDS.maxNetLossBps);
-      expect(byId.get('auc')!.threshold).toBe(GATE_THRESHOLDS.minAuc);
-      expect(byId.get('refer_rate')!.threshold).toBe(GATE_THRESHOLDS.maxReferRateBps);
-      expect(byId.get('approval_floor')!.threshold).toBe(GATE_THRESHOLDS.minApprovalRateBps);
-    });
+  it('passes every gate at the thresholds the default run uses', () => {
+    const failed = evaluation.gates.filter((g) => !g.pass);
+    expect(failed.map((g) => `${g.id}=${g.value} (${g.comparator} ${g.threshold})`)).toEqual([]);
+    // The thresholds are the gates', not a looser copy.
+    expect(byId.get('net_loss_base')!.threshold).toBe(GATE_THRESHOLDS.maxNetLossBps);
+    expect(byId.get('auc')!.threshold).toBe(GATE_THRESHOLDS.minAuc);
+    expect(byId.get('refer_rate')!.threshold).toBe(GATE_THRESHOLDS.maxReferRateBps);
+    expect(byId.get('approval_floor')!.threshold).toBe(GATE_THRESHOLDS.minApprovalRateBps);
+  });
 
-    it('lends enough for the gates to mean something', () => {
-      const o = evaluation.base.overall;
-      // A policy can pass the loss gates by not lending. This one funds plans, some go bad,
-      // and the score is judged on applicants it declined as well.
-      expect(o.plans).toBeGreaterThan(200);
-      expect(o.badRateBps).toBeGreaterThan(0);
-      expect(evaluation.throughTheDoor.pooled.honest.bads).toBeGreaterThan(20);
-      expect(evaluation.base.passThrough?.stats.plans ?? 0).toBeGreaterThan(0);
-    });
+  it('lends enough for the gates to mean something', () => {
+    const o = evaluation.base.overall;
+    // A policy can pass the loss gates by not lending. This one funds plans, some go bad,
+    // and the score is judged on applicants it declined as well.
+    expect(o.plans).toBeGreaterThan(200);
+    expect(o.badRateBps).toBeGreaterThan(0);
+    expect(evaluation.throughTheDoor.pooled.honest.bads).toBeGreaterThan(20);
+    expect(evaluation.base.passThrough?.stats.plans ?? 0).toBeGreaterThan(0);
+  });
 
-    it('fails the launch policy under the old servicing on the same applicants', () => {
-      const launch = evaluate({
-        ...CI_RUN,
-        comparisons: [],
-        gated: {
-          name: 'v1_baseline',
-          description: 'Negative control.',
-          policy: POLICY_V1,
-          servicing: BASELINE_SERVICING_POLICY,
-          withMild: true,
-        },
-      });
-      const failed = new Set(launch.gates.filter((g) => !g.pass).map((g) => g.id));
-      expect(failed.has('net_loss_base')).toBe(true);
-      expect(failed.has('fraud_approval')).toBe(true);
+  it('fails the launch policy under the old servicing on the same applicants', () => {
+    const launch = evaluate({
+      ...CI_RUN,
+      comparisons: [],
+      gated: {
+        name: 'v1_baseline',
+        description: 'Negative control.',
+        policy: POLICY_V1,
+        servicing: BASELINE_SERVICING_POLICY,
+        withMild: true,
+      },
     });
-  },
-  300_000,
-);
+    const failed = new Set(launch.gates.filter((g) => !g.pass).map((g) => g.id));
+    expect(failed.has('net_loss_base')).toBe(true);
+    expect(failed.has('fraud_approval')).toBe(true);
+  });
+}, 300_000);
